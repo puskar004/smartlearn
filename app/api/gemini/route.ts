@@ -1,6 +1,17 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 
+const MODELS = [
+  "gemini-flash-lite-latest",
+  "gemini-3.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
+  "gemini-3.8-flash",
+  "gemma-4-26b-a4b-it",
+  "gemma-4-31b-it",
+  "gemini-flash-latest",
+];
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -15,49 +26,48 @@ export async function POST(req: NextRequest) {
     if (!key) {
       return NextResponse.json({
         answer:
-          `**Demo mode (add GEMINI_API_KEY to .env.local)**\n\n` +
+          `**Demo mode (add GEMINI_API_KEY)**\n\n` +
           `**Your question:** ${question}\n\n` +
-          `### Step-by-step approach\n` +
-          `1. **Identify the chapter concept** — underline keywords from NCERT.\n` +
-          `2. **Recall the definition / formula / law** linked to those keywords.\n` +
-          `3. **Apply with a small example** (numbers or a short case).\n` +
-          `4. **Write the final answer clearly** with units / conditions.\n` +
-          `5. **Self-check** against NCERT in-text / exemplar style.\n\n` +
-          `${context ? `**Context provided:** ${context}\n\n` : ""}` +
-          `Add \`GEMINI_API_KEY\` for live Gemini tutoring.`,
+          `1. Identify NCERT keywords\n2. Recall definition/formula\n3. Apply with one example\n4. Write final answer clearly\n`,
         demo: true,
       });
     }
 
     const genAI = new GoogleGenerativeAI(key);
-    const prompt = `You are SmartLearn, a calm CBSE Class 10–12 tutor.
+    const prompt = `You are SmartLearn, a calm CBSE Class 10–12 tutor for Indian students.
 Rules:
-- Answer ONLY academic school questions (NCERT/CBSE science, maths, commerce, humanities, CS).
-- Refuse non-educational / harmful / cheating-for-live-exam requests politely.
-- Give STEP-BY-STEP solutions with clear numbering.
-- Prefer NCERT terminology. Keep language simple for Indian students.
+- Answer ONLY academic school questions (NCERT/CBSE).
+- Refuse non-educational requests politely.
+- Give STEP-BY-STEP numbered solutions.
+- Use simple English + NCERT terms.
 - End with a 2-line rapid revision tip.
-${context ? `Chapter/context: ${context}\n` : ""}
+${context ? `Context: ${context}\n` : ""}
 Student question: ${question}`;
 
-    const models = [
-      "gemini-flash-latest",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-    ];
     let lastError = "";
-    for (const name of models) {
+    for (const name of MODELS) {
       try {
         const model = genAI.getGenerativeModel({ model: name });
         const result = await model.generateContent(prompt);
         const answer = result.response.text();
-        return NextResponse.json({ answer, demo: false, model: name });
+        if (answer?.trim()) {
+          return NextResponse.json({ answer, demo: false, model: name });
+        }
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
+        // try next model on 404/503/high demand
+        continue;
       }
     }
-    throw new Error(lastError || "All Gemini models failed");
+
+    return NextResponse.json(
+      {
+        error:
+          lastError ||
+          "AI tutor is busy right now. Please try again in a few seconds.",
+      },
+      { status: 503 }
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : "Gemini failed";
     return NextResponse.json({ error: message }, { status: 500 });
