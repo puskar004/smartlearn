@@ -30,8 +30,6 @@ export async function POST(req: NextRequest) {
     }
 
     const genAI = new GoogleGenerativeAI(key);
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-
     const prompt = `You are SmartLearn, a calm CBSE Class 10–12 tutor.
 Rules:
 - Answer ONLY academic school questions (NCERT/CBSE science, maths, commerce, humanities, CS).
@@ -42,9 +40,24 @@ Rules:
 ${context ? `Chapter/context: ${context}\n` : ""}
 Student question: ${question}`;
 
-    const result = await model.generateContent(prompt);
-    const answer = result.response.text();
-    return NextResponse.json({ answer, demo: false });
+    const models = [
+      "gemini-flash-latest",
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+    ];
+    let lastError = "";
+    for (const name of models) {
+      try {
+        const model = genAI.getGenerativeModel({ model: name });
+        const result = await model.generateContent(prompt);
+        const answer = result.response.text();
+        return NextResponse.json({ answer, demo: false, model: name });
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+    }
+    throw new Error(lastError || "All Gemini models failed");
   } catch (e) {
     const message = e instanceof Error ? e.message : "Gemini failed";
     return NextResponse.json({ error: message }, { status: 500 });
