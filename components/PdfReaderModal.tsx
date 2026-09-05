@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, FileText, X } from "lucide-react";
+import { Download, ExternalLink, FileText, X } from "lucide-react";
 import {
   googleEmbedPdf,
   inAppPdfSrc,
   resolveEmbeddablePdf,
 } from "@/lib/ncert-pdf";
 import { setPdfReading } from "@/components/FocusLock";
+import PdfJsViewer from "@/components/PdfJsViewer";
 
 type Props = {
   open: boolean;
@@ -16,8 +17,11 @@ type Props = {
   onClose: () => void;
 };
 
+type Mode = "reader" | "plugin" | "gview" | "portal";
+
 /**
- * In-app reader via same-origin PDF proxy so Chrome does not block NCERT frames.
+ * In-app NCERT/CBSE PDF reader.
+ * Primary: pdf.js canvas via same-origin proxy (no Chrome X-Frame block).
  */
 export default function PdfReaderModal({
   open,
@@ -25,26 +29,30 @@ export default function PdfReaderModal({
   ncertLink,
   onClose,
 }: Props) {
-  const [mode, setMode] = useState<"pdf" | "gview" | "portal">("pdf");
+  const [mode, setMode] = useState<Mode>("reader");
   const [tick, setTick] = useState(0);
   const pdf = resolveEmbeddablePdf(ncertLink);
 
   const origin =
     typeof window !== "undefined" ? window.location.origin : undefined;
 
-  const src = useMemo(() => {
+  const proxySrc = useMemo(() => {
+    if (!pdf) return null;
+    return inAppPdfSrc(pdf, origin);
+  }, [pdf, origin]);
+
+  const iframeSrc = useMemo(() => {
     if (!open) return "about:blank";
     if (mode === "portal" && ncertLink) return ncertLink;
-    if (pdf && mode === "pdf") return inAppPdfSrc(pdf, origin);
-    if (pdf && mode === "gview") return googleEmbedPdf(pdf);
-    if (pdf) return inAppPdfSrc(pdf, origin);
-    return ncertLink || "about:blank";
-  }, [open, mode, pdf, ncertLink, origin, tick]);
+    if (mode === "gview" && pdf) return googleEmbedPdf(pdf);
+    if (mode === "plugin" && proxySrc) return `${proxySrc}&t=${tick}`;
+    return "about:blank";
+  }, [open, mode, pdf, ncertLink, proxySrc, tick]);
 
   useEffect(() => {
     setPdfReading(open);
     if (!open) return;
-    setMode(pdf ? "pdf" : "portal");
+    setMode(pdf ? "reader" : "portal");
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -72,41 +80,38 @@ export default function PdfReaderModal({
             {title}
           </div>
           {pdf && (
-            <div className="flex rounded-lg bg-slate-200/70 p-0.5 text-[11px] font-semibold">
-              <button
-                type="button"
-                onClick={() => setMode("pdf")}
-                className={`rounded-md px-2.5 py-1 transition ${
-                  mode === "pdf"
-                    ? "bg-white text-emerald-700 shadow"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                PDF
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("gview")}
-                className={`rounded-md px-2.5 py-1 transition ${
-                  mode === "gview"
-                    ? "bg-white text-sky-700 shadow"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                Viewer
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("portal")}
-                className={`rounded-md px-2.5 py-1 transition ${
-                  mode === "portal"
-                    ? "bg-white text-indigo-700 shadow"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                NCERT page
-              </button>
+            <div className="flex flex-wrap rounded-lg bg-slate-200/70 p-0.5 text-[11px] font-semibold">
+              {(
+                [
+                  ["reader", "Reader"],
+                  ["plugin", "PDF"],
+                  ["gview", "Viewer"],
+                  ["portal", "NCERT page"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMode(id)}
+                  className={`rounded-md px-2.5 py-1 transition ${
+                    mode === id
+                      ? "bg-white text-emerald-700 shadow"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+          )}
+          {proxySrc && (
+            <a
+              href={proxySrc}
+              download={`${title.replace(/[^\w]+/g, "_").slice(0, 40)}.pdf`}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+            >
+              <Download className="h-3 w-3" /> Download
+            </a>
           )}
           <button
             type="button"
@@ -126,16 +131,23 @@ export default function PdfReaderModal({
         </div>
 
         <div className="relative min-h-0 flex-1 bg-slate-100">
-          <iframe
-            key={`${src}-${tick}`}
-            title={title}
-            src={src}
-            className="h-full w-full border-0 bg-white"
-            // no sandbox — PDF plugins need full frame; proxy is same-origin
-            allow="fullscreen"
-          />
-          <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] text-white">
-            In-app PDF proxy · Esc closes · tab-switch alert paused
+          {mode === "reader" && proxySrc ? (
+            <PdfJsViewer
+              key={`${proxySrc}-${tick}`}
+              src={proxySrc}
+              title={title}
+            />
+          ) : (
+            <iframe
+              key={`${iframeSrc}-${tick}`}
+              title={title}
+              src={iframeSrc}
+              className="h-full w-full border-0 bg-white"
+              allow="fullscreen"
+            />
+          )}
+          <p className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] text-white">
+            SmartLearn PDF reader · Esc closes · tab-switch paused
           </p>
         </div>
       </div>
