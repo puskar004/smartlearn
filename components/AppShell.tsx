@@ -12,6 +12,8 @@ import SiteHeader from "@/components/SiteHeader";
 import TaskChecklist from "@/components/TaskChecklist";
 import StudentSync from "@/components/StudentSync";
 import RoleGate from "@/components/RoleGate";
+import GlobalMusicPlayer from "@/components/GlobalMusicPlayer";
+import ExtremeLock from "@/components/ExtremeLock";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
 
@@ -50,6 +52,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <UserBootstrap />
       <FullscreenGate />
       {!isTeacher && <FocusLock />}
+      {!isTeacher && <ExtremeLock />}
+      {!isTeacher && <GlobalMusicPlayer />}
 
       {marketing ? (
         <>

@@ -1,14 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Lock, Timer, Zap } from "lucide-react";
+import { clearExtreme, EXTREME_KEY } from "@/components/ExtremeLock";
 
 const PAID_KEY = "sl_extreme_paid";
-const SESSION_KEY = "sl_extreme_session";
 
 export default function ExtremePage() {
-  const router = useRouter();
   const [paid, setPaid] = useState(false);
   const [minutes, setMinutes] = useState(25);
   const [active, setActive] = useState(false);
@@ -17,48 +15,50 @@ export default function ExtremePage() {
 
   useEffect(() => {
     setPaid(localStorage.getItem(PAID_KEY) === "1");
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (raw) {
-      const end = Number(raw);
-      const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
-      if (left > 0) {
-        setActive(true);
-        setRemaining(left);
-      } else {
-        sessionStorage.removeItem(SESSION_KEY);
-      }
+    const end = Number(sessionStorage.getItem(EXTREME_KEY) || 0);
+    if (end > Date.now()) {
+      setActive(true);
+      setRemaining(Math.max(0, Math.floor((end - Date.now()) / 1000)));
     }
   }, []);
 
   useEffect(() => {
-    if (!active || remaining <= 0) {
-      if (active && remaining <= 0) {
-        setActive(false);
-        sessionStorage.removeItem(SESSION_KEY);
-        setBlocked(false);
-      }
-      return;
-    }
+    if (!active) return;
     const t = setInterval(() => {
-      setRemaining((r) => {
-        const next = r - 1;
-        if (next <= 0) sessionStorage.removeItem(SESSION_KEY);
-        return next;
-      });
-    }, 1000);
+      const end = Number(sessionStorage.getItem(EXTREME_KEY) || 0);
+      const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
+      setRemaining(left);
+      if (left <= 0) {
+        clearExtreme();
+        setActive(false);
+        setBlocked(false);
+        try {
+          if (document.fullscreenElement) void document.exitFullscreen();
+        } catch {
+          // ignore
+        }
+      }
+    }, 250);
     return () => clearInterval(t);
-  }, [active, remaining]);
+  }, [active]);
 
-  // Block back / unload while active
   useEffect(() => {
     if (!active) return;
-
     const onPop = () => {
       setBlocked(true);
-      history.pushState(null, "", location.href);
+      history.pushState(null, "", "/extreme");
     };
-    history.pushState(null, "", location.href);
+    history.pushState(null, "", "/extreme");
     window.addEventListener("popstate", onPop);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setBlocked(true);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
 
     const onBefore = (e: BeforeUnloadEvent) => {
       e.preventDefault();
@@ -66,14 +66,20 @@ export default function ExtremePage() {
     };
     window.addEventListener("beforeunload", onBefore);
 
+    try {
+      void document.documentElement.requestFullscreen?.();
+    } catch {
+      // ignore
+    }
+
     return () => {
       window.removeEventListener("popstate", onPop);
+      window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("beforeunload", onBefore);
     };
   }, [active]);
 
   const unlockPaid = () => {
-    // Demo payment gate — replace with Razorpay/Stripe later
     const ok = window.confirm(
       "Extreme Mode is a paid focus lock (demo ₹49). Simulate successful payment?"
     );
@@ -88,14 +94,15 @@ export default function ExtremePage() {
       unlockPaid();
       return;
     }
-    const secs = minutes * 60;
+    const secs = Math.max(5, minutes) * 60;
     const end = Date.now() + secs * 1000;
-    sessionStorage.setItem(SESSION_KEY, String(end));
+    sessionStorage.setItem(EXTREME_KEY, String(end));
+    window.dispatchEvent(new Event("sl-extreme"));
     setRemaining(secs);
     setActive(true);
     setBlocked(false);
     try {
-      document.documentElement.requestFullscreen?.();
+      void document.documentElement.requestFullscreen?.();
     } catch {
       // ignore
     }
@@ -109,12 +116,12 @@ export default function ExtremePage() {
       <div className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
         <Zap className="h-3.5 w-3.5" /> Extreme Mode · Paid
       </div>
-      <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
+      <h1 className="mt-3 text-3xl font-bold text-slate-900">
         No escape until the timer ends
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Once started, back navigation is blocked and leaving the page warns you.
-        Built for deep NCERT sprints. Unlock with a one-time demo payment.
+        While active: sidebar links blocked, back/Esc blocked, leaving the page
+        warns you. Global Extreme Lock keeps you on this session.
       </p>
 
       <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -124,7 +131,7 @@ export default function ExtremePage() {
               Session length (minutes)
               <input
                 type="number"
-                min={10}
+                min={5}
                 max={120}
                 value={minutes}
                 onChange={(e) => setMinutes(Number(e.target.value) || 25)}
@@ -170,18 +177,12 @@ export default function ExtremePage() {
               {mm}:{ss}
             </p>
             <p className="mt-3 text-sm text-slate-500">
-              Back button disabled · stay with your NCERT chapter.
+              Stay on NCERT / quiz in this locked session. Navigation is blocked
+              app-wide.
             </p>
-            <button
-              type="button"
-              onClick={() => router.push("/ncert")}
-              className="mt-6 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
-            >
-              Study NCERT in this tab
-            </button>
             {blocked && (
               <p className="mt-4 text-xs font-semibold text-rose-600">
-                Back is locked until timer hits zero.
+                Escape / back is locked until timer hits zero.
               </p>
             )}
           </div>

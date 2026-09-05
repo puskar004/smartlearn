@@ -21,35 +21,46 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   min-height: 100vh;
+  cursor: auto;
 }
 
 html {
   scroll-behavior: smooth;
+  cursor: auto;
 }
 
-/* Custom pointer — soft violet ring cursor feel */
-html,
-body {
+/* Sidebar keeps normal system cursor */
+aside,
+aside * {
+  cursor: auto !important;
+}
+aside a,
+aside button {
+  cursor: pointer !important;
+}
+
+/* Main content: keep previous custom cursors only in the middle pane */
+main,
+main * {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%234F46E5' stroke='%23fff' stroke-width='1.2' d='M4 3l7 17 2-7 7-2z'/%3E%3C/svg%3E")
       4 4,
     auto;
 }
 
-a,
-button,
-[role="button"],
-input,
-select,
-textarea,
-label,
-.sl-card,
-.sl-row {
+main a,
+main button,
+main [role="button"],
+main input,
+main select,
+main textarea,
+main label,
+main .sl-card,
+main .sl-row {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24'%3E%3Ccircle cx='10' cy='10' r='7' fill='none' stroke='%237C3AED' stroke-width='2'/%3E%3Cpath stroke='%237C3AED' stroke-width='2' d='M15 15l5 5'/%3E%3C/svg%3E")
       10 10,
     pointer;
 }
 
-/* Soft card hover lift used across bookshelf */
 .sl-card {
   transition:
     transform 0.2s ease,

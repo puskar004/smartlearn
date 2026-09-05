@@ -1,48 +1,15 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
-
-export type RoomMsg = {
-  id: string;
-  author: string;
-  authorId: string;
-  text: string;
-  at: number;
-};
-
-type Store = { messages: RoomMsg[] };
-
-function filePath() {
-  const base = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), ".data");
-  return path.join(base, "smartlearn-common-room.json");
-}
-
-async function readStore(): Promise<Store> {
-  try {
-    const raw = await fs.readFile(filePath(), "utf8");
-    return JSON.parse(raw) as Store;
-  } catch {
-    return { messages: [] };
-  }
-}
-
-async function writeStore(store: Store) {
-  const fp = filePath();
-  try {
-    await fs.mkdir(path.dirname(fp), { recursive: true });
-  } catch {
-    // ignore
-  }
-  await fs.writeFile(fp, JSON.stringify(store), "utf8");
-}
+import { addMessage, loadAllMessages } from "@/lib/common-room-server";
 
 export async function GET() {
-  const store = await readStore();
-  return NextResponse.json({
-    ok: true,
-    messages: store.messages.slice(0, 150),
-  });
+  try {
+    const messages = await loadAllMessages();
+    return NextResponse.json({ ok: true, messages });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -54,19 +21,30 @@ export async function POST(req: NextRequest) {
   const user = await currentUser();
   const body = await req.json().catch(() => ({}));
   const text = String(body.text || "").trim();
+  const imageDataUrl =
+    typeof body.imageDataUrl === "string" ? body.imageDataUrl : undefined;
 
-  if (text.length < 4) {
+  if (text.length < 1 && !imageDataUrl) {
     return NextResponse.json(
-      { error: "Write a clearer academic question (min 4 chars)." },
+      { error: "Write a message or attach a photo." },
       { status: 400 }
     );
   }
-  if (text.length > 500) {
-    return NextResponse.json({ error: "Max 500 characters." }, { status: 400 });
+  if (text.length > 200) {
+    return NextResponse.json(
+      { error: "Max 200 characters per message." },
+      { status: 400 }
+    );
+  }
+  // ~400KB cap for data URLs
+  if (imageDataUrl && imageDataUrl.length > 400_000) {
+    return NextResponse.json(
+      { error: "Image too large. Use a smaller photo (under ~300KB)." },
+      { status: 400 }
+    );
   }
 
-  const store = await readStore();
-  const msg: RoomMsg = {
+  const msg = {
     id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     author:
       user?.fullName ||
@@ -74,11 +52,16 @@ export async function POST(req: NextRequest) {
       user?.emailAddresses?.[0]?.emailAddress ||
       "Student",
     authorId: userId,
-    text,
+    text: text || (imageDataUrl ? "📷 Photo" : ""),
+    imageDataUrl,
     at: Date.now(),
   };
-  store.messages = [msg, ...store.messages].slice(0, 200);
-  await writeStore(store);
 
-  return NextResponse.json({ ok: true, message: msg, messages: store.messages });
+  try {
+    const messages = await addMessage(msg);
+    return NextResponse.json({ ok: true, message: msg, messages });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Failed to post";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

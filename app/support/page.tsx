@@ -1,22 +1,46 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useUser } from "@clerk/nextjs";
-import { HelpCircle, Loader2, Send } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { HelpCircle, Loader2, Send, Inbox } from "lucide-react";
+import { pushNotification } from "@/lib/notifications";
+
+type Ticket = {
+  id: string;
+  subject: string;
+  message: string;
+  at: number;
+};
 
 export default function SupportPage() {
   const { isSignedIn, user } = useUser();
+  const { userId } = useAuth();
   const [subject, setSubject] = useState("Help with SmartLearn");
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mine, setMine] = useState<Ticket[]>([]);
+
+  const loadMine = async () => {
+    try {
+      const res = await fetch("/api/support");
+      const data = await res.json();
+      if (data.tickets) setMine(data.tickets);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (isSignedIn) void loadMine();
+  }, [isSignedIn]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setStatus(null);
-    if (!isSignedIn) {
+    if (!isSignedIn || !userId) {
       setError("Please sign in to contact support.");
       return;
     }
@@ -32,8 +56,17 @@ export default function SupportPage() {
         setError(data.error || "Failed to send");
         return;
       }
-      setStatus(data.message || "Sent to SmartLearn support.");
+      setStatus(
+        data.message ||
+          "Saved for SmartLearn site handlers. Check notifications."
+      );
+      pushNotification(userId, {
+        title: "Support ticket sent",
+        body: `“${subject}” was delivered to the website support inbox.`,
+        href: "/support",
+      });
       setMessage("");
+      void loadMine();
     } catch {
       setError("Network error");
     } finally {
@@ -47,12 +80,22 @@ export default function SupportPage() {
         <HelpCircle className="h-3.5 w-3.5" /> Help &amp; Support
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
-        Message the SmartLearn team
+        Message the website team
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        This goes to the website handlers (support inbox), not the student
-        common room. Use Common Room to ask classmates.
+        Messages go to the <strong>SmartLearn site handler inbox</strong> (stored
+        on server
+        {process.env.NEXT_PUBLIC_SUPPORT_HINT
+          ? ` · ${process.env.NEXT_PUBLIC_SUPPORT_HINT}`
+          : ""}
+        ). This is <em>not</em> the student Common Room.
       </p>
+      <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <Inbox className="mr-1 inline h-3.5 w-3.5" />
+        Handlers can read tickets via server logs /{" "}
+        <code className="rounded bg-white px-1">SUPPORT_EMAIL</code> if configured
+        on Vercel. You also get an in-app notification confirmation.
+      </div>
 
       <form
         onSubmit={(e) => void submit(e)}
@@ -105,6 +148,26 @@ export default function SupportPage() {
           </p>
         )}
       </form>
+
+      {mine.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-sm font-bold text-slate-800">Your recent tickets</h2>
+          <ul className="mt-3 space-y-2">
+            {mine.map((t) => (
+              <li
+                key={t.id}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+              >
+                <div className="font-semibold text-slate-800">{t.subject}</div>
+                <div className="text-slate-500">
+                  {new Date(t.at).toLocaleString()}
+                </div>
+                <div className="mt-1 text-slate-600">{t.message.slice(0, 120)}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

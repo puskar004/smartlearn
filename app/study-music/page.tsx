@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MOOD_PLAYLISTS, ytEmbed } from "@/lib/media-catalog";
+import { setGlobalMusic } from "@/components/GlobalMusicPlayer";
 
 const MOOD_META = [
   { id: "focus", color: "from-indigo-500 to-violet-600", Icon: Flame },
@@ -54,20 +55,17 @@ export default function StudyMusicPage() {
 
   const playTone = () => {
     stopTone();
+    setGlobalMusic(null);
     const ctx = new AudioContext();
     const master = ctx.createGain();
     master.gain.value = 0.04;
     master.connect(ctx.destination);
-
     const freqs =
       moodId === "energy"
         ? [196, 247, 294]
         : moodId === "rain"
           ? [110, 146]
-          : moodId === "soft"
-            ? [174, 220]
-            : [164, 196, 246];
-
+          : [164, 196, 246];
     const nodes: AudioNode[] = [master];
     freqs.forEach((f, i) => {
       const o = ctx.createOscillator();
@@ -80,27 +78,18 @@ export default function StudyMusicPage() {
       o.start();
       nodes.push(o, g);
     });
-
-    // soft noise for rain mood
-    if (moodId === "rain") {
-      const bufferSize = 2 * ctx.sampleRate;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      noise.loop = true;
-      const ng = ctx.createGain();
-      ng.gain.value = 0.015;
-      noise.connect(ng);
-      ng.connect(master);
-      noise.start();
-      nodes.push(noise, ng);
-    }
-
     ctxRef.current = ctx;
     nodesRef.current = nodes;
     setToneOn(true);
+  };
+
+  const playAcrossApp = () => {
+    stopTone();
+    setGlobalMusic({
+      id: clip.id,
+      title: `${playlist.label} · ${clip.title}`,
+      playing: true,
+    });
   };
 
   return (
@@ -113,8 +102,8 @@ export default function StudyMusicPage() {
           Play by how you feel
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-500">
-          YouTube player below works in-page. If your network blocks embeds, use{" "}
-          <strong>Instant ambient tone</strong> (always works offline-ish).
+          Use <strong>Play across app</strong> so music keeps going when you
+          change pages (mini player bottom-left).
         </p>
       </div>
 
@@ -177,6 +166,13 @@ export default function StudyMusicPage() {
         ))}
         <button
           type="button"
+          onClick={playAcrossApp}
+          className="inline-flex items-center gap-1 rounded-full bg-violet-600 px-3 py-1.5 text-xs font-bold text-white"
+        >
+          <Play className="h-3.5 w-3.5" /> Play across app
+        </button>
+        <button
+          type="button"
           onClick={() => (toneOn ? stopTone() : playTone())}
           className={cn(
             "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition",
@@ -186,7 +182,7 @@ export default function StudyMusicPage() {
           )}
         >
           <Volume2 className="h-3.5 w-3.5" />
-          {toneOn ? "Stop ambient tone" : "Instant ambient tone"}
+          {toneOn ? "Stop ambient" : "Ambient tone"}
         </button>
       </div>
 
@@ -198,14 +194,6 @@ export default function StudyMusicPage() {
             </div>
             <div className="text-[11px] text-slate-400">{clip.channel}</div>
           </div>
-          <a
-            href={`https://www.youtube.com/watch?v=${clip.id}`}
-            target="_blank"
-            rel="noreferrer"
-            className="shrink-0 text-[11px] font-semibold text-violet-300 hover:underline"
-          >
-            Open YT
-          </a>
         </div>
         <iframe
           key={embed}
@@ -214,12 +202,7 @@ export default function StudyMusicPage() {
           className="aspect-video w-full bg-black"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
-          referrerPolicy="strict-origin-when-cross-origin"
         />
-        <p className="flex items-center gap-2 bg-slate-900 px-4 py-2 text-[11px] text-slate-500">
-          <Play className="h-3 w-3" />
-          In-app embed · if blank, try another track or ambient tone
-        </p>
       </div>
     </div>
   );

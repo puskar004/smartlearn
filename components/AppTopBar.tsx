@@ -1,13 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { Bell, Flame, Sparkles, Star } from "lucide-react";
 import NavAuth from "@/components/NavAuth";
 import { loadProgress } from "@/lib/user-store";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
+import {
+  loadNotifications,
+  markAllRead,
+  unreadCount,
+  type AppNotification,
+} from "@/lib/notifications";
 
 export default function AppTopBar() {
   const { userId } = useAuth();
@@ -15,6 +21,10 @@ export default function AppTopBar() {
   const [xp, setXp] = useState(0);
   const [streak, setStreak] = useState(0);
   const [role, setRole] = useState<"student" | "teacher">("student");
+  const [notes, setNotes] = useState<AppNotification[]>([]);
+  const [open, setOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const sync = () => {
@@ -23,11 +33,25 @@ export default function AppTopBar() {
       setXp(p.xp);
       setStreak(p.streak);
       setRole(getRole(userId));
+      setNotes(loadNotifications(userId));
+      setUnread(unreadCount(userId));
     };
     sync();
     window.addEventListener(ROLE_EVENT, sync);
-    return () => window.removeEventListener(ROLE_EVENT, sync);
+    window.addEventListener("sl-notifications", sync);
+    return () => {
+      window.removeEventListener(ROLE_EVENT, sync);
+      window.removeEventListener("sl-notifications", sync);
+    };
   }, [userId]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!panelRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   const isTeacher = role === "teacher";
 
@@ -44,13 +68,68 @@ export default function AppTopBar() {
           </Link>
         )}
 
-        <button
-          type="button"
-          className="rounded-full border border-slate-200 bg-white p-2 text-slate-400 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-600"
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-        </button>
+        <div className="relative" ref={panelRef}>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen((v) => !v);
+              if (userId && !open) {
+                setNotes(markAllRead(userId));
+                setUnread(0);
+              }
+            }}
+            className="relative rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-600"
+            aria-label="Notifications"
+          >
+            <Bell className="h-4 w-4" />
+            {unread > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
+          </button>
+          {open && (
+            <div className="absolute right-0 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+              <div className="border-b border-slate-100 px-3 py-2 text-xs font-bold text-slate-800">
+                Notifications
+              </div>
+              <ul className="max-h-72 overflow-y-auto">
+                {notes.length === 0 && (
+                  <li className="px-3 py-6 text-center text-xs text-slate-400">
+                    No notifications yet. Common Room posts & support tickets
+                    appear here.
+                  </li>
+                )}
+                {notes.map((n) => (
+                  <li key={n.id} className="border-b border-slate-50 px-3 py-2.5">
+                    {n.href ? (
+                      <Link
+                        href={n.href}
+                        onClick={() => setOpen(false)}
+                        className="block"
+                      >
+                        <div className="text-xs font-bold text-slate-800">
+                          {n.title}
+                        </div>
+                        <div className="text-[11px] text-slate-500">{n.body}</div>
+                        <div className="mt-1 text-[10px] text-slate-400">
+                          {new Date(n.at).toLocaleString()}
+                        </div>
+                      </Link>
+                    ) : (
+                      <>
+                        <div className="text-xs font-bold text-slate-800">
+                          {n.title}
+                        </div>
+                        <div className="text-[11px] text-slate-500">{n.body}</div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
 
         {!isTeacher && (
           <>
