@@ -490,10 +490,10 @@ function NcertInner() {
               “Same Books. Smarter Learning.”
             </p>
             <Link
-              href="/feynman"
+              href="/quiz"
               className="mt-3 inline-flex text-xs font-semibold text-violet-100 underline-offset-2 hover:underline"
             >
-              Try Feynman Mode →
+              Practice board quizzes →
             </Link>
           </div>
         </aside>

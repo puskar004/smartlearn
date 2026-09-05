@@ -48,10 +48,10 @@ export default function MistakeVaultPage() {
 
       <div className="mt-4 flex flex-wrap gap-3">
         <Link
-          href="/feynman"
+          href="/quiz"
           className="inline-flex items-center gap-1 rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white"
         >
-          <Brain className="h-3.5 w-3.5" /> Teach it back (Feynman)
+          <Brain className="h-3.5 w-3.5" /> Practice board quiz
         </Link>
         <button
           type="button"

@@ -19,8 +19,9 @@ const academic = [
   { href: "/ai-tutor", label: "Gemini AI Tutor" },
   { href: "/safe-search", label: "In-App Safe YouTube" },
   { href: "/quiz", label: "Chapter Rapid Quizzes" },
-  { href: "/feynman", label: "Feynman Mode (Teach-back)" },
   { href: "/mistakes", label: "Mistake Vault" },
+  { href: "/common-room", label: "Common Room" },
+  { href: "/support", label: "Help & Support" },
 ];
 
 const focusTools = [
