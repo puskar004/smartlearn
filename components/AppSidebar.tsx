@@ -101,8 +101,8 @@ export default function AppSidebar() {
           <div className="text-base font-extrabold tracking-tight text-slate-900">
             Smart<span className="text-violet-600">Learn</span>
           </div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            {isTeacher ? "Teacher console" : "Learning, Personalized"}
+          <div className="text-[10px] font-medium text-slate-400">
+            {isTeacher ? "Teacher console" : "Learn. Grow. Achieve."}
           </div>
         </div>
       </Link>
@@ -159,11 +159,12 @@ export default function AppSidebar() {
       </nav>
 
       {!isTeacher && (
-        <div className="mx-3 mb-3 hidden rounded-2xl bg-gradient-to-br from-violet-100 via-fuchsia-50 to-amber-50 p-4 lg:block">
+        <div className="mx-3 mb-3 hidden rounded-2xl bg-gradient-to-br from-violet-100 via-fuchsia-50 to-indigo-50 p-4 lg:block">
           <div className="flex items-center gap-2 text-violet-700">
             <Sparkles className="h-4 w-4" />
             <span className="text-xs font-bold">Small steps</span>
           </div>
+          <div className="text-xs font-bold text-violet-800">Big results!</div>
           <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
             “Consistency today, success tomorrow.”
           </p>
