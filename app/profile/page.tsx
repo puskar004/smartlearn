@@ -15,17 +15,10 @@ import {
   hardResetUser,
   loadProgress,
   saveProgress,
-  accuracy,
-  weaknessMap,
   type UserProgress,
 } from "@/lib/user-store";
-import {
-  getJoinedClass,
-  getRole,
-  joinClassroom,
-  setJoinedClass,
-  setRole,
-} from "@/lib/teacher-store";
+import { getJoinedClass, getRole, setRole } from "@/lib/teacher-store";
+import { emitRoleChanged } from "@/lib/role-events";
 
 export default function ProfilePage() {
   const { user, isSignedIn } = useUser();
@@ -36,9 +29,8 @@ export default function ProfilePage() {
   const [eyeGuard, setEyeGuard] = useState(false);
   const [saved, setSaved] = useState(false);
   const [progress, setProgress] = useState<UserProgress | null>(null);
-  const [classCode, setClassCode] = useState("");
   const [joined, setJoined] = useState<string | null>(null);
-  const [classMsg, setClassMsg] = useState<string | null>(null);
+  const [classMsg] = useState<string | null>(null);
   const [role, setRoleUi] = useState<"student" | "teacher">("student");
 
   useEffect(() => {
@@ -124,66 +116,11 @@ export default function ProfilePage() {
         </label>
 
         <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50/50 p-4">
-          <div className="text-sm font-bold text-violet-900">
-            Classroom / Teacher link
-          </div>
+          <div className="text-sm font-bold text-violet-900">Who are you?</div>
           <p className="mt-1 text-[11px] text-violet-700/80">
-            Enter the 6-letter code from your teacher so they can see your
-            progress, mistakes, and weak subjects.
+            Teacher mode shows only teacher tools (students, uploads, live).
+            Student mode shows study tools only.
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <input
-              value={classCode}
-              onChange={(e) => setClassCode(e.target.value.toUpperCase())}
-              placeholder="CLASS CODE"
-              className="rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm font-mono tracking-widest"
-              maxLength={8}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                if (!userId) return;
-                const p = loadProgress(userId);
-                const res = joinClassroom(classCode.trim(), {
-                  studentId: userId,
-                  name: user?.fullName || user?.firstName || "Student",
-                  email: user?.primaryEmailAddress?.emailAddress,
-                  grade: p.grade,
-                  xp: p.xp,
-                  streak: p.streak,
-                  accuracy: accuracy(p),
-                  mistakes: p.mistakes.length,
-                  weakSubjects: weaknessMap(p).map(([n]) => n),
-                  chaptersOpened: p.chaptersOpened.length,
-                  lastActive: Date.now(),
-                  recentMistakes: p.mistakes.slice(0, 5).map((m) => ({
-                    subjectName: m.subjectName,
-                    chapterTitle: m.chapterTitle,
-                    prompt: m.prompt,
-                    at: m.at,
-                  })),
-                });
-                if (!res.ok) {
-                  setClassMsg(res.error || "Failed");
-                  return;
-                }
-                setJoinedClass(userId, classCode.trim());
-                setJoined(classCode.trim().toUpperCase());
-                setClassMsg(`Joined ${res.classroom?.name || "class"}`);
-              }}
-              className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white"
-            >
-              Join class
-            </button>
-          </div>
-          {joined && (
-            <p className="mt-2 text-xs font-semibold text-emerald-700">
-              Joined: {joined}
-            </p>
-          )}
-          {classMsg && (
-            <p className="mt-1 text-xs text-slate-600">{classMsg}</p>
-          )}
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -191,8 +128,10 @@ export default function ProfilePage() {
                 if (!userId) return;
                 setRole(userId, "student");
                 setRoleUi("student");
+                emitRoleChanged();
+                window.location.href = "/dashboard";
               }}
-              className={`rounded-full px-3 py-1 text-[11px] font-bold ${
+              className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
                 role === "student"
                   ? "bg-slate-900 text-white"
                   : "bg-white text-slate-600 ring-1 ring-slate-200"
@@ -206,8 +145,10 @@ export default function ProfilePage() {
                 if (!userId) return;
                 setRole(userId, "teacher");
                 setRoleUi("teacher");
+                emitRoleChanged();
+                window.location.href = "/teacher";
               }}
-              className={`rounded-full px-3 py-1 text-[11px] font-bold ${
+              className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
                 role === "teacher"
                   ? "bg-indigo-600 text-white"
                   : "bg-white text-slate-600 ring-1 ring-slate-200"
@@ -215,15 +156,40 @@ export default function ProfilePage() {
             >
               I am a teacher
             </button>
-            {role === "teacher" && (
-              <a
-                href="/teacher"
-                className="rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-100"
-              >
-                Open Teacher Hub →
-              </a>
-            )}
           </div>
+          {role === "student" && (
+            <div className="mt-4 border-t border-violet-100 pt-3">
+              <div className="text-xs font-bold text-violet-900">
+                Teacher class code
+              </div>
+              {joined ? (
+                <p className="mt-1 text-xs font-semibold text-emerald-700">
+                  Linked: {joined}{" "}
+                  <a href="/join-class" className="underline">
+                    manage
+                  </a>
+                </p>
+              ) : (
+                <a
+                  href="/join-class"
+                  className="mt-2 inline-flex rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white"
+                >
+                  Enter teacher code →
+                </a>
+              )}
+            </div>
+          )}
+          {role === "teacher" && (
+            <a
+              href="/teacher?tab=code"
+              className="mt-3 inline-flex text-xs font-bold text-indigo-700 underline"
+            >
+              Open Teacher Hub / Class code →
+            </a>
+          )}
+          {classMsg && (
+            <p className="mt-2 text-xs text-slate-600">{classMsg}</p>
+          )}
         </div>
 
         <label className="mt-4 flex items-center gap-2 text-sm">

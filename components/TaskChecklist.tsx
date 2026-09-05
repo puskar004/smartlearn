@@ -7,10 +7,12 @@ import {
   Circle,
   ListTodo,
   Plus,
+  Trash2,
   X,
 } from "lucide-react";
 import {
   addCustomTask,
+  deleteTask,
   loadTasks,
   toggleTaskDone,
   type StudyTask,
@@ -123,23 +125,32 @@ export default function TaskChecklist({
                 {c}
               </div>
               {group.map((t) => (
-                <button
+                <div
                   key={t.id}
-                  type="button"
-                  onClick={() => setTasks(toggleTaskDone(userId, t.id))}
                   className={cn(
-                    "flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition",
+                    "flex w-full items-start gap-2 rounded-xl px-2 py-2 transition",
                     t.completed
                       ? "bg-emerald-50/80 hover:bg-emerald-50"
                       : "hover:bg-violet-50"
                   )}
                 >
-                  {t.completed ? (
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  ) : (
-                    <Circle className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
-                  )}
-                  <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setTasks(toggleTaskDone(userId, t.id))}
+                    className="mt-0.5 shrink-0"
+                    title="Toggle done"
+                  >
+                    {t.completed ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    ) : (
+                      <Circle className="h-4 w-4 text-slate-300" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTasks(toggleTaskDone(userId, t.id))}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <div
                       className={cn(
                         "text-xs font-semibold",
@@ -164,8 +175,21 @@ export default function TaskChecklist({
                         }}
                       />
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete task"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete task “${t.title}”?`)) {
+                        setTasks(deleteTask(userId, t.id));
+                      }
+                    }}
+                    className="mt-0.5 shrink-0 rounded-lg p-1 text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))}
             </li>
           );

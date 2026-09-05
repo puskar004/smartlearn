@@ -81,6 +81,12 @@ export function getRole(userId: string): "student" | "teacher" {
 
 export function setRole(userId: string, role: "student" | "teacher") {
   localStorage.setItem(ROLE_KEY + userId, role);
+  try {
+    // dynamic import avoid circular — call via window event from callers
+    window.dispatchEvent(new Event("sl-role-changed"));
+  } catch {
+    // ignore
+  }
 }
 
 export function getJoinedClass(userId: string): string | null {
@@ -91,6 +97,11 @@ export function getJoinedClass(userId: string): string | null {
 export function setJoinedClass(userId: string, code: string | null) {
   if (code) localStorage.setItem(JOIN_KEY + userId, code.toUpperCase());
   else localStorage.removeItem(JOIN_KEY + userId);
+  try {
+    window.dispatchEvent(new Event("sl-role-changed"));
+  } catch {
+    // ignore
+  }
 }
 
 function makeCode() {

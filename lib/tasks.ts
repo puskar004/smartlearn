@@ -182,3 +182,9 @@ export function addCustomTask(
   saveTasks(userId, next);
   return next;
 }
+
+export function deleteTask(userId: string, taskId: string): StudyTask[] {
+  const next = loadTasks(userId).filter((t) => t.id !== taskId);
+  saveTasks(userId, next);
+  return next;
+}
