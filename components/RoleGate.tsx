@@ -24,6 +24,7 @@ const STUDENT_ONLY = [
   "/extreme",
   "/join-class",
   "/support",
+  "/test",
 ];
 
 export default function RoleGate({ children }: { children: React.ReactNode }) {

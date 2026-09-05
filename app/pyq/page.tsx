@@ -3,18 +3,33 @@
 import { useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { FileText, Download } from "lucide-react";
 import { CURRICULUM, type Grade } from "@/lib/curriculum";
+import { getPyqPapers } from "@/lib/pyq-catalog";
+import PdfReaderModal from "@/components/PdfReaderModal";
 
 function PyqInner() {
   const sp = useSearchParams();
   const [grade, setGrade] = useState<Grade>(
     (sp.get("grade") as Grade) || "12"
   );
-  const pack = useMemo(() => CURRICULUM.find((g) => g.grade === grade)!, [grade]);
+  const pack = useMemo(
+    () => CURRICULUM.find((g) => g.grade === grade)!,
+    [grade]
+  );
   const initialSubject = sp.get("subject") || pack.subjects[0]?.id;
   const [subjectId, setSubjectId] = useState(initialSubject);
   const subject =
     pack.subjects.find((s) => s.id === subjectId) || pack.subjects[0];
+
+  const papers = useMemo(
+    () => getPyqPapers(grade, subject.id, subject.name),
+    [grade, subject.id, subject.name]
+  );
+
+  const [reader, setReader] = useState<{ title: string; link: string } | null>(
+    null
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -22,8 +37,8 @@ function PyqInner() {
         Previous Year Questions
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Year-wise PYQ practice lanes mapped to every subject. Pair with chapter
-        quizzes for rapid revision.
+        Last 10 years · PCM / PCB / all subjects · open PDF inside SmartLearn
+        (sample papers + board archives).
       </p>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -65,64 +80,91 @@ function PyqInner() {
         ))}
       </div>
 
-      <div className="mt-8 space-y-4">
-        {subject.pyqYears
-          .slice()
-          .reverse()
-          .map((year) => (
-            <div
-              key={year}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">
-                    {subject.name} · CBSE {year}
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Full paper practice · chapter tags from NCERT list
-                  </p>
-                </div>
-                <Link
-                  href={`/ai-tutor?q=${encodeURIComponent(
-                    `Solve a typical CBSE ${year} ${subject.name} board question from class ${grade} step by step`
-                  )}`}
-                  className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500"
-                >
-                  Solve with Gemini
-                </Link>
-              </div>
-              <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                {subject.chapters.slice(0, 6).map((ch) => (
-                  <li
-                    key={ch.id}
-                    className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                  >
-                    <span className="font-semibold text-slate-500">
-                      {year} set ·
-                    </span>{" "}
-                    Focus: Ch {ch.number} {ch.title}
-                    <div className="mt-1">
-                      <Link
-                        href={`/quiz/${ch.id}`}
-                        className="text-xs font-semibold text-amber-700 hover:underline"
-                      >
-                        Rapid quiz →
-                      </Link>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+      <div className="mt-8 space-y-3">
+        {papers.map((p) => (
+          <div
+            key={p.year}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <div>
+              <h2 className="text-base font-bold text-slate-900">{p.label}</h2>
+              <p className="text-xs text-slate-500">
+                {p.pdfUrl
+                  ? "PDF ready · open in-app"
+                  : "Open CBSE archive · pair with Gemini solutions"}
+              </p>
             </div>
-          ))}
+            <div className="flex flex-wrap gap-2">
+              {p.pdfUrl && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReader({
+                      title: p.label,
+                      link: p.pdfUrl!,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"
+                >
+                  <FileText className="h-3.5 w-3.5" /> Open PDF
+                </button>
+              )}
+              <Link
+                href={`/ai-tutor?q=${encodeURIComponent(
+                  `Solve a typical CBSE ${p.year} Class ${grade} ${subject.name} board question step by step with marking scheme`
+                )}`}
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500"
+              >
+                Solve with Gemini
+              </Link>
+              {p.portalUrl && (
+                <a
+                  href={p.portalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  <Download className="h-3.5 w-3.5" /> CBSE archive
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
+
+      <div className="mt-8 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-600">
+        <strong>Tip:</strong> Chapter-wise practice — open a chapter quiz after
+        each paper year.
+        <div className="mt-2 flex flex-wrap gap-2">
+          {subject.chapters.slice(0, 8).map((ch) => (
+            <Link
+              key={ch.id}
+              href={`/quiz/${ch.id}`}
+              className="rounded-full bg-white px-2.5 py-1 font-semibold text-indigo-700 ring-1 ring-indigo-100 hover:bg-indigo-50"
+            >
+              Ch {ch.number}
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <PdfReaderModal
+        open={Boolean(reader)}
+        title={reader?.title || ""}
+        ncertLink={reader?.link}
+        onClose={() => setReader(null)}
+      />
     </div>
   );
 }
 
 export default function PyqPage() {
   return (
-    <Suspense fallback={<div className="p-10 text-sm text-slate-500">Loading PYQs…</div>}>
+    <Suspense
+      fallback={
+        <div className="p-10 text-center text-sm text-slate-400">Loading…</div>
+      }
+    >
       <PyqInner />
     </Suspense>
   );

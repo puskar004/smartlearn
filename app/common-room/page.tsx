@@ -29,7 +29,13 @@ type Msg = {
 
 const COOLDOWN_SEC = 20;
 const MAX_CHARS = 200;
-const LOCAL_KEY = "sl_common_room_cache_v2";
+const LOCAL_KEY = "sl_common_room_cache_v3";
+const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+
+function keepFresh(list: Msg[]) {
+  const cut = Date.now() - TWO_DAYS;
+  return list.filter((m) => (m.at || 0) >= cut);
+}
 
 /** Compress image so Photo button always works under size limits */
 function compressImage(file: File): Promise<string> {
@@ -99,9 +105,9 @@ export default function CommonRoomPage() {
         // ignore
       }
       for (const m of incoming) map.set(m.id, m);
-      const list = Array.from(map.values())
-        .sort((a, b) => b.at - a.at)
-        .slice(0, 300);
+      const list = keepFresh(
+        Array.from(map.values()).sort((a, b) => b.at - a.at)
+      ).slice(0, 300);
       localStorage.setItem(LOCAL_KEY, JSON.stringify(list));
       setMsgs(list);
 
@@ -147,11 +153,12 @@ export default function CommonRoomPage() {
 
   useEffect(() => {
     try {
-      const cached = JSON.parse(
-        localStorage.getItem(LOCAL_KEY) || "[]"
-      ) as Msg[];
+      const cached = keepFresh(
+        JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]") as Msg[]
+      );
       cached.forEach((m) => seenIds.current.add(m.id));
       if (cached.length) setMsgs(cached);
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(cached));
     } catch {
       // ignore
     }
@@ -265,8 +272,8 @@ export default function CommonRoomPage() {
         Shared doubt wall
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Photos open full-screen on tap · Reply on any post · Max {MAX_CHARS}{" "}
-        chars. Signed in as{" "}
+        Chat + photos stay <strong>at least 2 days</strong>. Tap photo to
+        enlarge · Reply · Max {MAX_CHARS} chars. Signed in as{" "}
         <strong className="text-slate-700">{displayName(user)}</strong>
       </p>
 

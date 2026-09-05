@@ -33,6 +33,7 @@ const studentNav = [
   { href: "/ncert", label: "NCERT & Chapters", icon: BookOpen },
   { href: "/pyq", label: "PYQs", icon: ClipboardList },
   { href: "/quiz", label: "Practice & Quiz", icon: Target },
+  { href: "/test", label: "Live Test", icon: ClipboardList },
   { href: "/ai-tutor", label: "AI Tutor", icon: Brain },
   { href: "/feynman", label: "Feynman Mode", icon: Sparkles },
   { href: "/blueprint", label: "Study Plan", icon: CalendarDays },
@@ -46,6 +47,7 @@ const studentNav = [
 const teacherNav = [
   { href: "/teacher", label: "Teacher Home", icon: Home },
   { href: "/teacher?tab=students", label: "My Students", icon: Users },
+  { href: "/teacher/test", label: "Live Tests", icon: ClipboardList },
   { href: "/teacher?tab=materials", label: "Upload Notes/Videos", icon: Upload },
   { href: "/teacher?tab=live", label: "Live Sessions", icon: Radio },
   { href: "/teacher?tab=code", label: "Class Code", icon: GraduationCap },

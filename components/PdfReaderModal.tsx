@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, X } from "lucide-react";
 import {
   googleEmbedPdf,
+  inAppPdfSrc,
   resolveEmbeddablePdf,
 } from "@/lib/ncert-pdf";
 import { setPdfReading } from "@/components/FocusLock";
@@ -16,8 +17,7 @@ type Props = {
 };
 
 /**
- * In-app NCERT reader — stays on SmartLearn (no external tab).
- * Suppresses Focus Lock while open.
+ * In-app reader via same-origin PDF proxy so Chrome does not block NCERT frames.
  */
 export default function PdfReaderModal({
   open,
@@ -25,9 +25,21 @@ export default function PdfReaderModal({
   ncertLink,
   onClose,
 }: Props) {
-  const [mode, setMode] = useState<"pdf" | "portal">("pdf");
+  const [mode, setMode] = useState<"pdf" | "gview" | "portal">("pdf");
+  const [tick, setTick] = useState(0);
   const pdf = resolveEmbeddablePdf(ncertLink);
-  const embed = pdf ? googleEmbedPdf(pdf) : null;
+
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : undefined;
+
+  const src = useMemo(() => {
+    if (!open) return "about:blank";
+    if (mode === "portal" && ncertLink) return ncertLink;
+    if (pdf && mode === "pdf") return inAppPdfSrc(pdf, origin);
+    if (pdf && mode === "gview") return googleEmbedPdf(pdf);
+    if (pdf) return inAppPdfSrc(pdf, origin);
+    return ncertLink || "about:blank";
+  }, [open, mode, pdf, ncertLink, origin, tick]);
 
   useEffect(() => {
     setPdfReading(open);
@@ -37,7 +49,6 @@ export default function PdfReaderModal({
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    // prevent background scroll
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -49,20 +60,9 @@ export default function PdfReaderModal({
 
   if (!open) return null;
 
-  // Prefer direct PDF embed, then google viewer, never navigate away
-  const src =
-    mode === "pdf" && pdf
-      ? pdf
-      : mode === "pdf" && embed
-        ? embed
-        : mode === "portal" && ncertLink
-          ? ncertLink
-          : pdf || ncertLink || "about:blank";
-
   return (
     <div
       className="fixed inset-0 z-[120] flex flex-col bg-slate-950/80 p-1 backdrop-blur-sm sm:p-3"
-      // keep focus inside modal so browser doesn't treat as leave
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-600 bg-white shadow-2xl">
@@ -86,6 +86,17 @@ export default function PdfReaderModal({
               </button>
               <button
                 type="button"
+                onClick={() => setMode("gview")}
+                className={`rounded-md px-2.5 py-1 transition ${
+                  mode === "gview"
+                    ? "bg-white text-sky-700 shadow"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                Viewer
+              </button>
+              <button
+                type="button"
                 onClick={() => setMode("portal")}
                 className={`rounded-md px-2.5 py-1 transition ${
                   mode === "portal"
@@ -97,20 +108,13 @@ export default function PdfReaderModal({
               </button>
             </div>
           )}
-          {pdf && (
-            <a
-              href={pdf}
-              // same tab download attempt without leaving SPA chrome when possible
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
-              onClick={(e) => {
-                // stay in app: open blob attempt
-                e.preventDefault();
-                setMode("pdf");
-              }}
-            >
-              <ExternalLink className="h-3 w-3" /> Reload PDF
-            </a>
-          )}
+          <button
+            type="button"
+            onClick={() => setTick((t) => t + 1)}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+          >
+            <ExternalLink className="h-3 w-3" /> Reload
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -123,15 +127,15 @@ export default function PdfReaderModal({
 
         <div className="relative min-h-0 flex-1 bg-slate-100">
           <iframe
+            key={`${src}-${tick}`}
             title={title}
             src={src}
-            className="h-full w-full border-0"
-            referrerPolicy="no-referrer-when-downgrade"
-            // sandbox allows pdf plugins but blocks top-navigation
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads"
+            className="h-full w-full border-0 bg-white"
+            // no sandbox — PDF plugins need full frame; proxy is same-origin
+            allow="fullscreen"
           />
           <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] text-white">
-            Reading inside SmartLearn · Esc closes · tab-switch alert paused
+            In-app PDF proxy · Esc closes · tab-switch alert paused
           </p>
         </div>
       </div>

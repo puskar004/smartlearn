@@ -1,8 +1,5 @@
 /**
- * Convert NCERT textbook.php style links / book codes into direct PDF URLs
- * so we can embed them in-app (same tab, no external jump when possible).
- *
- * Example: code leph1, chapter 3 → https://ncert.nic.in/textbook/pdf/leph103.pdf
+ * NCERT textbook.php → direct PDF, then same-origin proxy so Chrome can embed.
  */
 
 export function chapterPdfUrl(bookCode: string, bookChapter: number): string {
@@ -11,18 +8,17 @@ export function chapterPdfUrl(bookCode: string, bookChapter: number): string {
   return `https://ncert.nic.in/textbook/pdf/${code}${n}.pdf`;
 }
 
-/** Parse textbook.php?leph1=3-14 → { code, ch } */
-export function parseTextbookPhp(url: string): { code: string; ch: number } | null {
+export function parseTextbookPhp(
+  url: string
+): { code: string; ch: number } | null {
   try {
     const u = new URL(url);
-    // query like leph1=3-14
     for (const [k, v] of u.searchParams.entries()) {
       if (/^[a-z]+\d+$/i.test(k) && /^\d+/.test(v)) {
         const ch = parseInt(v.split("-")[0], 10);
         if (!Number.isNaN(ch)) return { code: k, ch };
       }
     }
-    // sometimes ?leph1=3-14 is the whole search without standard parse
     const q = u.search.replace(/^\?/, "");
     const m = q.match(/^([a-z]+\d+)=(\d+)/i);
     if (m) return { code: m[1], ch: parseInt(m[2], 10) };
@@ -40,7 +36,33 @@ export function resolveEmbeddablePdf(ncertLink?: string): string | null {
   return null;
 }
 
-/** Google Docs embedded viewer — keeps user on SmartLearn chrome */
+/** Same-origin proxy — avoids Chrome X-Frame / “page blocked” on ncert.nic.in */
+export function proxiedPdf(pdfUrl: string) {
+  return `/api/pdf-proxy?url=${encodeURIComponent(pdfUrl)}`;
+}
+
+/** Google Docs viewer fallback */
 export function googleEmbedPdf(pdfUrl: string) {
   return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(pdfUrl)}`;
+}
+
+/** Mozilla PDF.js viewer with our proxy (most reliable in-app) */
+export function pdfJsEmbed(pdfUrl: string) {
+  const file = encodeURIComponent(proxiedPdf(pdfUrl));
+  // Use pdf.js from CDN viewer
+  return `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(
+    typeof window !== "undefined"
+      ? `${window.location.origin}${proxiedPdf(pdfUrl)}`
+      : pdfUrl
+  )}`;
+}
+
+export function inAppPdfSrc(pdfUrl: string, origin?: string) {
+  const proxy = proxiedPdf(pdfUrl);
+  const abs =
+    origin && proxy.startsWith("/")
+      ? `${origin}${proxy}`
+      : proxy;
+  // Prefer native browser PDF via same-origin proxy (no third-party frame)
+  return abs;
 }
