@@ -14,6 +14,8 @@ import {
   unreadCount,
   type AppNotification,
 } from "@/lib/notifications";
+import { displayName } from "@/lib/display-name";
+import { getTabSwitchCount } from "@/components/FocusLock";
 
 export default function AppTopBar() {
   const { userId } = useAuth();
@@ -24,7 +26,10 @@ export default function AppTopBar() {
   const [notes, setNotes] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [switches, setSwitches] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const name = displayName(user);
 
   useEffect(() => {
     const sync = () => {
@@ -35,6 +40,7 @@ export default function AppTopBar() {
       setRole(getRole(userId));
       setNotes(loadNotifications(userId));
       setUnread(unreadCount(userId));
+      setSwitches(getTabSwitchCount(userId));
     };
     sync();
     window.addEventListener(ROLE_EVENT, sync);
@@ -90,14 +96,21 @@ export default function AppTopBar() {
           </button>
           {open && (
             <div className="absolute right-0 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-              <div className="border-b border-slate-100 px-3 py-2 text-xs font-bold text-slate-800">
-                Notifications
+              <div className="border-b border-slate-100 px-3 py-2">
+                <div className="text-xs font-bold text-slate-800">
+                  Notifications
+                </div>
+                {!isTeacher && (
+                  <div className="mt-0.5 text-[10px] text-slate-500">
+                    Tab switches this session:{" "}
+                    <strong className="text-amber-700">{switches}</strong>
+                  </div>
+                )}
               </div>
               <ul className="max-h-72 overflow-y-auto">
                 {notes.length === 0 && (
                   <li className="px-3 py-6 text-center text-xs text-slate-400">
-                    No notifications yet. Common Room posts & support tickets
-                    appear here.
+                    Tab-switch parent alerts, Common Room & support appear here.
                   </li>
                 )}
                 {notes.map((n) => (
@@ -152,9 +165,9 @@ export default function AppTopBar() {
 
         <div className="flex items-center gap-2">
           {user && (
-            <div className="hidden text-right leading-tight xl:block">
-              <div className="text-xs font-bold text-slate-800">
-                {user.fullName || "User"}
+            <div className="hidden text-right leading-tight sm:block">
+              <div className="max-w-[140px] truncate text-xs font-bold text-slate-800">
+                {name}
               </div>
               <div className="text-[10px] text-slate-400">
                 {isTeacher ? "Teacher" : "Student"}

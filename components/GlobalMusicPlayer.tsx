@@ -30,7 +30,7 @@ export function getGlobalMusic(): GlobalMusicState | null {
   }
 }
 
-/** Mini player stays mounted across student routes so music keeps playing. */
+/** Stays mounted across Home / Join Class / Teacher / every section. */
 export default function GlobalMusicPlayer() {
   const path = usePathname() || "";
   const [music, setMusic] = useState<GlobalMusicState | null>(null);
@@ -46,20 +46,22 @@ export default function GlobalMusicPlayer() {
     };
   }, []);
 
-  // hide on marketing / login
-  if (
+  const hideChrome =
     path === "/" ||
     path.startsWith("/login") ||
-    path.startsWith("/sign-") ||
-    path.startsWith("/teacher")
-  ) {
-    return null;
-  }
+    path.startsWith("/sign-in") ||
+    path.startsWith("/sign-up");
 
-  if (!music?.playing || !music.id) return null;
+  if (hideChrome) return null;
+  if (!music?.id) return null;
+
+  const playing = Boolean(music.playing);
 
   return (
-    <div className="fixed bottom-5 left-[88px] z-40 w-[min(calc(100vw-7rem),340px)] overflow-hidden rounded-2xl border border-violet-200 bg-slate-950 shadow-2xl lg:left-[280px]">
+    <div
+      className="fixed bottom-4 left-[76px] z-[80] w-[min(calc(100vw-6rem),360px)] overflow-hidden rounded-2xl border border-violet-300 bg-slate-950 shadow-2xl lg:left-[272px]"
+      data-global-music="1"
+    >
       <div className="flex items-center gap-2 px-3 py-2">
         <Music2 className="h-4 w-4 shrink-0 text-violet-300" />
         <div className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white">
@@ -68,17 +70,12 @@ export default function GlobalMusicPlayer() {
         <button
           type="button"
           className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-          title={music.playing ? "Pause" : "Play"}
-          onClick={() => {
-            const next = {
-              ...music,
-              playing: !music.playing,
-            };
-            setGlobalMusic(next.playing ? next : { ...next, playing: false });
-            if (!next.playing) setGlobalMusic(null);
-          }}
+          title={playing ? "Pause" : "Play"}
+          onClick={() =>
+            setGlobalMusic({ ...music, playing: !playing })
+          }
         >
-          {music.playing ? (
+          {playing ? (
             <Pause className="h-3.5 w-3.5" />
           ) : (
             <Play className="h-3.5 w-3.5" />
@@ -93,16 +90,19 @@ export default function GlobalMusicPlayer() {
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      {/* Keep iframe mounted off-layout height so audio continues */}
-      <iframe
-        key={music.id}
-        title={music.title}
-        src={`${ytEmbed(music.id)}&autoplay=1`}
-        className="h-0 w-full border-0 opacity-0"
-        allow="autoplay; encrypted-media"
-      />
-      <div className="bg-slate-900 px-3 py-1 text-[10px] text-slate-500">
-        Playing across pages · stop anytime
+      {playing && (
+        <iframe
+          key={`play-${music.id}`}
+          title={music.title}
+          src={ytEmbed(music.id, { autoplay: true })}
+          className="h-[72px] w-full border-0 bg-black"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      )}
+      <div className="bg-slate-900 px-3 py-1 text-[10px] text-violet-300/80">
+        Keeps playing on Home · Join Class · every section
       </div>
     </div>
   );

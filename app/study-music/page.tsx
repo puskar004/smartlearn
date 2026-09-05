@@ -32,7 +32,7 @@ export default function StudyMusicPage() {
 
   const playlist = MOOD_PLAYLISTS[moodId];
   const clip = playlist.clips[clipIdx % playlist.clips.length];
-  const embed = useMemo(() => ytEmbed(clip.id), [clip.id]);
+  const embed = useMemo(() => ytEmbed(clip.id, { autoplay: false }), [clip.id]);
 
   const stopTone = () => {
     try {
@@ -202,6 +202,7 @@ export default function StudyMusicPage() {
           className="aspect-video w-full bg-black"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
         />
       </div>
     </div>

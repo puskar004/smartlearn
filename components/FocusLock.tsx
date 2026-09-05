@@ -9,9 +9,12 @@ import {
 } from "@/lib/whatsapp";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
+import { pushNotification } from "@/lib/notifications";
+import { displayName } from "@/lib/display-name";
 
 const PARENT_KEY = "sl_parent_phone";
 const FOCUS_KEY = "sl_focus_lock_enabled";
+const SWITCH_COUNT_KEY = "sl_tab_switch_count_";
 const COOLDOWN_MS = 20_000;
 
 function parentKey(userId?: string | null) {
@@ -40,7 +43,11 @@ export function setFocusLockEnabled(on: boolean) {
   localStorage.setItem(FOCUS_KEY, on ? "1" : "0");
 }
 
-/** Suppress tab-switch alerts while in-app PDF reader is open */
+export function getTabSwitchCount(userId: string) {
+  if (typeof window === "undefined") return 0;
+  return Number(localStorage.getItem(SWITCH_COUNT_KEY + userId) || 0);
+}
+
 export function setPdfReading(on: boolean) {
   if (typeof document === "undefined") return;
   if (on) document.documentElement.dataset.pdfOpen = "1";
@@ -51,11 +58,6 @@ function isPdfReading() {
   return document.documentElement.dataset.pdfOpen === "1";
 }
 
-/**
- * Student-only: when the study tab is hidden (real tab switch/minimize),
- * show alert + optional parent WhatsApp.
- * Does NOT fire for in-app PDF modal.
- */
 export default function FocusLock() {
   const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
@@ -87,22 +89,27 @@ export default function FocusLock() {
     if (now - lastAlert.current < COOLDOWN_MS) return;
     lastAlert.current = now;
 
-    const name =
-      user?.fullName ||
-      user?.primaryEmailAddress?.emailAddress ||
-      "Student";
-    const msg = buildParentTabSwitchMessage(name);
+    const count = getTabSwitchCount(userId) + 1;
+    localStorage.setItem(SWITCH_COUNT_KEY + userId, String(count));
+
+    const name = displayName(user);
+    const msg = buildParentTabSwitchMessage(name, count);
     const phone = getParentPhone(userId);
+    const sent = phone ? openParentWhatsApp(phone, msg) : false;
 
     setBanner(
-      phone
-        ? "Tab switch detected — WhatsApp alert opened for parent."
-        : "Tab switch detected — set parent WhatsApp number in Profile to auto-alert."
+      sent
+        ? `Tab switch #${count} — parent WhatsApp opened with alert message.`
+        : `Tab switch #${count} — set parent WhatsApp in Profile to auto-alert.`
     );
 
-    if (phone) {
-      openParentWhatsApp(phone, msg);
-    }
+    pushNotification(userId, {
+      title: `Tab switch #${count}`,
+      body: sent
+        ? `Parent alert sent. Message: “${msg.slice(0, 120)}…”`
+        : `No parent number set. Would have sent: “${msg.slice(0, 100)}…”`,
+      href: "/parent",
+    });
 
     try {
       const Ctx =

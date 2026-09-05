@@ -53,7 +53,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <FullscreenGate />
       {!isTeacher && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
-      {!isTeacher && <GlobalMusicPlayer />}
+      {/* Always mount music player so it survives Home / Join Class / every section */}
+      <GlobalMusicPlayer />
 
       {marketing ? (
         <>

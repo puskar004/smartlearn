@@ -7,7 +7,10 @@ export type RoomMsg = {
   author: string;
   authorId: string;
   text: string;
-  imageDataUrl?: string; // optional small image (data URL)
+  imageDataUrl?: string;
+  replyToId?: string;
+  replyToAuthor?: string;
+  replyToText?: string;
   at: number;
 };
 

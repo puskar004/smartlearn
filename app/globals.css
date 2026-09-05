@@ -61,6 +61,12 @@ main .sl-row {
     pointer;
 }
 
+/* File / photo controls must stay clickable with system pointer */
+main label:has(input[type="file"]),
+main input[type="file"] {
+  cursor: pointer !important;
+}
+
 .sl-card {
   transition:
     transform 0.2s ease,

@@ -6,9 +6,19 @@ export type MediaClip = {
   channel: string;
 };
 
-export function ytEmbed(id: string) {
-  // playsinline + enablejsapi helps mobile; origin not required for basic play
-  return `https://www.youtube.com/embed/${id}?rel=0&modestbranding=1&playsinline=1`;
+/** Reliable in-app embed URL (nocookie + related + jsapi). */
+export function ytEmbed(id: string, opts?: { autoplay?: boolean }) {
+  const clean = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 20);
+  const params = new URLSearchParams({
+    rel: "1",
+    modestbranding: "1",
+    playsinline: "1",
+    enablejsapi: "1",
+    // related from same channel when possible still shows related rails in player
+    iv_load_policy: "3",
+  });
+  if (opts?.autoplay) params.set("autoplay", "1");
+  return `https://www.youtube-nocookie.com/embed/${clean}?${params.toString()}`;
 }
 
 export const MOOD_PLAYLISTS: Record<
@@ -19,65 +29,138 @@ export const MOOD_PLAYLISTS: Record<
     label: "Deep Focus",
     blurb: "Lofi / concentration beats",
     clips: [
-      { id: "jfKfPfyJRdk", title: "Lofi hip hop radio — beats to study", channel: "Lofi Girl" },
-      { id: "5qap5aO4i9A", title: "Lofi hip hop radio — relax/study", channel: "Lofi Girl" },
-      { id: "DWcJFNfaw9c", title: "Coffee shop lofi study beats", channel: "Study" },
+      {
+        id: "jfKfPfyJRdk",
+        title: "Lofi hip hop radio — beats to study",
+        channel: "Lofi Girl",
+      },
+      {
+        id: "lTRiuFIWV54",
+        title: "1 hour lofi study beats",
+        channel: "Study",
+      },
+      {
+        id: "7NOSDKbWMlQ",
+        title: "Calm piano for focus",
+        channel: "Focus",
+      },
     ],
   },
   calm: {
     label: "Calm Revise",
     blurb: "Soft ambient for theory",
     clips: [
-      { id: "lFcSrYw8Gjc", title: "Beautiful piano for studying", channel: "Calm" },
-      { id: "1ZYbU82GVz4", title: "Relaxing music for deep work", channel: "Ambient" },
-      { id: "n61ULEU7CO0", title: "Peaceful study music", channel: "Study" },
+      {
+        id: "7NOSDKbWMlQ",
+        title: "Beautiful piano for studying",
+        channel: "Calm",
+      },
+      {
+        id: "1ZYbU82GVz4",
+        title: "Relaxing music for deep work",
+        channel: "Ambient",
+      },
+      {
+        id: "jfKfPfyJRdk",
+        title: "Soft lofi revise",
+        channel: "Lofi Girl",
+      },
     ],
   },
   rain: {
     label: "Rainy Desk",
     blurb: "Rain ambience",
     clips: [
-      { id: "mPZkdNFkNps", title: "Rain sounds for sleep/study", channel: "Nature" },
-      { id: "q76bMs-NwRk", title: "Heavy rain sounds", channel: "Rain" },
-      { id: "jfKfPfyJRdk", title: "Lofi + chill (backup)", channel: "Lofi Girl" },
+      {
+        id: "mPZkdNFkNps",
+        title: "Rain sounds for sleep/study",
+        channel: "Nature",
+      },
+      {
+        id: "q76bMs-NwRk",
+        title: "Heavy rain sounds",
+        channel: "Rain",
+      },
+      {
+        id: "jfKfPfyJRdk",
+        title: "Lofi + chill (backup)",
+        channel: "Lofi Girl",
+      },
     ],
   },
   energy: {
     label: "Energy Boost",
     blurb: "Upbeat instrumental",
     clips: [
-      { id: "4xDzrJKXOOY", title: "Synthwave radio", channel: "Energy" },
-      { id: "DWcJFNfaw9c", title: "Upbeat study beats", channel: "Focus" },
-      { id: "5qap5aO4i9A", title: "Lofi energy mix", channel: "Lofi Girl" },
+      {
+        id: "4xDzrJKXOOY",
+        title: "Synthwave radio",
+        channel: "Energy",
+      },
+      {
+        id: "lTRiuFIWV54",
+        title: "Upbeat study beats",
+        channel: "Focus",
+      },
+      {
+        id: "jfKfPfyJRdk",
+        title: "Lofi energy mix",
+        channel: "Lofi Girl",
+      },
     ],
   },
   soft: {
     label: "Soft Heart",
     blurb: "Gentle acoustic focus",
     clips: [
-      { id: "lFcSrYw8Gjc", title: "Soft piano study", channel: "Soft" },
-      { id: "n61ULEU7CO0", title: "Gentle keys", channel: "Calm" },
-      { id: "1ZYbU82GVz4", title: "Soft ambient", channel: "Ambient" },
+      {
+        id: "7NOSDKbWMlQ",
+        title: "Soft piano study",
+        channel: "Soft",
+      },
+      {
+        id: "1ZYbU82GVz4",
+        title: "Soft ambient",
+        channel: "Ambient",
+      },
+      {
+        id: "lTRiuFIWV54",
+        title: "Gentle keys",
+        channel: "Calm",
+      },
     ],
   },
 };
 
+/** Curated CBSE/NCERT-friendly lecture embeds (real video IDs). */
 export const EDU_CLIPS: (MediaClip & { tags: string })[] = [
   {
     id: "w4pXtm5JPhQ",
-    title: "Introduction to electricity (basics)",
+    title: "Electricity basics — current & resistance",
     channel: "Education",
-    tags: "class 10 electricity ohm physics current",
+    tags: "class 10 electricity ohm physics current resistance",
+  },
+  {
+    id: "1xSQlwWGT8M",
+    title: "Light — reflection and refraction",
+    channel: "Education",
+    tags: "class 10 light reflection refraction optics",
+  },
+  {
+    id: "8m6hHMuKOVY",
+    title: "Quadratic equations explained",
+    channel: "Education",
+    tags: "class 10 maths quadratic equations algebra",
   },
   {
     id: "bVqgWpxvA_4",
-    title: "Photosynthesis explained",
+    title: "Photosynthesis / life processes",
     channel: "Education",
-    tags: "class 10 life processes biology photosynthesis",
+    tags: "class 10 life processes biology photosynthesis nutrition",
   },
   {
     id: "fAtUN3nO9dU",
-    title: "Current electricity concepts",
+    title: "Current electricity (Class 12)",
     channel: "Education",
     tags: "class 12 physics current kirchhoff electricity",
   },
@@ -94,24 +177,23 @@ export const EDU_CLIPS: (MediaClip & { tags: string })[] = [
     tags: "class 12 maths matrices determinants",
   },
   {
-    id: "8m6hHMuKOVY",
-    title: "Quadratic equations",
-    channel: "Education",
-    tags: "class 10 maths quadratic equations",
-  },
-  {
-    id: "1xSQlwWGT8M",
-    title: "Light reflection basics",
-    channel: "Education",
-    tags: "class 10 light reflection refraction",
-  },
-  {
     id: "8V0F1D_5iYs",
     title: "Electrochemistry basics",
     channel: "Education",
     tags: "class 12 chemistry electrochemistry nernst",
   },
-  // Reliable always-play backups (lofi still educational focus context)
+  {
+    id: "Ok8rMT2KcyA",
+    title: "Human eye and colourful world",
+    channel: "Education",
+    tags: "class 10 human eye light physics",
+  },
+  {
+    id: "ilw-qmqZ3Q4",
+    title: "Carbon and its compounds",
+    channel: "Education",
+    tags: "class 10 chemistry carbon compounds organic",
+  },
   {
     id: "jfKfPfyJRdk",
     title: "Focus music while you revise NCERT",
@@ -119,7 +201,7 @@ export const EDU_CLIPS: (MediaClip & { tags: string })[] = [
     tags: "study focus revision background",
   },
   {
-    id: "5qap5aO4i9A",
+    id: "lTRiuFIWV54",
     title: "Quiet study session audio",
     channel: "Study focus",
     tags: "study quiet concentration",
@@ -140,7 +222,9 @@ export function matchEduClips(query: string): (MediaClip & { tags: string })[] {
     .sort((a, b) => b.s - a.s)
     .map((x) => x.c);
 
-  // Always return playable clips
-  if (scored.length >= 3) return scored;
-  return [...scored, ...EDU_CLIPS.filter((c) => !scored.includes(c))].slice(0, 6);
+  if (scored.length >= 4) return scored;
+  return [...scored, ...EDU_CLIPS.filter((c) => !scored.includes(c))].slice(
+    0,
+    8
+  );
 }

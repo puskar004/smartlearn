@@ -1,8 +1,12 @@
-export function buildParentTabSwitchMessage(studentName: string) {
+export function buildParentTabSwitchMessage(
+  studentName: string,
+  switchCount = 1
+) {
   return (
     `Hello Parent,\n\n` +
     `This is an automated focus alert from SmartLearn.\n\n` +
-    `Your child (${studentName || "Student"}) left the SmartLearn study tab or switched away from the focused study session.\n\n` +
+    `Your child (${studentName || "Student"}) left the SmartLearn study tab ` +
+    `(tab switch count today/session: ${switchCount}).\n\n` +
     `Please gently check in and encourage them to return to uninterrupted study.\n\n` +
     `— SmartLearn Focus Guardian`
   );

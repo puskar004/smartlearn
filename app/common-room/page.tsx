@@ -1,10 +1,19 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useUser } from "@clerk/nextjs";
-import { Clock, ImagePlus, Loader2, MessageSquare, Users, X } from "lucide-react";
+import { useAuth, useUser } from "@clerk/nextjs";
+import {
+  Clock,
+  ImagePlus,
+  Loader2,
+  MessageSquare,
+  Reply,
+  Users,
+  X,
+  ZoomIn,
+} from "lucide-react";
 import { pushNotification } from "@/lib/notifications";
-import { useAuth } from "@clerk/nextjs";
+import { displayName } from "@/lib/display-name";
 
 type Msg = {
   id: string;
@@ -12,12 +21,55 @@ type Msg = {
   authorId?: string;
   text: string;
   imageDataUrl?: string;
+  replyToId?: string;
+  replyToAuthor?: string;
+  replyToText?: string;
   at: number;
 };
 
-const COOLDOWN_SEC = 30;
+const COOLDOWN_SEC = 20;
 const MAX_CHARS = 200;
 const LOCAL_KEY = "sl_common_room_cache_v2";
+
+/** Compress image so Photo button always works under size limits */
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 900;
+        let w = img.width;
+        let h = img.height;
+        if (w > max || h > max) {
+          const r = Math.min(max / w, max / h);
+          w = Math.round(w * r);
+          h = Math.round(h * r);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("canvas"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        let q = 0.72;
+        let data = canvas.toDataURL("image/jpeg", q);
+        while (data.length > 280_000 && q > 0.35) {
+          q -= 0.08;
+          data = canvas.toDataURL("image/jpeg", q);
+        }
+        resolve(data);
+      };
+      img.onerror = () => reject(new Error("image"));
+      img.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function CommonRoomPage() {
   const { user, isSignedIn } = useUser();
@@ -29,37 +81,46 @@ export default function CommonRoomPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [replyTo, setReplyTo] = useState<Msg | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const seenIds = useRef<Set<string>>(new Set());
+  const textRef = useRef<HTMLTextAreaElement>(null);
 
-  const merge = useCallback((incoming: Msg[]) => {
-    const map = new Map<string, Msg>();
-    try {
-      const cached = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]") as Msg[];
-      for (const m of cached) map.set(m.id, m);
-    } catch {
-      // ignore
-    }
-    for (const m of incoming) map.set(m.id, m);
-    const list = Array.from(map.values()).sort((a, b) => b.at - a.at).slice(0, 300);
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(list));
-    setMsgs(list);
+  const merge = useCallback(
+    (incoming: Msg[]) => {
+      const map = new Map<string, Msg>();
+      try {
+        const cached = JSON.parse(
+          localStorage.getItem(LOCAL_KEY) || "[]"
+        ) as Msg[];
+        for (const m of cached) map.set(m.id, m);
+      } catch {
+        // ignore
+      }
+      for (const m of incoming) map.set(m.id, m);
+      const list = Array.from(map.values())
+        .sort((a, b) => b.at - a.at)
+        .slice(0, 300);
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(list));
+      setMsgs(list);
 
-    // notify about others' new posts
-    if (userId) {
-      for (const m of incoming) {
-        if (seenIds.current.has(m.id)) continue;
-        seenIds.current.add(m.id);
-        if (m.authorId && m.authorId !== userId) {
-          pushNotification(userId, {
-            title: "Common Room",
-            body: `${m.author}: ${m.text.slice(0, 80)}`,
-            href: "/common-room",
-          });
+      if (userId) {
+        for (const m of incoming) {
+          if (seenIds.current.has(m.id)) continue;
+          seenIds.current.add(m.id);
+          if (m.authorId && m.authorId !== userId) {
+            pushNotification(userId, {
+              title: m.replyToId ? "Common Room reply" : "Common Room",
+              body: `${m.author}: ${m.text.slice(0, 80)}`,
+              href: "/common-room",
+            });
+          }
         }
       }
-    }
-  }, [userId]);
+    },
+    [userId]
+  );
 
   const load = useCallback(async () => {
     try {
@@ -67,18 +128,15 @@ export default function CommonRoomPage() {
       const data = await res.json();
       if (data.messages) merge(data.messages);
       else {
-        // fallback cache
         try {
-          const cached = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]");
-          setMsgs(cached);
+          setMsgs(JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]"));
         } catch {
           // ignore
         }
       }
     } catch {
       try {
-        const cached = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]");
-        setMsgs(cached);
+        setMsgs(JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]"));
       } catch {
         // ignore
       }
@@ -88,9 +146,10 @@ export default function CommonRoomPage() {
   }, [merge]);
 
   useEffect(() => {
-    // seed seen set so we don't notify on first load
     try {
-      const cached = JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]") as Msg[];
+      const cached = JSON.parse(
+        localStorage.getItem(LOCAL_KEY) || "[]"
+      ) as Msg[];
       cached.forEach((m) => seenIds.current.add(m.id));
       if (cached.length) setMsgs(cached);
     } catch {
@@ -107,22 +166,33 @@ export default function CommonRoomPage() {
     return () => clearTimeout(t);
   }, [left]);
 
-  const onFile = (file: File | null) => {
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
+
+  const onFile = async (file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setError("Only images allowed.");
       return;
     }
-    if (file.size > 280_000) {
-      setError("Image too large (max ~280KB). Compress and retry.");
-      return;
+    setError(null);
+    try {
+      const data = await compressImage(file);
+      setImage(data);
+    } catch {
+      setError("Could not read photo. Try another image.");
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImage(String(reader.result || ""));
-      setError(null);
-    };
-    reader.readAsDataURL(file);
+  };
+
+  const startReply = (m: Msg) => {
+    setReplyTo(m);
+    textRef.current?.focus();
   };
 
   const post = async (e: FormEvent) => {
@@ -151,7 +221,13 @@ export default function CommonRoomPage() {
       const res = await fetch("/api/common-room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: clean, imageDataUrl: image || undefined }),
+        body: JSON.stringify({
+          text: clean,
+          imageDataUrl: image || undefined,
+          replyToId: replyTo?.id,
+          replyToAuthor: replyTo?.author,
+          replyToText: replyTo?.text?.slice(0, 80),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -162,11 +238,14 @@ export default function CommonRoomPage() {
       else if (data.message) merge([data.message, ...msgs]);
       setText("");
       setImage(null);
+      setReplyTo(null);
       setLeft(COOLDOWN_SEC);
       if (userId) {
         pushNotification(userId, {
-          title: "Posted to Common Room",
-          body: "Your question is visible to all students.",
+          title: replyTo ? "Reply posted" : "Posted to Common Room",
+          body: replyTo
+            ? `Replied to ${replyTo.author}`
+            : "Your question is visible to all students.",
           href: "/common-room",
         });
       }
@@ -186,13 +265,35 @@ export default function CommonRoomPage() {
         Shared doubt wall
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Posts stay saved for everyone. You can also attach a small photo. Max{" "}
-        {MAX_CHARS} characters.
+        Photos open full-screen on tap · Reply on any post · Max {MAX_CHARS}{" "}
+        chars. Signed in as{" "}
+        <strong className="text-slate-700">{displayName(user)}</strong>
       </p>
 
       <form onSubmit={(e) => void post(e)} className="mt-6 space-y-3">
+        {replyTo && (
+          <div className="flex items-start justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs">
+            <div>
+              <div className="font-bold text-sky-800">
+                Replying to {replyTo.author}
+              </div>
+              <div className="text-sky-700/80 line-clamp-2">
+                {replyTo.text}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              className="rounded-lg p-1 text-sky-700 hover:bg-sky-100"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="relative">
           <textarea
+            ref={textRef}
             value={text}
             onChange={(e) => setText(e.target.value.slice(0, MAX_CHARS))}
             rows={3}
@@ -215,7 +316,8 @@ export default function CommonRoomPage() {
             <img
               src={image}
               alt="attach"
-              className="h-24 rounded-xl border border-slate-200 object-cover"
+              onClick={() => setLightbox(image)}
+              className="h-24 cursor-zoom-in rounded-xl border border-slate-200 object-cover"
             />
             <button
               type="button"
@@ -233,20 +335,20 @@ export default function CommonRoomPage() {
               <Clock className="h-3.5 w-3.5" />
               {left > 0 ? `Next post in ${left}s` : "Ready"}
             </div>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-            >
+            <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
               <ImagePlus className="h-3.5 w-3.5" /> Photo
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => onFile(e.target.files?.[0] || null)}
-            />
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                onChange={(e) => {
+                  void onFile(e.target.files?.[0] || null);
+                  e.target.value = "";
+                }}
+              />
+            </label>
           </div>
           <button
             type="submit"
@@ -254,7 +356,7 @@ export default function CommonRoomPage() {
             className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-bold text-white hover:bg-sky-500 disabled:opacity-50"
           >
             {posting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Post to everyone
+            {replyTo ? "Post reply" : "Post to everyone"}
           </button>
         </div>
         {error && <p className="text-xs text-rose-600">{error}</p>}
@@ -274,6 +376,13 @@ export default function CommonRoomPage() {
               key={m.id}
               className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
             >
+              {m.replyToAuthor && (
+                <div className="mb-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
+                  <Reply className="mr-1 inline h-3 w-3" />
+                  Reply to <strong>{m.replyToAuthor}</strong>
+                  {m.replyToText ? `: ${m.replyToText}` : ""}
+                </div>
+              )}
               <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
                 <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
                   <MessageSquare className="h-3 w-3 text-sky-500" />
@@ -287,16 +396,58 @@ export default function CommonRoomPage() {
                 </p>
               )}
               {m.imageDataUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={m.imageDataUrl}
-                  alt="shared"
-                  className="mt-3 max-h-64 rounded-xl border border-slate-100 object-contain"
-                />
+                <button
+                  type="button"
+                  onClick={() => setLightbox(m.imageDataUrl!)}
+                  className="group relative mt-3 block max-w-full overflow-hidden rounded-xl border border-slate-100"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={m.imageDataUrl}
+                    alt="shared"
+                    className="max-h-64 w-auto object-contain transition group-hover:opacity-95"
+                  />
+                  <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
+                    <ZoomIn className="h-3 w-3" /> Enlarge
+                  </span>
+                </button>
               )}
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => startReply(m)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-700 hover:bg-sky-50"
+                >
+                  <Reply className="h-3 w-3" /> Reply
+                </button>
+              </div>
             </li>
           ))}
         </ul>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setLightbox(null)}
+          role="dialog"
+          aria-modal
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            onClick={() => setLightbox(null)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox}
+            alt="enlarged"
+            className="max-h-[90vh] max-w-[95vw] rounded-xl object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       )}
     </div>
   );
