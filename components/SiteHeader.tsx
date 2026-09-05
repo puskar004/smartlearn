@@ -133,6 +133,12 @@ export default function SiteHeader() {
 
         <div className="flex items-center gap-2 sm:gap-3">
           <Link
+            href="/login"
+            className="hidden items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 sm:inline-flex"
+          >
+            Student / Teacher login
+          </Link>
+          <Link
             href="/study-music"
             className="hidden items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 sm:inline-flex"
           >

@@ -6,6 +6,8 @@ import { useAuth } from "@clerk/nextjs";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
 
+const PUBLIC = ["/", "/login", "/sign-in", "/sign-up"];
+
 const STUDENT_ONLY = [
   "/dashboard",
   "/ncert",
@@ -23,10 +25,8 @@ const STUDENT_ONLY = [
   "/join-class",
 ];
 
-const TEACHER_ONLY = ["/teacher"];
-
 export default function RoleGate({ children }: { children: React.ReactNode }) {
-  const { userId, isSignedIn } = useAuth();
+  const { userId, isSignedIn, isLoaded } = useAuth();
   const path = usePathname() || "/";
   const router = useRouter();
   const [role, setRole] = useState<"student" | "teacher">("student");
@@ -48,7 +48,20 @@ export default function RoleGate({ children }: { children: React.ReactNode }) {
   }, [userId]);
 
   useEffect(() => {
-    if (!ready || !isSignedIn || !userId) return;
+    if (!isLoaded || !ready) return;
+
+    const isPublic =
+      PUBLIC.some((p) => path === p || path.startsWith(p + "/")) ||
+      path.startsWith("/sign-in") ||
+      path.startsWith("/sign-up");
+
+    // Must pick role + login before app
+    if (!isSignedIn && !isPublic) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!isSignedIn || !userId) return;
 
     const isTeacher = role === "teacher";
     const onTeacherRoute = path.startsWith("/teacher");
@@ -56,14 +69,14 @@ export default function RoleGate({ children }: { children: React.ReactNode }) {
       (p) => path === p || path.startsWith(p + "/")
     );
 
-    if (isTeacher && onStudentRoute) {
+    if (isTeacher && (onStudentRoute || path === "/")) {
       router.replace("/teacher");
       return;
     }
     if (!isTeacher && onTeacherRoute) {
       router.replace("/dashboard");
     }
-  }, [ready, role, path, isSignedIn, userId, router]);
+  }, [ready, role, path, isSignedIn, isLoaded, userId, router]);
 
   return <>{children}</>;
 }

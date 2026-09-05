@@ -55,16 +55,25 @@ export default function RootLayout({
           appearance={smartLearnAppearance}
           localization={{
             formButtonPrimary: "Continue with SmartLearn",
+            formFieldInputPlaceholder__emailAddress: "you@email.com",
             signIn: {
               start: {
                 title: "Sign in to SmartLearn",
-                subtitle: "Welcome back — continue your focused study",
+                subtitle: "We'll email a SmartLearn OTP to verify it's you",
+              },
+              emailCode: {
+                title: "Check your email",
+                subtitle: "Enter the SmartLearn verification code we sent you",
               },
             },
             signUp: {
               start: {
                 title: "Join SmartLearn",
-                subtitle: "Create your free student account",
+                subtitle: "Create your account — OTP comes from SmartLearn",
+              },
+              emailCode: {
+                title: "Verify with SmartLearn OTP",
+                subtitle: "Enter the code from your SmartLearn email",
               },
             },
           } as never}

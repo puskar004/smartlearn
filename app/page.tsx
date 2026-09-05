@@ -81,11 +81,11 @@ export default function HomePage() {
               </p>
             </div>
             <Link
-              href="/parent"
+              href="/login"
               className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
             >
               <MessageCircle className="h-4 w-4" />
-              Send WhatsApp Summary Now
+              Login as Student or Teacher
             </Link>
           </div>
 

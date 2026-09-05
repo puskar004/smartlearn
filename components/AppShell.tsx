@@ -15,11 +15,12 @@ import RoleGate from "@/components/RoleGate";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
 
-const MARKETING = new Set(["/", "/sign-in", "/sign-up"]);
+const MARKETING = new Set(["/", "/login", "/sign-in", "/sign-up"]);
 
 function isMarketing(path: string) {
   if (MARKETING.has(path)) return true;
   if (path.startsWith("/sign-in") || path.startsWith("/sign-up")) return true;
+  if (path.startsWith("/login")) return true;
   return false;
 }
 
