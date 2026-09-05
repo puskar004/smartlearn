@@ -3,12 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth, useUser } from "@clerk/nextjs";
-import { CheckCircle2, Link2, School } from "lucide-react";
+import { CheckCircle2, Link2, Loader2, School } from "lucide-react";
 import {
-  getClassroom,
+  apiJoinClassroom,
   getJoinedClass,
   getRole,
-  joinClassroom,
   setJoinedClass,
 } from "@/lib/teacher-store";
 import {
@@ -24,6 +23,7 @@ export default function JoinClassPage() {
   const [joined, setJoined] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [className, setClassName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -31,8 +31,13 @@ export default function JoinClassPage() {
     const j = getJoinedClass(userId);
     setJoined(j);
     if (j) {
-      const c = getClassroom(j);
-      setClassName(c?.name || null);
+      void fetch(`/api/classroom?action=joined`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.classroom?.name) setClassName(d.classroom.name);
+          if (d.joined) setJoined(d.joined);
+        })
+        .catch(() => null);
     }
   }, [userId]);
 
@@ -58,47 +63,55 @@ export default function JoinClassPage() {
     );
   }
 
-  const join = () => {
+  const join = async () => {
     const trimmed = code.trim().toUpperCase();
     if (trimmed.length < 4) {
-      setMsg("Enter the full private code from your teacher.");
+      setMsg("Enter the full private code from your teacher (6 characters).");
       return;
     }
-    const p = loadProgress(userId);
-    const res = joinClassroom(trimmed, {
-      studentId: userId,
-      name: user?.fullName || user?.firstName || "Student",
-      email: user?.primaryEmailAddress?.emailAddress,
-      grade: p.grade,
-      xp: p.xp,
-      streak: p.streak,
-      accuracy: accuracy(p),
-      mistakes: p.mistakes.length,
-      weakSubjects: weaknessMap(p).map(([n]) => n),
-      chaptersOpened: p.chaptersOpened.length,
-      lastActive: Date.now(),
-      recentMistakes: p.mistakes.slice(0, 8).map((m) => ({
-        subjectName: m.subjectName,
-        chapterTitle: m.chapterTitle,
-        prompt: m.prompt,
-        at: m.at,
-      })),
-    });
-    if (!res.ok) {
-      setMsg(res.error || "Invalid code");
-      return;
-    }
-    setJoinedClass(userId, trimmed);
-    setJoined(trimmed);
-    setClassName(res.classroom?.name || "Class");
+    setLoading(true);
     setMsg(null);
+    try {
+      const p = loadProgress(userId);
+      const res = await apiJoinClassroom(trimmed, {
+        studentId: userId,
+        name: user?.fullName || user?.firstName || "Student",
+        email: user?.primaryEmailAddress?.emailAddress,
+        grade: p.grade,
+        xp: p.xp,
+        streak: p.streak,
+        accuracy: accuracy(p),
+        mistakes: p.mistakes.length,
+        weakSubjects: weaknessMap(p).map(([n]) => n),
+        chaptersOpened: p.chaptersOpened.length,
+        lastActive: Date.now(),
+        recentMistakes: p.mistakes.slice(0, 8).map((m) => ({
+          subjectName: m.subjectName,
+          chapterTitle: m.chapterTitle,
+          prompt: m.prompt,
+          at: m.at,
+        })),
+      });
+      if (!res.ok) {
+        setMsg(res.error || "Invalid code");
+        return;
+      }
+      setJoinedClass(userId, trimmed);
+      setJoined(trimmed);
+      setClassName(res.classroom?.name || "Class");
+      setMsg(null);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Join failed. Try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const leave = () => {
     setJoinedClass(userId, null);
     setJoined(null);
     setClassName(null);
-    setMsg("Left classroom. Teacher no longer receives your live updates.");
+    setMsg("Left classroom.");
   };
 
   return (
@@ -110,9 +123,8 @@ export default function JoinClassPage() {
         Connect with your teacher
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Your teacher gives you a <strong>private 6-letter code</strong>. After
-        you join, they can see your study activity, weak subjects, and mistakes —
-        only that teacher, only that code.
+        Enter the <strong>private code</strong> your teacher shared. Works from
+        any phone/laptop — not only the same device.
       </p>
 
       {joined ? (
@@ -125,7 +137,7 @@ export default function JoinClassPage() {
             {joined}
           </p>
           <p className="mt-2 text-xs text-emerald-700">
-            Your progress syncs automatically while you study on this device.
+            Your progress syncs to your teacher automatically.
           </p>
           <button
             type="button"
@@ -143,16 +155,23 @@ export default function JoinClassPage() {
           </label>
           <input
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onChange={(e) =>
+              setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
+            }
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void join();
+            }}
             placeholder="ABC123"
             maxLength={8}
             className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-center font-mono text-2xl font-black tracking-[0.35em] text-slate-900 outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
           />
           <button
             type="button"
-            onClick={join}
-            className="mt-4 w-full rounded-xl bg-violet-600 py-3 text-sm font-bold text-white shadow-md shadow-violet-600/25 hover:bg-violet-500"
+            onClick={() => void join()}
+            disabled={loading}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 py-3 text-sm font-bold text-white shadow-md shadow-violet-600/25 hover:bg-violet-500 disabled:opacity-60"
           >
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             Join &amp; share my progress
           </button>
           {msg && (
@@ -164,10 +183,10 @@ export default function JoinClassPage() {
       )}
 
       <ol className="mt-8 list-decimal space-y-2 pl-5 text-xs text-slate-500">
-        <li>Teacher opens Teacher Hub and creates a class → gets a code.</li>
-        <li>Teacher shares only that code with their students.</li>
-        <li>You enter the code here once.</li>
-        <li>Teacher sees your XP, accuracy, weak subjects, and mistake history.</li>
+        <li>Teacher logs in as Teacher → gets a private code.</li>
+        <li>Teacher shares that code with the class.</li>
+        <li>You enter it here (any device).</li>
+        <li>Teacher sees your XP, accuracy, weak subjects, mistakes.</li>
       </ol>
     </div>
   );

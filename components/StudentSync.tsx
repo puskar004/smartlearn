@@ -2,26 +2,23 @@
 
 import { useEffect } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
-import {
-  getJoinedClass,
-  pushStudentSnapshot,
-} from "@/lib/teacher-store";
+import { apiSyncStudent, getJoinedClass } from "@/lib/teacher-store";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
 
-/** Periodically sync student progress to joined classroom for teacher view */
+/** Sync student progress to teacher classroom (server / any device). */
 export default function StudentSync() {
   const { userId, isSignedIn } = useAuth();
   const { user } = useUser();
 
   useEffect(() => {
     if (!isSignedIn || !userId) return;
-    const code = getJoinedClass(userId);
-    if (!code) return;
 
     const sync = () => {
+      const code = getJoinedClass(userId);
+      if (!code) return;
       const p = loadProgress(userId);
       const weak = weaknessMap(p).map(([n]) => n);
-      pushStudentSnapshot(code, {
+      void apiSyncStudent(code, {
         studentId: userId,
         name: user?.fullName || user?.firstName || "Student",
         email: user?.primaryEmailAddress?.emailAddress,
@@ -43,7 +40,7 @@ export default function StudentSync() {
     };
 
     sync();
-    const id = setInterval(sync, 20_000);
+    const id = setInterval(sync, 15_000);
     return () => clearInterval(id);
   }, [isSignedIn, userId, user]);
 

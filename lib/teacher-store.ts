@@ -1,77 +1,23 @@
 /**
- * Teacher classroom store (local-first).
- * Students join with a class code; snapshots sync on this device.
- * Multi-device production would swap this for a real DB.
+ * Client helpers for classroom system.
+ * Roles still cached in localStorage for instant UI; server (Clerk metadata) is source of truth for codes/joins.
  */
 
-export type StudentSnapshot = {
-  studentId: string;
-  name: string;
-  email?: string;
-  grade: string;
-  xp: number;
-  streak: number;
-  accuracy: number | null;
-  mistakes: number;
-  weakSubjects: string[];
-  chaptersOpened: number;
-  lastActive: number;
-  recentMistakes: {
-    subjectName: string;
-    chapterTitle: string;
-    prompt: string;
-    at: number;
-  }[];
-};
+import type {
+  Classroom,
+  StudentSnapshot,
+  TeacherMaterial,
+} from "@/lib/classroom-types";
 
-export type TeacherMaterial = {
-  id: string;
-  title: string;
-  type: "notes" | "video" | "link";
-  url: string;
-  subject: string;
-  createdAt: number;
-  teacherName: string;
-};
+export type {
+  Classroom,
+  StudentSnapshot,
+  TeacherMaterial,
+  LiveSession,
+} from "@/lib/classroom-types";
 
-export type LiveSession = {
-  id: string;
-  title: string;
-  subject: string;
-  startedAt: number;
-  endsAt: number;
-  active: boolean;
-  joinCode: string;
-  messages: { id: string; author: string; text: string; at: number }[];
-};
-
-export type Classroom = {
-  code: string;
-  name: string;
-  teacherId: string;
-  teacherName: string;
-  createdAt: number;
-  students: StudentSnapshot[];
-  materials: TeacherMaterial[];
-  liveSession: LiveSession | null;
-};
-
-const CLASS_KEY = "sl_classrooms_v1";
 const ROLE_KEY = "sl_role_v1_";
 const JOIN_KEY = "sl_joined_class_v1_";
-
-function loadAll(): Record<string, Classroom> {
-  if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(localStorage.getItem(CLASS_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveAll(map: Record<string, Classroom>) {
-  localStorage.setItem(CLASS_KEY, JSON.stringify(map));
-}
 
 export function getRole(userId: string): "student" | "teacher" {
   if (typeof window === "undefined") return "student";
@@ -82,11 +28,16 @@ export function getRole(userId: string): "student" | "teacher" {
 export function setRole(userId: string, role: "student" | "teacher") {
   localStorage.setItem(ROLE_KEY + userId, role);
   try {
-    // dynamic import avoid circular — call via window event from callers
     window.dispatchEvent(new Event("sl-role-changed"));
   } catch {
     // ignore
   }
+  // fire-and-forget server sync
+  void fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "setRole", role }),
+  }).catch(() => null);
 }
 
 export function getJoinedClass(userId: string): string | null {
@@ -104,139 +55,165 @@ export function setJoinedClass(userId: string, code: string | null) {
   }
 }
 
-function makeCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-
+/** @deprecated use API create */
 export function createClassroom(
-  teacherId: string,
-  teacherName: string,
-  name: string
+  _teacherId: string,
+  _teacherName: string,
+  _name: string
 ): Classroom {
-  const map = loadAll();
-  let code = makeCode();
-  while (map[code]) code = makeCode();
-  const room: Classroom = {
-    code,
-    name: name || "My Class",
-    teacherId,
-    teacherName,
-    createdAt: Date.now(),
-    students: [],
-    materials: [],
-    liveSession: null,
-  };
-  map[code] = room;
-  saveAll(map);
-  return room;
+  throw new Error("Use apiCreateClassroom()");
 }
 
-export function getClassroom(code: string): Classroom | null {
-  const map = loadAll();
-  return map[code.toUpperCase()] || null;
+export async function apiCreateClassroom(name: string): Promise<Classroom> {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "create", name }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || "Could not create class");
+  }
+  return data.classroom as Classroom;
 }
 
-export function listTeacherClasses(teacherId: string): Classroom[] {
-  return Object.values(loadAll()).filter((c) => c.teacherId === teacherId);
+export async function apiListMyClasses(): Promise<Classroom[]> {
+  const res = await fetch("/api/classroom?action=mine");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load classes");
+  return (data.classrooms || []) as Classroom[];
 }
 
-export function joinClassroom(
+export async function apiGetRoom(code: string): Promise<Classroom | null> {
+  const res = await fetch(
+    `/api/classroom?action=room&code=${encodeURIComponent(code)}`
+  );
+  const data = await res.json();
+  if (!res.ok) return null;
+  return (data.classroom as Classroom) || null;
+}
+
+export async function apiJoinClassroom(
   code: string,
   snapshot: StudentSnapshot
-): { ok: boolean; error?: string; classroom?: Classroom } {
-  const map = loadAll();
-  const c = map[code.toUpperCase()];
-  if (!c) return { ok: false, error: "Invalid class code" };
-  const others = c.students.filter((s) => s.studentId !== snapshot.studentId);
-  c.students = [snapshot, ...others].slice(0, 80);
-  map[c.code] = c;
-  saveAll(map);
-  return { ok: true, classroom: c };
+): Promise<{ ok: boolean; error?: string; classroom?: Classroom }> {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "join", code, snapshot }),
+  });
+  const data = await res.json();
+  return data;
 }
 
-export function pushStudentSnapshot(code: string, snapshot: StudentSnapshot) {
-  return joinClassroom(code, snapshot);
+export async function apiSyncStudent(
+  code: string,
+  snapshot: StudentSnapshot
+) {
+  return fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "sync", code, snapshot }),
+  }).then((r) => r.json());
 }
 
-export function addMaterial(
+export async function apiAddMaterial(
   code: string,
   material: Omit<TeacherMaterial, "id" | "createdAt">
 ) {
-  const map = loadAll();
-  const c = map[code.toUpperCase()];
-  if (!c) return null;
-  const m: TeacherMaterial = {
-    ...material,
-    id: `mat-${Date.now()}`,
-    createdAt: Date.now(),
-  };
-  c.materials = [m, ...c.materials].slice(0, 100);
-  map[c.code] = c;
-  saveAll(map);
-  return c;
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "addMaterial", code, material }),
+  });
+  return res.json();
 }
 
-export function startLiveSession(
+export async function apiStartLive(
   code: string,
   title: string,
   subject: string,
   minutes: number
 ) {
-  const map = loadAll();
-  const c = map[code.toUpperCase()];
-  if (!c) return null;
-  const joinCode = makeCode().slice(0, 4);
-  c.liveSession = {
-    id: `live-${Date.now()}`,
-    title,
-    subject,
-    startedAt: Date.now(),
-    endsAt: Date.now() + minutes * 60_000,
-    active: true,
-    joinCode,
-    messages: [],
-  };
-  map[c.code] = c;
-  saveAll(map);
-  return c;
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "startLive",
+      code,
+      title,
+      subject,
+      minutes,
+    }),
+  });
+  return res.json();
 }
 
-export function endLiveSession(code: string) {
-  const map = loadAll();
-  const c = map[code.toUpperCase()];
-  if (!c?.liveSession) return null;
-  c.liveSession.active = false;
-  map[c.code] = c;
-  saveAll(map);
-  return c;
+export async function apiEndLive(code: string) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "endLive", code }),
+  });
+  return res.json();
 }
 
-export function postLiveMessage(
+export async function apiPostMessage(
   code: string,
   author: string,
   text: string
 ) {
-  const map = loadAll();
-  const c = map[code.toUpperCase()];
-  if (!c?.liveSession?.active) return null;
-  c.liveSession.messages = [
-    ...c.liveSession.messages,
-    {
-      id: `m-${Date.now()}`,
-      author,
-      text,
-      at: Date.now(),
-    },
-  ].slice(-100);
-  map[c.code] = c;
-  saveAll(map);
-  return c;
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "message", code, author, text }),
+  });
+  return res.json();
 }
 
-/** No sample students — only real joins via teacher private code. */
+// legacy no-ops kept so old imports don't crash if any remain
+export function getClassroom(_code: string): Classroom | null {
+  return null;
+}
+export function listTeacherClasses(_teacherId: string): Classroom[] {
+  return [];
+}
+export function joinClassroom(
+  _code: string,
+  _snapshot: StudentSnapshot
+): { ok: boolean; error?: string; classroom?: Classroom } {
+  return { ok: false, error: "Use apiJoinClassroom" };
+}
+export function pushStudentSnapshot(
+  code: string,
+  snapshot: StudentSnapshot
+) {
+  return apiSyncStudent(code, snapshot);
+}
+export function addMaterial(
+  _code: string,
+  _material: Omit<TeacherMaterial, "id" | "createdAt">
+) {
+  return null;
+}
+export function startLiveSession(
+  _code: string,
+  _title: string,
+  _subject: string,
+  _minutes: number
+) {
+  return null;
+}
+export function endLiveSession(_code: string) {
+  return null;
+}
+export function postLiveMessage(
+  _code: string,
+  _author: string,
+  _text: string
+) {
+  return null;
+}
 export function demoStudentsIfEmpty(room: Classroom): Classroom {
   return room;
 }

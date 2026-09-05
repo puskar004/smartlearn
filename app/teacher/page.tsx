@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, useUser } from "@clerk/nextjs";
@@ -8,21 +8,22 @@ import {
   BookOpen,
   Copy,
   GraduationCap,
+  Loader2,
   Radio,
   Upload,
   Users,
   Video,
 } from "lucide-react";
 import {
-  addMaterial,
-  createClassroom,
-  endLiveSession,
-  getClassroom,
+  apiAddMaterial,
+  apiCreateClassroom,
+  apiEndLive,
+  apiGetRoom,
+  apiListMyClasses,
+  apiPostMessage,
+  apiStartLive,
   getRole,
-  listTeacherClasses,
-  postLiveMessage,
   setRole,
-  startLiveSession,
   type Classroom,
   type StudentSnapshot,
 } from "@/lib/teacher-store";
@@ -33,10 +34,14 @@ function TeacherInner() {
   const { user } = useUser();
   const router = useRouter();
   const sp = useSearchParams();
-  const tab = (sp.get("tab") as "students" | "materials" | "live" | "code") || "students";
+  const tab =
+    (sp.get("tab") as "students" | "materials" | "live" | "code") || "students";
 
   const [classes, setClasses] = useState<Classroom[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
+  const [room, setRoom] = useState<Classroom | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [className, setClassName] = useState("Class 12 Science A");
   const [selected, setSelected] = useState<StudentSnapshot | null>(null);
   const [matTitle, setMatTitle] = useState("");
@@ -48,53 +53,60 @@ function TeacherInner() {
   const [liveMins, setLiveMins] = useState(40);
   const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState(false);
-  const [tick, setTick] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
-  const refresh = () => {
+  const refresh = useCallback(async () => {
     if (!userId) return;
-    const list = listTeacherClasses(userId);
-    setClasses(list);
-    if (!activeCode && list[0]) setActiveCode(list[0].code);
-    else if (activeCode && !list.find((c) => c.code === activeCode) && list[0]) {
-      setActiveCode(list[0].code);
+    try {
+      const list = await apiListMyClasses();
+      setClasses(list);
+      const code = activeCode || list[0]?.code || null;
+      if (!activeCode && list[0]) setActiveCode(list[0].code);
+      if (code) {
+        const r = await apiGetRoom(code);
+        setRoom(r);
+      } else {
+        setRoom(null);
+      }
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
     }
-    setTick((t) => t + 1);
-  };
+  }, [userId, activeCode]);
 
   useEffect(() => {
     if (!userId) return;
     if (getRole(userId) !== "teacher") {
       setRole(userId, "teacher");
     }
-    refresh();
-    const id = setInterval(refresh, 5000);
+    void refresh();
+    const id = setInterval(() => void refresh(), 8000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
-
-  const room = useMemo(() => {
-    if (!activeCode) return null;
-    return getClassroom(activeCode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCode, classes, tick]);
+  }, [userId, refresh]);
 
   if (!isSignedIn || !userId) {
     return (
       <div className="px-6 py-16 text-center text-sm text-slate-500">
-        Sign in to open the Teacher Hub.
+        Sign in as Teacher to open this hub.
       </div>
     );
   }
 
-  const create = () => {
-    const c = createClassroom(
-      userId,
-      user?.fullName || "Teacher",
-      className
-    );
-    setActiveCode(c.code);
-    refresh();
-    router.replace("/teacher?tab=code");
+  const create = async () => {
+    setBusy(true);
+    try {
+      const c = await apiCreateClassroom(className);
+      setActiveCode(c.code);
+      setClasses((prev) => [c, ...prev.filter((x) => x.code !== c.code)]);
+      setRoom(c);
+      router.replace("/teacher?tab=code");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const copyCode = async () => {
@@ -108,26 +120,41 @@ function TeacherInner() {
     }
   };
 
-  const upload = (e: FormEvent) => {
+  const upload = async (e: FormEvent) => {
     e.preventDefault();
     if (!activeCode || !matTitle.trim() || !matUrl.trim()) return;
-    addMaterial(activeCode, {
-      title: matTitle.trim(),
-      url: matUrl.trim(),
-      type: matType,
-      subject: matSubject,
-      teacherName: user?.fullName || "Teacher",
-    });
-    setMatTitle("");
-    setMatUrl("");
-    refresh();
+    setBusy(true);
+    try {
+      const data = await apiAddMaterial(activeCode, {
+        title: matTitle.trim(),
+        url: matUrl.trim(),
+        type: matType,
+        subject: matSubject,
+        teacherName: user?.fullName || "Teacher",
+      });
+      if (data.classroom) setRoom(data.classroom);
+      setMatTitle("");
+      setMatUrl("");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const startLive = () => {
+  const startLive = async () => {
     if (!activeCode) return;
-    startLiveSession(activeCode, liveTitle, liveSubject, liveMins);
-    refresh();
-    router.replace("/teacher?tab=live");
+    setBusy(true);
+    try {
+      const data = await apiStartLive(
+        activeCode,
+        liveTitle,
+        liveSubject,
+        liveMins
+      );
+      if (data.classroom) setRoom(data.classroom);
+      router.replace("/teacher?tab=live");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const setTab = (t: string) => router.replace(`/teacher?tab=${t}`);
@@ -142,11 +169,16 @@ function TeacherInner() {
           Hello{user?.firstName ? `, ${user.firstName}` : ""}
         </h1>
         <p className="mt-2 max-w-xl text-sm text-indigo-100">
-          Create a private class code → share only with your students → see who
-          joined, their mistakes, weak subjects, and push notes / live sessions.
-          Students never see this upload panel.
+          Create a private code → share with students → see their live progress
+          from any device. Students never see upload tools.
         </p>
       </div>
+
+      {error && (
+        <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
+          {error}
+        </p>
+      )}
 
       <div className="mt-6 flex flex-wrap gap-3">
         <input
@@ -157,16 +189,25 @@ function TeacherInner() {
         />
         <button
           type="button"
-          onClick={create}
-          className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white"
+          onClick={() => void create()}
+          disabled={busy}
+          className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
         >
-          <GraduationCap className="h-4 w-4" /> Create class + code
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <GraduationCap className="h-4 w-4" />
+          )}
+          Create class + code
         </button>
         {classes.map((c) => (
           <button
             key={c.code}
             type="button"
-            onClick={() => setActiveCode(c.code)}
+            onClick={() => {
+              setActiveCode(c.code);
+              void apiGetRoom(c.code).then((r) => setRoom(r));
+            }}
             className={cn(
               "rounded-xl border px-3 py-2 text-xs font-bold transition",
               activeCode === c.code
@@ -179,9 +220,14 @@ function TeacherInner() {
         ))}
       </div>
 
-      {!room ? (
+      {loading ? (
+        <div className="mt-10 flex justify-center text-slate-400">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : !room ? (
         <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-10 text-center text-sm text-slate-500">
-          Create your first class to get a <strong>private code</strong>.
+          Create your first class to get a <strong>private code</strong> students
+          can join from any phone.
         </div>
       ) : (
         <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_300px]">
@@ -221,12 +267,12 @@ function TeacherInner() {
                   {room.code}
                 </p>
                 <p className="mt-3 text-xs text-slate-500">
-                  Tell students: Profile / Join Teacher → enter this code.
-                  Only then you get their data. No sample students.
+                  Students open <strong>Join Teacher</strong> and type this code
+                  (any device). Then they appear under Students.
                 </p>
                 <button
                   type="button"
-                  onClick={copyCode}
+                  onClick={() => void copyCode()}
                   className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white"
                 >
                   <Copy className="h-4 w-4" />
@@ -239,11 +285,11 @@ function TeacherInner() {
               <div className="space-y-3">
                 {room.students.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-500">
-                    Waiting for students… Share code{" "}
+                    No students yet. Share{" "}
                     <strong className="font-mono text-indigo-700">
                       {room.code}
                     </strong>
-                    . Empty until someone joins — no demo data.
+                    . Empty until someone joins — no sample data.
                   </div>
                 )}
                 {room.students.map((s) => (
@@ -292,12 +338,12 @@ function TeacherInner() {
             {tab === "materials" && (
               <div className="space-y-4">
                 <form
-                  onSubmit={upload}
+                  onSubmit={(e) => void upload(e)}
                   className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
                 >
                   <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
                     <Upload className="h-4 w-4 text-indigo-600" /> Upload notes /
-                    lecture (students don&apos;t see this screen)
+                    lecture
                   </h3>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <input
@@ -327,21 +373,21 @@ function TeacherInner() {
                     <input
                       value={matUrl}
                       onChange={(e) => setMatUrl(e.target.value)}
-                      placeholder="https://… (Drive, YouTube, PDF)"
+                      placeholder="https://…"
                       className="rounded-xl border border-slate-200 px-3 py-2 text-sm sm:col-span-2"
                       required
                     />
                   </div>
                   <button
                     type="submit"
-                    className="mt-3 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white"
+                    disabled={busy}
+                    className="mt-3 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
                   >
                     Publish to class
                   </button>
                 </form>
-
                 <ul className="space-y-2">
-                  {room.materials.map((m) => (
+                  {(room.materials || []).map((m) => (
                     <li
                       key={m.id}
                       className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5 text-sm"
@@ -369,11 +415,6 @@ function TeacherInner() {
                       </a>
                     </li>
                   ))}
-                  {room.materials.length === 0 && (
-                    <li className="text-center text-xs text-slate-400">
-                      No materials yet.
-                    </li>
-                  )}
                 </ul>
               </div>
             )}
@@ -408,7 +449,7 @@ function TeacherInner() {
                       />
                       <button
                         type="button"
-                        onClick={startLive}
+                        onClick={() => void startLive()}
                         className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white"
                       >
                         Go live
@@ -423,43 +464,41 @@ function TeacherInner() {
                           LIVE · {room.liveSession.title}
                         </div>
                         <div className="text-xs text-rose-600">
-                          Room code {room.liveSession.joinCode} · ends{" "}
-                          {new Date(room.liveSession.endsAt).toLocaleTimeString()}
+                          Room {room.liveSession.joinCode}
                         </div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
-                          endLiveSession(room.code);
-                          refresh();
-                        }}
+                        onClick={() =>
+                          void apiEndLive(room.code).then((d) => {
+                            if (d.classroom) setRoom(d.classroom);
+                          })
+                        }
                         className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white"
                       >
                         End session
                       </button>
                     </div>
                     <div className="mt-3 max-h-48 space-y-2 overflow-y-auto rounded-xl bg-white p-3">
-                      {room.liveSession.messages.map((m) => (
+                      {(room.liveSession.messages || []).map((m) => (
                         <div key={m.id} className="text-xs">
                           <strong>{m.author}:</strong> {m.text}
                         </div>
                       ))}
-                      {room.liveSession.messages.length === 0 && (
-                        <p className="text-xs text-slate-400">No messages yet.</p>
-                      )}
                     </div>
                     <form
                       className="mt-2 flex gap-2"
                       onSubmit={(e) => {
                         e.preventDefault();
                         if (!msg.trim()) return;
-                        postLiveMessage(
+                        void apiPostMessage(
                           room.code,
                           user?.fullName || "Teacher",
                           msg.trim()
-                        );
-                        setMsg("");
-                        refresh();
+                        ).then((d) => {
+                          if (d.classroom) setRoom(d.classroom);
+                          setMsg("");
+                        });
                       }}
                     >
                       <input
@@ -488,7 +527,7 @@ function TeacherInner() {
               </h3>
               {!selected ? (
                 <p className="mt-3 text-xs text-slate-400">
-                  Select a joined student to inspect full history.
+                  Select a joined student.
                 </p>
               ) : (
                 <div className="mt-3 space-y-2 text-xs text-slate-600">
@@ -528,12 +567,11 @@ function TeacherInner() {
                 </div>
               )}
             </div>
-
             <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-500">
               <Link href="/profile" className="font-bold text-indigo-600 underline">
                 Settings
               </Link>{" "}
-              → switch back to <strong>Student</strong> mode if needed.
+              → switch to Student mode if needed.
             </div>
           </aside>
         </div>
