@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
+  --background: #f4f6ff;
   --foreground: #0f172a;
 }
 
@@ -13,11 +13,41 @@
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(167, 139, 250, 0.25), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(125, 211, 252, 0.2), transparent 50%),
+    radial-gradient(800px 400px at 50% 100%, rgba(251, 207, 232, 0.18), transparent 45%),
+    var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  min-height: 100vh;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+/* Soft card hover lift used across bookshelf */
+.sl-card {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+.sl-card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 18px 40px -18px rgba(79, 70, 229, 0.35),
+    0 8px 16px -8px rgba(15, 23, 42, 0.08);
+}
+
+.sl-row {
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease;
+}
+.sl-row:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  transform: translateX(2px);
 }
