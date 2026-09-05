@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 520" fill="none">
+  <defs>
+    <linearGradient id="desk" x1="80" y1="400" x2="560" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E0E7FF"/>
+      <stop offset="1" stop-color="#C4B5FD"/>
+    </linearGradient>
+    <linearGradient id="lap" x1="220" y1="280" x2="420" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E1B4B"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+    <linearGradient id="boyH" x1="200" y1="200" x2="300" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#5B21B6"/>
+    </linearGradient>
+    <linearGradient id="girlH" x1="340" y1="210" x2="460" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F472B6"/>
+      <stop offset="1" stop-color="#DB2777"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#7C3AED" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- soft blobs -->
+  <circle cx="520" cy="80" r="90" fill="#DDD6FE" opacity="0.55"/>
+  <circle cx="100" cy="120" r="70" fill="#CFFAFE" opacity="0.5"/>
+  <circle cx="560" cy="300" r="50" fill="#FBCFE8" opacity="0.45"/>
+
+  <!-- desk ellipse -->
+  <ellipse cx="320" cy="455" rx="240" ry="28" fill="url(#desk)" filter="url(#soft)"/>
+  <ellipse cx="320" cy="448" rx="220" ry="18" fill="#EEF2FF"/>
+
+  <!-- books stack left -->
+  <g filter="url(#soft)">
+    <rect x="118" y="390" width="86" height="18" rx="3" fill="#818CF8"/>
+    <rect x="122" y="372" width="86" height="18" rx="3" fill="#A78BFA"/>
+    <rect x="126" y="354" width="86" height="18" rx="3" fill="#C084FC"/>
+    <text x="145" y="404" fill="white" font-size="8" font-family="system-ui" font-weight="700">Quiz</text>
+    <text x="145" y="386" fill="white" font-size="8" font-family="system-ui" font-weight="700">PYQs</text>
+    <text x="140" y="368" fill="white" font-size="8" font-family="system-ui" font-weight="700">NCERT</text>
+  </g>
+
+  <!-- open book right -->
+  <g filter="url(#soft)">
+    <path d="M470 410 C490 395 520 395 540 410 L540 430 C520 418 490 418 470 430 Z" fill="#FEF3C7"/>
+    <path d="M505 402 L505 428" stroke="#F59E0B" stroke-width="1.5"/>
+  </g>
+
+  <!-- pencil cup -->
+  <rect x="545" y="400" width="28" height="32" rx="4" fill="#A78BFA"/>
+  <rect x="551" y="378" width="4" height="28" rx="1" fill="#FBBF24" transform="rotate(-8 553 392)"/>
+  <rect x="558" y="375" width="4" height="30" rx="1" fill="#34D399" transform="rotate(6 560 390)"/>
+  <rect x="564" y="380" width="4" height="26" rx="1" fill="#F472B6" transform="rotate(12 566 393)"/>
+
+  <!-- laptop -->
+  <g filter="url(#soft)">
+    <rect x="230" y="300" width="180" height="112" rx="10" fill="url(#lap)"/>
+    <rect x="242" y="312" width="156" height="88" rx="6" fill="#0F172A"/>
+    <!-- glow cap -->
+    <g transform="translate(300 340)">
+      <ellipse cx="20" cy="8" rx="28" ry="10" fill="#818CF8" opacity="0.35"/>
+      <path d="M4 0 L20 -14 L36 0 L36 6 L4 6 Z" fill="#C4B5FD"/>
+      <rect x="8" y="6" width="24" height="6" rx="1" fill="#A78BFA"/>
+      <circle cx="20" cy="-2" r="3" fill="#EEF2FF"/>
+    </g>
+    <rect x="210" y="410" width="220" height="12" rx="3" fill="#1E1B4B"/>
+    <rect x="250" y="414" width="140" height="4" rx="2" fill="#6366F1" opacity="0.5"/>
+  </g>
+
+  <!-- BOY -->
+  <g filter="url(#soft)">
+    <!-- body hoodie -->
+    <path d="M210 250 C210 220 250 210 280 215 C310 220 320 250 318 290 L318 360 C318 375 300 385 275 385 C250 385 222 375 218 360 Z" fill="url(#boyH)"/>
+    <path d="M218 260 C240 255 270 255 295 262 L300 290 C280 285 250 285 225 290 Z" fill="#6D28D9" opacity="0.5"/>
+    <!-- hood strings -->
+    <path d="M250 275 Q255 300 248 320" stroke="#C4B5FD" stroke-width="2" fill="none"/>
+    <path d="M270 275 Q268 300 275 320" stroke="#C4B5FD" stroke-width="2" fill="none"/>
+    <!-- neck -->
+    <rect x="255" y="200" width="28" height="22" rx="8" fill="#F8C9A8"/>
+    <!-- head -->
+    <ellipse cx="269" cy="168" rx="42" ry="46" fill="#F8C9A8"/>
+    <!-- hair -->
+    <path d="M230 160 C235 120 260 108 275 110 C300 112 315 135 310 165 C300 145 280 140 255 148 C245 152 235 155 230 160 Z" fill="#1F2937"/>
+    <path d="M228 165 C232 150 245 145 250 155" fill="#111827"/>
+    <!-- eyes -->
+    <ellipse cx="255" cy="170" rx="5" ry="6" fill="#1F2937"/>
+    <ellipse cx="283" cy="170" rx="5" ry="6" fill="#1F2937"/>
+    <circle cx="256.5" cy="168.5" r="1.5" fill="white"/>
+    <circle cx="284.5" cy="168.5" r="1.5" fill="white"/>
+    <!-- brows -->
+    <path d="M246 158 Q255 154 262 158" stroke="#1F2937" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M276 158 Q283 154 292 158" stroke="#1F2937" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <!-- smile -->
+    <path d="M258 188 Q269 198 280 188" stroke="#B45309" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <!-- blush -->
+    <ellipse cx="242" cy="182" rx="7" ry="4" fill="#FDA4AF" opacity="0.55"/>
+    <ellipse cx="296" cy="182" rx="7" ry="4" fill="#FDA4AF" opacity="0.55"/>
+    <!-- arm on laptop -->
+    <path d="M300 300 C330 310 350 330 360 350 C340 345 320 335 305 325 Z" fill="#7C3AED"/>
+    <ellipse cx="365" cy="352" rx="12" ry="9" fill="#F8C9A8"/>
+  </g>
+
+  <!-- ROBOT on boy head -->
+  <g filter="url(#soft)" transform="translate(230 55)">
+    <rect x="20" y="28" width="70" height="58" rx="18" fill="#F8FAFC" stroke="#A78BFA" stroke-width="3"/>
+    <rect x="28" y="40" width="54" height="32" rx="12" fill="#4C1D95"/>
+    <!-- eyes -->
+    <circle cx="42" cy="56" r="7" fill="#67E8F9"/>
+    <circle cx="66" cy="56" r="7" fill="#67E8F9"/>
+    <circle cx="43.5" cy="54.5" r="2.5" fill="#0F172A"/>
+    <circle cx="67.5" cy="54.5" r="2.5" fill="#0F172A"/>
+    <!-- smile -->
+    <path d="M45 72 Q55 80 65 72" stroke="#67E8F9" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <!-- ears -->
+    <circle cx="16" cy="55" r="8" fill="#A78BFA"/>
+    <circle cx="94" cy="55" r="8" fill="#A78BFA"/>
+    <!-- antenna -->
+    <line x1="55" y1="28" x2="55" y2="10" stroke="#A78BFA" stroke-width="3"/>
+    <circle cx="55" cy="6" r="6" fill="#F472B6"/>
+    <!-- arms -->
+    <rect x="0" y="48" width="16" height="8" rx="4" fill="#C4B5FD"/>
+    <rect x="94" y="48" width="16" height="8" rx="4" fill="#C4B5FD"/>
+  </g>
+
+  <!-- GIRL -->
+  <g filter="url(#soft)">
+    <!-- body -->
+    <path d="M360 255 C365 225 400 215 435 220 C470 228 475 265 472 305 L468 365 C465 382 445 390 420 390 C390 390 362 380 360 360 Z" fill="url(#girlH)"/>
+    <path d="M370 270 C400 262 440 265 460 275 L458 300 C440 292 405 290 375 295 Z" fill="#BE185D" opacity="0.35"/>
+    <!-- neck -->
+    <rect x="405" y="205" width="26" height="22" rx="8" fill="#F5C4A8"/>
+    <!-- head -->
+    <ellipse cx="418" cy="172" rx="40" ry="44" fill="#F5C4A8"/>
+    <!-- long hair -->
+    <path d="M378 155 C380 110 405 100 420 102 C450 105 465 130 460 170 C470 200 465 250 455 280 C445 250 450 200 448 175 C440 140 410 135 390 150 C382 155 378 160 378 155 Z" fill="#292524"/>
+    <path d="M378 170 C370 200 368 250 375 290 C385 260 385 210 390 180 Z" fill="#1C1917"/>
+    <path d="M455 175 C460 210 465 255 458 295 C470 250 472 210 465 175 Z" fill="#1C1917"/>
+    <!-- eyes -->
+    <ellipse cx="405" cy="172" rx="5" ry="6" fill="#1F2937"/>
+    <ellipse cx="432" cy="172" rx="5" ry="6" fill="#1F2937"/>
+    <circle cx="406.5" cy="170.5" r="1.5" fill="white"/>
+    <circle cx="433.5" cy="170.5" r="1.5" fill="white"/>
+    <path d="M396 160 Q405 156 412 160" stroke="#1F2937" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M424 160 Q432 156 440 160" stroke="#1F2937" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <path d="M408 188 Q418 196 428 188" stroke="#B45309" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <ellipse cx="392" cy="182" rx="7" ry="4" fill="#FDA4AF" opacity="0.55"/>
+    <ellipse cx="445" cy="182" rx="7" ry="4" fill="#FDA4AF" opacity="0.55"/>
+    <!-- hand on chin -->
+    <ellipse cx="395" cy="230" rx="14" ry="12" fill="#F5C4A8"/>
+    <path d="M385 235 C370 280 375 320 390 350" stroke="#F472B6" stroke-width="22" stroke-linecap="round" fill="none"/>
+    <!-- pen hand -->
+    <ellipse cx="455" cy="340" rx="11" ry="9" fill="#F5C4A8"/>
+    <rect x="458" y="320" width="5" height="28" rx="1.5" fill="#1E293B" transform="rotate(25 460 334)"/>
+    <rect x="458" y="316" width="5" height="6" rx="1" fill="#FBBF24" transform="rotate(25 460 319)"/>
+  </g>
+
+  <!-- sparkles -->
+  <g fill="#A78BFA" opacity="0.8">
+    <circle cx="160" cy="80" r="3"/>
+    <circle cx="500" cy="140" r="2.5"/>
+    <circle cx="90" cy="250" r="2"/>
+    <circle cx="580" cy="220" r="3"/>
+    <path d="M180 140 L183 148 L191 151 L183 154 L180 162 L177 154 L169 151 L177 148 Z" fill="#F0ABFC"/>
+    <path d="M520 200 L522 206 L528 208 L522 210 L520 216 L518 210 L512 208 L518 206 Z" fill="#67E8F9"/>
+  </g>
+</svg>

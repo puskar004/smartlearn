@@ -98,7 +98,7 @@ export default function SiteHeader() {
             <div className="text-lg font-extrabold tracking-tight text-slate-900">
               Smart<span className="text-violet-600">Learn</span>
             </div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+            <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">
               Learning, Personalized
             </div>
           </div>
