@@ -7,6 +7,8 @@ import FullscreenGate from "@/components/FullscreenGate";
 import AppSidebar from "@/components/AppSidebar";
 import AppTopBar from "@/components/AppTopBar";
 import SiteHeader from "@/components/SiteHeader";
+import TaskChecklist from "@/components/TaskChecklist";
+import StudentSync from "@/components/StudentSync";
 
 const MARKETING = new Set(["/", "/sign-in", "/sign-up"]);
 
@@ -33,10 +35,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </>
       ) : (
         <div className="min-h-screen">
+          <StudentSync />
           <AppSidebar />
           <div className="pl-[72px] lg:pl-[260px]">
             <AppTopBar />
             <main className="min-h-[calc(100vh-4rem)]">{children}</main>
+            {!path.startsWith("/teacher") && <TaskChecklist floating />}
           </div>
         </div>
       )}

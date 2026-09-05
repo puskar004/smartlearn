@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { Brain, Loader2, Sparkles } from "lucide-react";
 import { loadProgress, saveProgress } from "@/lib/user-store";
+import { bumpTask } from "@/lib/tasks";
 import MarkdownAnswer from "@/components/MarkdownAnswer";
 
 export default function FeynmanPage() {
@@ -55,6 +56,7 @@ SIMPLER VERSION: <5-8 line NCERT-simple re-explanation a Class student can memor
         ].slice(0, 50);
         p.xp += Math.round(sc / 10);
         saveProgress(p);
+        bumpTask(userId, "weekly-feynman", 1);
       }
     } catch (err) {
       setFeedback(err instanceof Error ? err.message : "Error");

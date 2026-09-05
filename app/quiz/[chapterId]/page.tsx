@@ -8,6 +8,7 @@ import { Check, X } from "lucide-react";
 import { allChapters } from "@/lib/curriculum";
 import { getQuizByChapterId } from "@/lib/quiz-engine";
 import { recordQuiz } from "@/lib/user-store";
+import { bumpTask } from "@/lib/tasks";
 
 export default function ChapterQuizPage() {
   const params = useParams();
@@ -87,6 +88,8 @@ export default function ChapterQuizPage() {
             ...m,
           }))
         );
+        bumpTask(userId, "daily-quiz", 1);
+        bumpTask(userId, "weekly-pyq", Math.max(1, finalScore));
         setSaved(true);
       }
       setDone(true);

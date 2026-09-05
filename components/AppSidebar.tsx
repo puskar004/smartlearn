@@ -15,6 +15,8 @@ import {
   Trophy,
   ClipboardList,
   Target,
+  GraduationCap,
+  Music2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +29,8 @@ const nav = [
   { href: "/blueprint", label: "Study Plan", icon: CalendarDays },
   { href: "/mistakes", label: "Progress", icon: LineChart },
   { href: "/feynman", label: "Achievements", icon: Trophy },
+  { href: "/study-music", label: "Mood Music", icon: Music2 },
+  { href: "/teacher", label: "Teacher Hub", icon: GraduationCap },
   { href: "/parent", label: "Parent Portal", icon: Shield },
 ];
 
