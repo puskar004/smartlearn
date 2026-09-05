@@ -6,6 +6,7 @@ import {
   googleEmbedPdf,
   resolveEmbeddablePdf,
 } from "@/lib/ncert-pdf";
+import { setPdfReading } from "@/components/FocusLock";
 
 type Props = {
   open: boolean;
@@ -15,7 +16,8 @@ type Props = {
 };
 
 /**
- * Opens NCERT material inside SmartLearn so the student does not leave the tab.
+ * In-app NCERT reader — stays on SmartLearn (no external tab).
+ * Suppresses Focus Lock while open.
  */
 export default function PdfReaderModal({
   open,
@@ -28,25 +30,42 @@ export default function PdfReaderModal({
   const embed = pdf ? googleEmbedPdf(pdf) : null;
 
   useEffect(() => {
+    setPdfReading(open);
     if (!open) return;
     setMode(pdf ? "pdf" : "portal");
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // prevent background scroll
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      setPdfReading(false);
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
   }, [open, pdf, onClose]);
 
   if (!open) return null;
 
+  // Prefer direct PDF embed, then google viewer, never navigate away
   const src =
-    mode === "pdf" && embed
-      ? embed
-      : ncertLink || "https://ncert.nic.in/textbook.php";
+    mode === "pdf" && pdf
+      ? pdf
+      : mode === "pdf" && embed
+        ? embed
+        : mode === "portal" && ncertLink
+          ? ncertLink
+          : pdf || ncertLink || "about:blank";
 
   return (
-    <div className="fixed inset-0 z-[120] flex flex-col bg-slate-950/70 p-2 backdrop-blur-sm sm:p-4">
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-white shadow-2xl">
+    <div
+      className="fixed inset-0 z-[120] flex flex-col bg-slate-950/80 p-1 backdrop-blur-sm sm:p-3"
+      // keep focus inside modal so browser doesn't treat as leave
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-600 bg-white shadow-2xl">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
           <FileText className="h-4 w-4 text-emerald-600" />
           <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">
@@ -63,7 +82,7 @@ export default function PdfReaderModal({
                     : "text-slate-500 hover:text-slate-800"
                 }`}
               >
-                PDF reader
+                PDF
               </button>
               <button
                 type="button"
@@ -74,17 +93,22 @@ export default function PdfReaderModal({
                     : "text-slate-500 hover:text-slate-800"
                 }`}
               >
-                NCERT portal
+                NCERT page
               </button>
             </div>
           )}
           {pdf && (
             <a
               href={pdf}
-              download
+              // same tab download attempt without leaving SPA chrome when possible
               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+              onClick={(e) => {
+                // stay in app: open blob attempt
+                e.preventDefault();
+                setMode("pdf");
+              }}
             >
-              <ExternalLink className="h-3 w-3" /> Direct PDF
+              <ExternalLink className="h-3 w-3" /> Reload PDF
             </a>
           )}
           <button
@@ -102,11 +126,12 @@ export default function PdfReaderModal({
             title={title}
             src={src}
             className="h-full w-full border-0"
-            // sandbox keeps navigation contained when possible
             referrerPolicy="no-referrer-when-downgrade"
+            // sandbox allows pdf plugins but blocks top-navigation
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads"
           />
-          <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/70 px-3 py-1 text-[10px] text-white">
-            Reading inside SmartLearn · Esc to close · avoids full tab switch
+          <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] text-white">
+            Reading inside SmartLearn · Esc closes · tab-switch alert paused
           </p>
         </div>
       </div>

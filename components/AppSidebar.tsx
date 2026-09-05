@@ -14,7 +14,6 @@ import {
   Settings,
   Shield,
   Sparkles,
-  Trophy,
   ClipboardList,
   Target,
   GraduationCap,
@@ -36,10 +35,10 @@ const studentNav = [
   { href: "/ai-tutor", label: "AI Tutor", icon: Brain },
   { href: "/blueprint", label: "Study Plan", icon: CalendarDays },
   { href: "/mistakes", label: "Progress", icon: LineChart },
-  { href: "/feynman", label: "Achievements", icon: Trophy },
   { href: "/study-music", label: "Mood Music", icon: Music2 },
   { href: "/join-class", label: "Join Teacher", icon: Link2 },
   { href: "/parent", label: "Parent Portal", icon: Shield },
+  { href: "/common-room", label: "Common Room", icon: Sparkles },
 ];
 
 const teacherNav = [
@@ -52,7 +51,7 @@ const teacherNav = [
 
 const bottomStudent = [
   { href: "/profile", label: "Settings", icon: Settings },
-  { href: "/common-room", label: "Help & Support", icon: HelpCircle },
+  { href: "/support", label: "Help & Support", icon: HelpCircle },
 ];
 
 const bottomTeacher = [

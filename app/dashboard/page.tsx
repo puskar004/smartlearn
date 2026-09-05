@@ -12,7 +12,6 @@ import {
   Zap,
   AlertTriangle,
   Target,
-  Sparkles,
   ArrowRight,
 } from "lucide-react";
 import {
@@ -44,13 +43,6 @@ const tiles = [
     desc: "Your personal error DNA",
     icon: AlertTriangle,
     color: "text-rose-600 bg-rose-50 group-hover:bg-rose-500 group-hover:text-white",
-  },
-  {
-    href: "/feynman",
-    title: "Feynman Mode",
-    desc: "Teach back · AI grades clarity",
-    icon: Sparkles,
-    color: "text-violet-600 bg-violet-50 group-hover:bg-violet-500 group-hover:text-white",
   },
   {
     href: "/ai-tutor",

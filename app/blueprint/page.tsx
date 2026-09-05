@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
-import { Calendar, Sparkles, Target } from "lucide-react";
+import { Calendar, Check, Sparkles, Target } from "lucide-react";
 import { CURRICULUM, type Grade } from "@/lib/curriculum";
 import {
   loadProgress,
@@ -17,12 +17,13 @@ export default function BlueprintPage() {
   const { userId, isSignedIn } = useAuth();
   const [p, setP] = useState<UserProgress | null>(null);
   const [examDate, setExamDate] = useState("");
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
     const prog = loadProgress(userId);
     setP(prog);
-    // Only accept clean YYYY-MM-DD already stored
     const raw = prog.boardExamDate || "";
     setExamDate(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "");
   }, [userId]);
@@ -35,7 +36,6 @@ export default function BlueprintPage() {
   const grade = (p?.grade || "12") as Grade;
   const pack = CURRICULUM.find((g) => g.grade === grade)!;
   const weak = p ? weaknessMap(p) : [];
-
   const todayKey = toLocalYmd(new Date());
 
   const todayPlan = useMemo(() => {
@@ -68,20 +68,38 @@ export default function BlueprintPage() {
   })();
 
   const saveDate = () => {
-    if (!userId || !p) return;
-    if (examDate && daysUntilLocal(examDate) == null) {
-      alert("Please pick a valid date (YYYY-MM-DD).");
+    if (!userId) {
+      setSaveMsg("Please sign in first.");
       return;
     }
-    const next = { ...p, boardExamDate: examDate || null };
-    saveProgress(next);
-    setP(next);
+    if (examDate && daysUntilLocal(examDate) == null) {
+      setSaveMsg("Pick a valid date.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const prog = loadProgress(userId);
+      const next: UserProgress = {
+        ...prog,
+        boardExamDate: examDate || null,
+      };
+      saveProgress(next);
+      setP(next);
+      setSaveMsg(
+        examDate
+          ? `Saved: ${formatLocalYmd(examDate)}`
+          : "Exam date cleared."
+      );
+      window.setTimeout(() => setSaveMsg(null), 3500);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!isSignedIn) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center text-sm text-slate-500">
-        Sign in to unlock your personal Board Blueprint (fresh per account).
+        Sign in to unlock your personal Board Blueprint.
       </div>
     );
   }
@@ -89,14 +107,13 @@ export default function BlueprintPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-        <Target className="h-3.5 w-3.5" /> Unique · Board Blueprint
+        <Target className="h-3.5 w-3.5" /> Study Plan
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
         Today&apos;s micro-plan to board day
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Built from <em>your</em> mistake vault + class + countdown. New login
-        starts at day zero.
+        Built from your mistake vault + class + countdown.
       </p>
 
       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -110,24 +127,28 @@ export default function BlueprintPage() {
             value={examDate}
             min={minDate}
             max={maxDate}
-            onChange={(e) => {
-              const v = e.target.value; // always YYYY-MM-DD from browser
-              setExamDate(v);
-            }}
-            className="min-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900"
+            onChange={(e) => setExamDate(e.target.value)}
+            className="min-w-[12rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900"
           />
           <button
             type="button"
             onClick={saveDate}
-            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white"
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-indigo-500 disabled:opacity-60"
           >
-            Save
+            {saveMsg?.startsWith("Saved") ? (
+              <Check className="h-4 w-4" />
+            ) : null}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
         {examDate && (
           <p className="mt-2 text-xs text-slate-500">
-            Saved as: <strong>{formatLocalYmd(examDate)}</strong> ({examDate})
+            Selected: <strong>{formatLocalYmd(examDate)}</strong> ({examDate})
           </p>
+        )}
+        {saveMsg && (
+          <p className="mt-2 text-xs font-semibold text-emerald-700">{saveMsg}</p>
         )}
         {daysLeft != null && (
           <p className="mt-3 text-2xl font-black text-indigo-600">
@@ -149,7 +170,7 @@ export default function BlueprintPage() {
           <Link
             key={i}
             href={item.href}
-            className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:border-indigo-300"
+            className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md"
           >
             <div className="text-[11px] font-bold text-indigo-600">
               MISSION {i + 1}
@@ -158,7 +179,7 @@ export default function BlueprintPage() {
               {item.subject} · {item.chapter.title}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              10-min rapid quiz + NCERT skim
+              Board-style quiz + NCERT skim
             </div>
           </Link>
         ))}

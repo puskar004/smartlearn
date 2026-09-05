@@ -167,13 +167,6 @@ export default function HomePage() {
             color="bg-rose-50 text-rose-700"
           />
           <Feature
-            href="/feynman"
-            icon={<Brain className="h-5 w-5" />}
-            title="Feynman Mode"
-            desc="Explain a concept in plain words — AI grades clarity. Mastery, not mugging."
-            color="bg-violet-50 text-violet-700"
-          />
-          <Feature
             href="/blueprint"
             icon={<GraduationCap className="h-5 w-5" />}
             title="Board Blueprint"
