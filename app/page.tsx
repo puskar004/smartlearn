@@ -92,20 +92,20 @@ export default function HomePage() {
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             <Stat
               label="Focus Study Time (This Week)"
-              value="18.5 Hours"
-              hint="↑ Tracked via focus sessions"
+              value="Your real hours"
+              hint="Starts at 0 for every new login — no sample data"
             />
             <Stat
               label="Average Quiz Accuracy"
-              value="78.4%"
+              value="Live from quizzes"
               valueClass="text-indigo-600"
-              hint="Based on chapter topic drills"
+              hint="Only after the student attempts chapter drills"
             />
             <Stat
               label="Parent updates on WhatsApp"
-              value="Active"
+              value="When number is set"
               valueClass="text-emerald-600"
-              hint="Verified contact in Profile"
+              hint="Configure in Parent Portal / Profile"
             />
           </div>
         </div>

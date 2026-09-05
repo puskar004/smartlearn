@@ -9,17 +9,24 @@ import {
   isFocusLockEnabled,
   setFocusLockEnabled,
 } from "@/components/FocusLock";
+import {
+  accuracy,
+  loadProgress,
+  type UserProgress,
+} from "@/lib/user-store";
 
 export default function ParentPortalPage() {
   const { user } = useUser();
-  const { userId } = useAuth();
+  const { userId, isSignedIn } = useAuth();
   const [phone, setPhone] = useState("");
   const [focusOn, setFocusOn] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
+  const [p, setP] = useState<UserProgress | null>(null);
 
   useEffect(() => {
     setPhone(getParentPhone(userId));
     setFocusOn(isFocusLockEnabled());
+    if (userId) setP(loadProgress(userId));
   }, [userId]);
 
   const save = () => {
@@ -27,6 +34,10 @@ export default function ParentPortalPage() {
     setFocusLockEnabled(focusOn);
     setStatus("Parent settings saved for this student account.");
   };
+
+  const acc = p ? accuracy(p) : null;
+  const hours = p ? (p.focusMinutes / 60).toFixed(1) : "0.0";
+  const hasContact = Boolean(phone && phone.replace(/\D/g, "").length >= 10);
 
   const sendSummary = async () => {
     const res = await fetch("/api/parent-alert", {
@@ -36,11 +47,18 @@ export default function ParentPortalPage() {
         phone,
         studentName: user?.fullName || "Student",
         reason: "weekly_summary",
+        stats: {
+          hours,
+          accuracy: acc,
+          xp: p?.xp ?? 0,
+          streak: p?.streak ?? 0,
+          mistakes: p?.mistakes.length ?? 0,
+        },
       }),
     });
     const data = await res.json();
     if (data.waLink) window.open(data.waLink, "_blank", "noopener,noreferrer");
-    setStatus("WhatsApp summary link opened.");
+    setStatus("WhatsApp summary link opened with real stats.");
   };
 
   return (
@@ -52,8 +70,8 @@ export default function ParentPortalPage() {
         Accountability that reaches WhatsApp
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        When your child switches tabs during a signed-in study session, SmartLearn
-        opens a polite English WhatsApp alert to this number.
+        Numbers below are from <strong>this student account only</strong>. New
+        login starts at zero — no sample data.
       </p>
 
       <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -87,7 +105,8 @@ export default function ParentPortalPage() {
           <button
             type="button"
             onClick={sendSummary}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white"
+            disabled={!isSignedIn}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
           >
             <MessageCircle className="h-4 w-4" />
             Send WhatsApp Summary Now
@@ -99,9 +118,25 @@ export default function ParentPortalPage() {
       </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
-        <Card title="Focus Study Time" value="18.5 h" sub="This week" />
-        <Card title="Quiz accuracy" value="78.4%" sub="Chapter drills" />
-        <Card title="Alerts" value={focusOn ? "On" : "Off"} sub="Tab switch" />
+        <Card
+          title="Focus Study Time"
+          value={`${hours} h`}
+          sub="This account (tracked minutes)"
+        />
+        <Card
+          title="Quiz accuracy"
+          value={acc != null ? `${acc}%` : "0%"}
+          sub={
+            p?.quizResults.length
+              ? `${p.quizResults.length} quizzes logged`
+              : "No quizzes yet"
+          }
+        />
+        <Card
+          title="Parent WhatsApp"
+          value={hasContact ? "Active" : "Not set"}
+          sub={hasContact ? "Number saved in Profile" : "Add number above"}
+        />
       </div>
     </div>
   );

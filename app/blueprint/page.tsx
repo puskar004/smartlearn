@@ -11,6 +11,7 @@ import {
   weaknessMap,
   type UserProgress,
 } from "@/lib/user-store";
+import { daysUntilLocal, formatLocalYmd, toLocalYmd } from "@/lib/dates";
 
 export default function BlueprintPage() {
   const { userId, isSignedIn } = useAuth();
@@ -21,21 +22,21 @@ export default function BlueprintPage() {
     if (!userId) return;
     const prog = loadProgress(userId);
     setP(prog);
-    setExamDate(prog.boardExamDate || "");
+    // Only accept clean YYYY-MM-DD already stored
+    const raw = prog.boardExamDate || "";
+    setExamDate(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "");
   }, [userId]);
 
   const daysLeft = useMemo(() => {
     if (!examDate) return null;
-    const d =
-      (new Date(examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-    return Math.ceil(d);
+    return daysUntilLocal(examDate);
   }, [examDate]);
 
   const grade = (p?.grade || "12") as Grade;
   const pack = CURRICULUM.find((g) => g.grade === grade)!;
   const weak = p ? weaknessMap(p) : [];
 
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = toLocalYmd(new Date());
 
   const todayPlan = useMemo(() => {
     const day = new Date().getDate();
@@ -59,8 +60,19 @@ export default function BlueprintPage() {
     return picks;
   }, [pack, weak, todayKey]);
 
+  const minDate = toLocalYmd(new Date());
+  const maxDate = (() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 5);
+    return toLocalYmd(d);
+  })();
+
   const saveDate = () => {
     if (!userId || !p) return;
+    if (examDate && daysUntilLocal(examDate) == null) {
+      alert("Please pick a valid date (YYYY-MM-DD).");
+      return;
+    }
     const next = { ...p, boardExamDate: examDate || null };
     saveProgress(next);
     setP(next);
@@ -83,8 +95,8 @@ export default function BlueprintPage() {
         Today&apos;s micro-plan to board day
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Not a generic timetable — built from <em>your</em> mistake vault + class
-        + countdown. New login starts at day zero.
+        Built from <em>your</em> mistake vault + class + countdown. New login
+        starts at day zero.
       </p>
 
       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -92,24 +104,38 @@ export default function BlueprintPage() {
           <Calendar className="h-4 w-4 text-indigo-500" />
           Your first board exam date
         </label>
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
             type="date"
             value={examDate}
-            onChange={(e) => setExamDate(e.target.value)}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            min={minDate}
+            max={maxDate}
+            onChange={(e) => {
+              const v = e.target.value; // always YYYY-MM-DD from browser
+              setExamDate(v);
+            }}
+            className="min-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900"
           />
           <button
             type="button"
             onClick={saveDate}
-            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white"
+            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white"
           >
             Save
           </button>
         </div>
+        {examDate && (
+          <p className="mt-2 text-xs text-slate-500">
+            Saved as: <strong>{formatLocalYmd(examDate)}</strong> ({examDate})
+          </p>
+        )}
         {daysLeft != null && (
           <p className="mt-3 text-2xl font-black text-indigo-600">
-            {daysLeft > 0 ? `${daysLeft} days left` : "Exam window — stay calm & revise"}
+            {daysLeft > 0
+              ? `${daysLeft} days left`
+              : daysLeft === 0
+                ? "Exam is today — stay calm & revise"
+                : `Exam was ${Math.abs(daysLeft)} days ago`}
           </p>
         )}
       </div>

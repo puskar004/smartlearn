@@ -110,20 +110,33 @@ export default function SafeSearchPage() {
             <div className="truncate text-xs font-semibold text-white">
               {active.title}
             </div>
-            <button
-              type="button"
-              onClick={() => setActive(null)}
-              className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
-              aria-label="Close player"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              {active.id && !active.id.includes("-") && active.id.length >= 8 && (
+                <a
+                  href={`https://www.youtube.com/watch?v=${active.id.split("-")[0]}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] font-semibold text-violet-300 hover:underline"
+                >
+                  YT link
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setActive(null)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-label="Close player"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           <iframe
+            key={active.watchUrl}
             title={active.title}
             src={active.watchUrl}
-            className="aspect-video w-full"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            className="aspect-video w-full bg-black"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
             referrerPolicy="strict-origin-when-cross-origin"
           />

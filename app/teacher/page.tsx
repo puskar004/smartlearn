@@ -14,7 +14,6 @@ import {
 import {
   addMaterial,
   createClassroom,
-  demoStudentsIfEmpty,
   endLiveSession,
   getClassroom,
   getRole,
@@ -61,8 +60,7 @@ export default function TeacherPage() {
 
   const room = useMemo(() => {
     if (!activeCode) return null;
-    const r = getClassroom(activeCode);
-    return r ? demoStudentsIfEmpty(r) : null;
+    return getClassroom(activeCode);
   }, [activeCode, classes]);
 
   if (!isSignedIn || !userId) {
@@ -223,6 +221,16 @@ export default function TeacherPage() {
 
                 {tab === "students" && (
                   <div className="space-y-3">
+                    {room.students.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-500">
+                        No students yet. Share private code{" "}
+                        <strong className="font-mono text-violet-700">
+                          {room.code}
+                        </strong>{" "}
+                        — only students who join with this code appear here.
+                        No sample data.
+                      </div>
+                    )}
                     {room.students.map((s) => (
                       <button
                         key={s.studentId}

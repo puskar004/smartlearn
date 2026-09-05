@@ -225,51 +225,7 @@ export function postLiveMessage(
   return c;
 }
 
+/** No sample students — only real joins via teacher private code. */
 export function demoStudentsIfEmpty(room: Classroom): Classroom {
-  if (room.students.length > 0) return room;
-  return {
-    ...room,
-    students: [
-      {
-        studentId: "demo-1",
-        name: "Priya Sharma",
-        grade: "12",
-        xp: 420,
-        streak: 6,
-        accuracy: 72,
-        mistakes: 14,
-        weakSubjects: ["Physics", "Mathematics"],
-        chaptersOpened: 18,
-        lastActive: Date.now() - 3600_000,
-        recentMistakes: [
-          {
-            subjectName: "Physics",
-            chapterTitle: "Current Electricity",
-            prompt: "Kirchhoff loop rule application",
-            at: Date.now() - 7200_000,
-          },
-        ],
-      },
-      {
-        studentId: "demo-2",
-        name: "Arjun Mehta",
-        grade: "12",
-        xp: 280,
-        streak: 2,
-        accuracy: 58,
-        mistakes: 22,
-        weakSubjects: ["Chemistry"],
-        chaptersOpened: 11,
-        lastActive: Date.now() - 86400_000,
-        recentMistakes: [
-          {
-            subjectName: "Chemistry",
-            chapterTitle: "Electrochemistry",
-            prompt: "Nernst equation sign convention",
-            at: Date.now() - 90000_000,
-          },
-        ],
-      },
-    ],
-  };
+  return room;
 }

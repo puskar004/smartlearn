@@ -1,71 +1,107 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Music2, Pause, Play, CloudRain, Flame, Leaf, Zap, Heart } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import {
+  Music2,
+  Play,
+  CloudRain,
+  Flame,
+  Leaf,
+  Zap,
+  Heart,
+  Volume2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MOOD_PLAYLISTS, ytEmbed } from "@/lib/media-catalog";
 
-type Mood = {
-  id: string;
-  label: string;
-  blurb: string;
-  color: string;
-  Icon: typeof Leaf;
-  /** In-app YouTube search embed — study-safe keywords only */
-  query: string;
-};
-
-const MOODS: Mood[] = [
-  {
-    id: "focus",
-    label: "Deep Focus",
-    blurb: "Instrumental concentration",
-    color: "from-indigo-500 to-violet-600",
-    Icon: Flame,
-    query: "lofi hip hop study beats instrumental no vocals concentration music",
-  },
-  {
-    id: "calm",
-    label: "Calm Revise",
-    blurb: "Soft ambient for theory",
-    color: "from-sky-400 to-cyan-600",
-    Icon: Leaf,
-    query: "calm ambient study music instrumental peaceful piano revision",
-  },
-  {
-    id: "rain",
-    label: "Rainy Desk",
-    blurb: "Rain + soft pads",
-    color: "from-slate-500 to-blue-700",
-    Icon: CloudRain,
-    query: "rain sounds soft lo-fi study music instrumental",
-  },
-  {
-    id: "energy",
-    label: "Energy Boost",
-    blurb: "Upbeat but lyric-light",
-    color: "from-amber-400 to-orange-600",
-    Icon: Zap,
-    query: "upbeat instrumental study music electronic focus no lyrics",
-  },
-  {
-    id: "soft",
-    label: "Soft Heart",
-    blurb: "Gentle acoustic focus",
-    color: "from-rose-400 to-pink-600",
-    Icon: Heart,
-    query: "soft acoustic instrumental study playlist calm guitar",
-  },
-];
-
-function embedFor(query: string) {
-  return `https://www.youtube-nocookie.com/embed?rel=0&modestbranding=1&listType=search&list=${encodeURIComponent(query)}`;
-}
+const MOOD_META = [
+  { id: "focus", color: "from-indigo-500 to-violet-600", Icon: Flame },
+  { id: "calm", color: "from-sky-400 to-cyan-600", Icon: Leaf },
+  { id: "rain", color: "from-slate-500 to-blue-700", Icon: CloudRain },
+  { id: "energy", color: "from-amber-400 to-orange-600", Icon: Zap },
+  { id: "soft", color: "from-rose-400 to-pink-600", Icon: Heart },
+] as const;
 
 export default function StudyMusicPage() {
-  const [mood, setMood] = useState<Mood>(MOODS[0]);
-  const [playing, setPlaying] = useState(true);
+  const [moodId, setMoodId] = useState<string>("focus");
+  const [clipIdx, setClipIdx] = useState(0);
+  const [toneOn, setToneOn] = useState(false);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const nodesRef = useRef<AudioNode[]>([]);
 
-  const src = useMemo(() => embedFor(mood.query), [mood]);
+  const playlist = MOOD_PLAYLISTS[moodId];
+  const clip = playlist.clips[clipIdx % playlist.clips.length];
+  const embed = useMemo(() => ytEmbed(clip.id), [clip.id]);
+
+  const stopTone = () => {
+    try {
+      nodesRef.current.forEach((n) => {
+        try {
+          (n as OscillatorNode).stop?.();
+        } catch {
+          // ignore
+        }
+        n.disconnect?.();
+      });
+      void ctxRef.current?.close();
+    } catch {
+      // ignore
+    }
+    nodesRef.current = [];
+    ctxRef.current = null;
+    setToneOn(false);
+  };
+
+  const playTone = () => {
+    stopTone();
+    const ctx = new AudioContext();
+    const master = ctx.createGain();
+    master.gain.value = 0.04;
+    master.connect(ctx.destination);
+
+    const freqs =
+      moodId === "energy"
+        ? [196, 247, 294]
+        : moodId === "rain"
+          ? [110, 146]
+          : moodId === "soft"
+            ? [174, 220]
+            : [164, 196, 246];
+
+    const nodes: AudioNode[] = [master];
+    freqs.forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = i === 0 ? "sine" : "triangle";
+      o.frequency.value = f;
+      g.gain.value = 0.25 / freqs.length;
+      o.connect(g);
+      g.connect(master);
+      o.start();
+      nodes.push(o, g);
+    });
+
+    // soft noise for rain mood
+    if (moodId === "rain") {
+      const bufferSize = 2 * ctx.sampleRate;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      noise.loop = true;
+      const ng = ctx.createGain();
+      ng.gain.value = 0.015;
+      noise.connect(ng);
+      ng.connect(master);
+      noise.start();
+      nodes.push(noise, ng);
+    }
+
+    ctxRef.current = ctx;
+    nodesRef.current = nodes;
+    setToneOn(true);
+  };
 
   return (
     <div className="px-4 py-6 lg:px-8 lg:py-8">
@@ -77,22 +113,24 @@ export default function StudyMusicPage() {
           Play by how you feel
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-500">
-          Pick a mood — SmartLearn loads instrumental / study-safe music{" "}
-          <strong>inside the page</strong> (no random entertainment tabs).
+          YouTube player below works in-page. If your network blocks embeds, use{" "}
+          <strong>Instant ambient tone</strong> (always works offline-ish).
         </p>
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {MOODS.map((m) => {
+        {MOOD_META.map((m) => {
+          const pl = MOOD_PLAYLISTS[m.id];
           const Icon = m.Icon;
-          const active = mood.id === m.id;
+          const active = moodId === m.id;
           return (
             <button
               key={m.id}
               type="button"
               onClick={() => {
-                setMood(m);
-                setPlaying(true);
+                setMoodId(m.id);
+                setClipIdx(0);
+                stopTone();
               }}
               className={cn(
                 "sl-card rounded-2xl border p-4 text-left transition",
@@ -110,47 +148,77 @@ export default function StudyMusicPage() {
                 <Icon className="h-5 w-5" />
               </div>
               <div className="mt-3 text-sm font-bold text-slate-900">
-                {m.label}
+                {pl.label}
               </div>
-              <div className="text-[11px] text-slate-500">{m.blurb}</div>
+              <div className="text-[11px] text-slate-500">{pl.blurb}</div>
             </button>
           );
         })}
       </div>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        {playlist.clips.map((c, i) => (
+          <button
+            key={c.id + i}
+            type="button"
+            onClick={() => {
+              setClipIdx(i);
+              stopTone();
+            }}
+            className={cn(
+              "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+              clipIdx === i
+                ? "bg-violet-600 text-white"
+                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-violet-50"
+            )}
+          >
+            Track {i + 1}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => (toneOn ? stopTone() : playTone())}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold transition",
+            toneOn
+              ? "bg-emerald-600 text-white"
+              : "bg-slate-900 text-white hover:bg-slate-800"
+          )}
+        >
+          <Volume2 className="h-3.5 w-3.5" />
+          {toneOn ? "Stop ambient tone" : "Instant ambient tone"}
+        </button>
+      </div>
+
       <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-slate-950 shadow-xl">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div className="text-sm font-bold text-white">
-            Now playing · {mood.label}
+          <div className="min-w-0">
+            <div className="truncate text-sm font-bold text-white">
+              {clip.title}
+            </div>
+            <div className="text-[11px] text-slate-400">{clip.channel}</div>
           </div>
-          <button
-            type="button"
-            onClick={() => setPlaying((p) => !p)}
-            className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20"
+          <a
+            href={`https://www.youtube.com/watch?v=${clip.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 text-[11px] font-semibold text-violet-300 hover:underline"
           >
-            {playing ? (
-              <>
-                <Pause className="h-3.5 w-3.5" /> Pause view
-              </>
-            ) : (
-              <>
-                <Play className="h-3.5 w-3.5" /> Show player
-              </>
-            )}
-          </button>
+            Open YT
+          </a>
         </div>
-        {playing && (
-          <iframe
-            key={src}
-            title={mood.label}
-            src={src}
-            className="aspect-video w-full"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          />
-        )}
-        <p className="bg-slate-900 px-4 py-2 text-[11px] text-slate-500">
-          In-app only · study / instrumental search filter · stays on SmartLearn
+        <iframe
+          key={embed}
+          title={clip.title}
+          src={embed}
+          className="aspect-video w-full bg-black"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+        <p className="flex items-center gap-2 bg-slate-900 px-4 py-2 text-[11px] text-slate-500">
+          <Play className="h-3 w-3" />
+          In-app embed · if blank, try another track or ambient tone
         </p>
       </div>
     </div>
