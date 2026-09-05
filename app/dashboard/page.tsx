@@ -56,6 +56,13 @@ const tiles = [
     tone: "bg-emerald-50 text-emerald-600",
   },
   {
+    href: "/feynman",
+    title: "Feynman Mode",
+    desc: "Explain like you're 12 · AI grades you",
+    icon: Brain,
+    tone: "bg-violet-50 text-violet-700",
+  },
+  {
     href: "/safe-search",
     title: "Safe YouTube",
     desc: "Education videos in-app only",

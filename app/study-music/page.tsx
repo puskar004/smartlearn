@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Music2,
   Play,
@@ -10,17 +10,19 @@ import {
   Zap,
   Heart,
   Brain,
-  Piano,
   Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SPOTIFY_MOODS, spotifyEmbed } from "@/lib/spotify-catalog";
-import { setGlobalMusic } from "@/components/GlobalMusicPlayer";
+import {
+  getGlobalMusic,
+  setGlobalMusic,
+} from "@/components/GlobalMusicPlayer";
 
 const ICONS: Record<string, typeof Flame> = {
   focus: Flame,
   lofi: Music2,
-  piano: Piano,
+  piano: Leaf,
   intense: Zap,
   brain: Brain,
   jazz: Sparkles,
@@ -41,32 +43,43 @@ const COLORS: Record<string, string> = {
 
 export default function StudyMusicPage() {
   const [moodId, setMoodId] = useState(SPOTIFY_MOODS[0].id);
+  const [armed, setArmed] = useState(false);
   const mood = SPOTIFY_MOODS.find((m) => m.id === moodId) || SPOTIFY_MOODS[0];
   const embed = spotifyEmbed(mood.spotifyType, mood.spotifyId);
 
-  const playAcrossApp = () => {
+  useEffect(() => {
+    const g = getGlobalMusic();
+    if (g?.spotifyId) {
+      const m = SPOTIFY_MOODS.find((x) => x.spotifyId === g.spotifyId);
+      if (m) setMoodId(m.id);
+      setArmed(Boolean(g.playing));
+    }
+  }, []);
+
+  const armSidePlayer = () => {
     setGlobalMusic({
       spotifyType: mood.spotifyType,
       spotifyId: mood.spotifyId,
       title: mood.label,
       playing: true,
     });
+    setArmed(true);
   };
 
   return (
     <div className="px-4 py-6 lg:px-8 lg:py-8">
       <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/70 p-6 shadow-sm backdrop-blur sm:p-8">
         <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-          <Music2 className="h-3.5 w-3.5" /> Mood Music · Spotify only
+          <Music2 className="h-3.5 w-3.5" /> Mood Music · Spotify
         </div>
         <h1 className="mt-3 text-3xl font-black text-slate-900">
-          Spotify study soundtracks
+          Your Spotify, inside SmartLearn
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-500">
-          YouTube removed. Log in to <strong>your Spotify</strong> inside the
-          player below (no new tab). Use{" "}
-          <strong>Play across app</strong> so music keeps going on Home, Join
-          Class, and every section.
+          Log in with <strong>your Spotify account inside the player</strong>{" "}
+          (no new tab). Then press <strong>Keep playing on side</strong> — when
+          you open Home, NCERT, Quiz, etc., a <strong>small side player</strong>{" "}
+          keeps the music going.
         </p>
       </div>
 
@@ -78,7 +91,10 @@ export default function StudyMusicPage() {
             <button
               key={m.id}
               type="button"
-              onClick={() => setMoodId(m.id)}
+              onClick={() => {
+                setMoodId(m.id);
+                setArmed(false);
+              }}
               className={cn(
                 "sl-card rounded-2xl border p-4 text-left transition",
                 active
@@ -103,17 +119,19 @@ export default function StudyMusicPage() {
         })}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={playAcrossApp}
-          className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/25 hover:bg-emerald-500"
+          onClick={armSidePlayer}
+          className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-emerald-600/25 hover:bg-emerald-500"
         >
-          <Play className="h-3.5 w-3.5" /> Play across app
+          <Play className="h-3.5 w-3.5" /> Keep playing on side
         </button>
-        <span className="self-center text-[11px] text-slate-500">
-          Mini player sticks to bottom · stays on route change
-        </span>
+        {armed && (
+          <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700">
+            Side player armed · leave this page to see it
+          </span>
+        )}
       </div>
 
       <div className="mt-6 overflow-hidden rounded-3xl border border-emerald-200/60 bg-[#121212] shadow-xl">
@@ -123,7 +141,8 @@ export default function StudyMusicPage() {
               {mood.label}
             </div>
             <div className="text-[11px] text-emerald-400/90">
-              Spotify embed · sign in here if prompted · never opens a new tab
+              Sign in to Spotify here if asked · play a track · then “Keep
+              playing on side”
             </div>
           </div>
         </div>

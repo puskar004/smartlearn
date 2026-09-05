@@ -37,6 +37,8 @@ export type UserProgress = {
   tabSwitchCount: number;
   chaptersOpened: string[];
   boardExamDate: string | null;
+  /** Chapters student selected for their personal syllabus / board plan */
+  planChapterIds: string[];
 };
 
 const PREFIX = "sl_user_v2_";
@@ -61,6 +63,7 @@ export function emptyProgress(userId: string): UserProgress {
     tabSwitchCount: 0,
     chaptersOpened: [],
     boardExamDate: null,
+    planChapterIds: [],
   };
 }
 

@@ -22,6 +22,7 @@ import {
   Upload,
   Radio,
   Link2,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getJoinedClass, getRole } from "@/lib/teacher-store";
@@ -33,12 +34,13 @@ const studentNav = [
   { href: "/pyq", label: "PYQs", icon: ClipboardList },
   { href: "/quiz", label: "Practice & Quiz", icon: Target },
   { href: "/ai-tutor", label: "AI Tutor", icon: Brain },
+  { href: "/feynman", label: "Feynman Mode", icon: Sparkles },
   { href: "/blueprint", label: "Study Plan", icon: CalendarDays },
   { href: "/mistakes", label: "Progress", icon: LineChart },
   { href: "/study-music", label: "Mood Music", icon: Music2 },
   { href: "/join-class", label: "Join Teacher", icon: Link2 },
   { href: "/parent", label: "Parent Portal", icon: Shield },
-  { href: "/common-room", label: "Common Room", icon: Sparkles },
+  { href: "/common-room", label: "Common Room", icon: MessageSquare },
 ];
 
 const teacherNav = [
