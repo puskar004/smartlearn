@@ -18,10 +18,10 @@ export default function ChapterQuizPage() {
     () => allChapters().find((c) => c.id === chapterId),
     [chapterId]
   );
-  const questions = useMemo(
-    () => getQuizByChapterId(chapterId, 10) || [],
-    [chapterId]
-  );
+  const questions = useMemo(() => {
+    const n = chapterId === "12-maths-ch1" ? 25 : 10;
+    return getQuizByChapterId(chapterId, n) || [];
+  }, [chapterId]);
 
   const [idx, setIdx] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);

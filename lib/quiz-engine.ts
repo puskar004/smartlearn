@@ -84,6 +84,7 @@ export function buildChapterQuiz(
     topics: chapter.topics,
     subjectName: chapter.subjectName,
     subjectId: chapter.subjectId,
+    chapterId: chapter.id,
   });
 
   const seed = hash(chapter.id + chapter.title);
@@ -113,7 +114,10 @@ export function buildChapterQuiz(
 export function getQuizByChapterId(chapterId: string, count = 10) {
   const chapter = allChapters().find((c) => c.id === chapterId);
   if (!chapter) return null;
-  return buildChapterQuiz(chapter, count);
+  // Relations & Functions has a 100-Q bank — default longer paper
+  const n =
+    chapterId === "12-maths-ch1" && count <= 10 ? 25 : count;
+  return buildChapterQuiz(chapter, n);
 }
 
 export function pickDailyRapidSet(grade?: string, n = 15) {

@@ -3,6 +3,8 @@
  * Keyed loosely by subject; matched to chapter title/topics.
  */
 
+import { MATHS_12_CH1_RF } from "./quiz-maths-12-ch1";
+
 export type BankQ = {
   prompt: string;
   options: [string, string, string, string];
@@ -387,12 +389,31 @@ export const BOARD_BANK: BankQ[] = [
   },
 ];
 
+/** Chapter-specific full banks (CSV / curated) */
+const CHAPTER_BANKS: Record<string, BankQ[]> = {
+  "12-maths-ch1": MATHS_12_CH1_RF as BankQ[],
+};
+
 export function questionsForChapter(input: {
   title: string;
   topics: string[];
   subjectName?: string;
   subjectId?: string;
+  chapterId?: string;
 }): BankQ[] {
+  if (input.chapterId && CHAPTER_BANKS[input.chapterId]) {
+    return CHAPTER_BANKS[input.chapterId];
+  }
+
+  // Class 12 Relations and Functions without id
+  const titleL = (input.title || "").toLowerCase();
+  if (
+    titleL.includes("relations and functions") &&
+    (input.subjectName || "").toLowerCase().includes("math")
+  ) {
+    return MATHS_12_CH1_RF as BankQ[];
+  }
+
   const hay = [
     input.title,
     input.subjectName || "",
