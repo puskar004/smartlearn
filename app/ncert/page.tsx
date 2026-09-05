@@ -2,12 +2,20 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { BookOpen, ExternalLink, FileText } from "lucide-react";
+import { BookOpen, ExternalLink, FileText, Library } from "lucide-react";
 import { CURRICULUM, type Grade } from "@/lib/curriculum";
+import { useAuth } from "@clerk/nextjs";
+import { markChapterOpened } from "@/lib/user-store";
 
 export default function NcertPage() {
   const [grade, setGrade] = useState<Grade>("12");
+  const { userId } = useAuth();
   const pack = useMemo(() => CURRICULUM.find((g) => g.grade === grade)!, [grade]);
+
+  const pdfCount = pack.subjects.reduce(
+    (n, s) => n + s.chapters.filter((c) => c.ncertPdf).length,
+    0
+  );
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
@@ -20,8 +28,8 @@ export default function NcertPage() {
             Complete CBSE bookshelf
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            Class 10–12 subjects, every listed chapter, NCERT entry points, and
-            topic maps for rapid study.
+            Every subject · every chapter · official NCERT portal links (
+            {pdfCount} chapter links in Class {grade}).
           </p>
         </div>
         <div className="flex gap-2 rounded-xl bg-slate-100 p-1">
@@ -56,17 +64,31 @@ export default function NcertPage() {
                     {subject.name}
                   </h2>
                   <p className="text-xs text-slate-500">
-                    {subject.chapters.length} chapters · PYQs{" "}
-                    {subject.pyqYears[0]}–{subject.pyqYears.at(-1)}
+                    {subject.chapters.length} chapters ·{" "}
+                    {subject.chapters.filter((c) => c.ncertPdf).length} NCERT
+                    links · PYQs {subject.pyqYears[0]}–
+                    {subject.pyqYears.at(-1)}
                   </p>
                 </div>
               </div>
-              <Link
-                href={`/pyq?grade=${grade}&subject=${subject.id}`}
-                className="text-xs font-semibold text-indigo-600 hover:underline"
-              >
-                Open PYQs
-              </Link>
+              <div className="flex flex-col items-end gap-1">
+                {subject.bookUrl && (
+                  <a
+                    href={subject.bookUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:underline"
+                  >
+                    <Library className="h-3 w-3" /> Full book
+                  </a>
+                )}
+                <Link
+                  href={`/pyq?grade=${grade}&subject=${subject.id}`}
+                  className="text-xs font-semibold text-indigo-600 hover:underline"
+                >
+                  Open PYQs
+                </Link>
+              </div>
             </div>
 
             <ul className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-1">
@@ -84,16 +106,19 @@ export default function NcertPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    {ch.ncertPdf && (
+                    {ch.ncertPdf ? (
                       <a
                         href={ch.ncertPdf}
                         target="_blank"
                         rel="noreferrer"
+                        onClick={() => userId && markChapterOpened(userId, ch.id)}
                         className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:underline"
                       >
-                        <FileText className="h-3 w-3" /> NCERT
+                        <FileText className="h-3 w-3" /> NCERT PDF
                         <ExternalLink className="h-3 w-3" />
                       </a>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">—</span>
                     )}
                     <Link
                       href={`/quiz/${ch.id}`}

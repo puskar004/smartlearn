@@ -3,12 +3,15 @@
 import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { Check, X } from "lucide-react";
 import { allChapters } from "@/lib/curriculum";
 import { getQuizByChapterId } from "@/lib/quiz-engine";
+import { recordQuiz } from "@/lib/user-store";
 
 export default function ChapterQuizPage() {
   const params = useParams();
+  const { userId } = useAuth();
   const chapterId = String(params.chapterId || "");
   const chapter = useMemo(
     () => allChapters().find((c) => c.id === chapterId),
@@ -23,6 +26,15 @@ export default function ChapterQuizPage() {
   const [selected, setSelected] = useState<number | null>(null);
   const [score, setScore] = useState(0);
   const [done, setDone] = useState(false);
+  const [misses, setMisses] = useState<
+    {
+      prompt: string;
+      yourAnswer: string;
+      correctAnswer: string;
+      explanation: string;
+    }[]
+  >([]);
+  const [saved, setSaved] = useState(false);
 
   if (!chapter || questions.length === 0) {
     return (
@@ -40,11 +52,43 @@ export default function ChapterQuizPage() {
   const choose = (i: number) => {
     if (selected !== null) return;
     setSelected(i);
-    if (i === q.correctIndex) setScore((s) => s + 1);
+    if (i === q.correctIndex) {
+      setScore((s) => s + 1);
+    } else {
+      setMisses((m) => [
+        ...m,
+        {
+          prompt: q.prompt,
+          yourAnswer: q.options[i],
+          correctAnswer: q.options[q.correctIndex],
+          explanation: q.explanation,
+        },
+      ]);
+    }
   };
 
-  const next = () => {
+  const nextAndMaybeSave = () => {
     if (idx + 1 >= questions.length) {
+      if (userId && !saved) {
+        const finalScore = score;
+        recordQuiz(
+          userId,
+          {
+            chapterId,
+            score: finalScore,
+            total: questions.length,
+            at: Date.now(),
+          },
+          misses.map((m) => ({
+            chapterId,
+            chapterTitle: chapter.title,
+            subjectName: chapter.subjectName,
+            grade: chapter.grade,
+            ...m,
+          }))
+        );
+        setSaved(true);
+      }
       setDone(true);
       return;
     }
@@ -66,20 +110,35 @@ export default function ChapterQuizPage() {
           <p className="mt-6 text-5xl font-black text-indigo-600">{pct}%</p>
           <p className="mt-2 text-sm text-slate-600">
             {score} / {questions.length} correct · +{score * 2} XP
+            {userId ? " · saved to your profile" : " · sign in to save"}
           </p>
-          <div className="mt-6 flex justify-center gap-3">
+          {misses.length > 0 && (
+            <p className="mt-2 text-xs text-rose-600">
+              {misses.length} mistake{misses.length > 1 ? "s" : ""} added to your
+              Mistake Vault
+            </p>
+          )}
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
             <button
               type="button"
               onClick={() => {
                 setIdx(0);
                 setSelected(null);
                 setScore(0);
+                setMisses([]);
                 setDone(false);
+                setSaved(false);
               }}
               className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white"
             >
               Retry
             </button>
+            <Link
+              href="/mistakes"
+              className="rounded-xl bg-rose-100 px-4 py-2 text-sm font-bold text-rose-800"
+            >
+              Mistake Vault
+            </Link>
             <Link
               href="/quiz"
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
@@ -155,7 +214,7 @@ export default function ChapterQuizPage() {
             <div className="mt-3">
               <button
                 type="button"
-                onClick={next}
+                onClick={nextAndMaybeSave}
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white"
               >
                 {idx + 1 >= questions.length ? "See score" : "Next question"}

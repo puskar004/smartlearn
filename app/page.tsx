@@ -159,6 +159,27 @@ export default function HomePage() {
             desc="Paid lock-in: no back navigation until the timer ends. Deep work only."
             color="bg-rose-50 text-rose-600"
           />
+          <Feature
+            href="/mistakes"
+            icon={<Trophy className="h-5 w-5" />}
+            title="Mistake Vault"
+            desc="Only YOUR wrong answers. New login = empty vault. Relearn what you miss."
+            color="bg-rose-50 text-rose-700"
+          />
+          <Feature
+            href="/feynman"
+            icon={<Brain className="h-5 w-5" />}
+            title="Feynman Mode"
+            desc="Explain a concept in plain words — AI grades clarity. Mastery, not mugging."
+            color="bg-violet-50 text-violet-700"
+          />
+          <Feature
+            href="/blueprint"
+            icon={<GraduationCap className="h-5 w-5" />}
+            title="Board Blueprint"
+            desc="Exam countdown + daily missions built from your weakness heat map."
+            color="bg-blue-50 text-blue-700"
+          />
         </div>
       </section>
 

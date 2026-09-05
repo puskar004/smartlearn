@@ -1,3 +1,5 @@
+import { resolveNcertUrl, resolveSubjectBookUrl } from "./ncert-books";
+
 export type Grade = "10" | "11" | "12";
 
 export type Chapter = {
@@ -14,6 +16,8 @@ export type Subject = {
   icon: string;
   chapters: Chapter[];
   pyqYears: number[];
+  /** Full NCERT book portal for this subject */
+  bookUrl?: string;
 };
 
 export type GradePack = {
@@ -43,7 +47,7 @@ function ch(
   };
 }
 
-export const CURRICULUM: GradePack[] = [
+const _RAW_CURRICULUM: GradePack[] = [
   {
     grade: "10",
     label: "Class 10",
@@ -496,6 +500,26 @@ export const CURRICULUM: GradePack[] = [
     ],
   },
 ];
+
+/** Attach NCERT PDF/portal links for every chapter + subject book hub */
+function withNcertLinks(packs: GradePack[]): GradePack[] {
+  return packs.map((g) => ({
+    ...g,
+    subjects: g.subjects.map((s) => ({
+      ...s,
+      bookUrl: resolveSubjectBookUrl(g.grade, s.id),
+      chapters: s.chapters.map((c) => ({
+        ...c,
+        ncertPdf:
+          c.ncertPdf || resolveNcertUrl(g.grade, s.id, c.number) || undefined,
+      })),
+    })),
+  }));
+}
+
+export type SubjectWithBook = Subject & { bookUrl?: string };
+
+export const CURRICULUM: GradePack[] = withNcertLinks(_RAW_CURRICULUM);
 
 export function getGrade(grade: Grade) {
   return CURRICULUM.find((g) => g.grade === grade)!;

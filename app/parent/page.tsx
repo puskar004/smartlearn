@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { MessageCircle, Shield } from "lucide-react";
 import {
   getParentPhone,
@@ -12,19 +12,20 @@ import {
 
 export default function ParentPortalPage() {
   const { user } = useUser();
+  const { userId } = useAuth();
   const [phone, setPhone] = useState("");
   const [focusOn, setFocusOn] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    setPhone(getParentPhone());
+    setPhone(getParentPhone(userId));
     setFocusOn(isFocusLockEnabled());
-  }, []);
+  }, [userId]);
 
   const save = () => {
-    setParentPhone(phone);
+    setParentPhone(phone, userId);
     setFocusLockEnabled(focusOn);
-    setStatus("Parent settings saved on this device.");
+    setStatus("Parent settings saved for this student account.");
   };
 
   const sendSummary = async () => {

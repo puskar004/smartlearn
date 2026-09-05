@@ -12,13 +12,21 @@ const PARENT_KEY = "sl_parent_phone";
 const FOCUS_KEY = "sl_focus_lock_enabled";
 const COOLDOWN_MS = 45_000;
 
-export function getParentPhone() {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(PARENT_KEY) || "";
+function parentKey(userId?: string | null) {
+  return userId ? `${PARENT_KEY}_${userId}` : PARENT_KEY;
 }
 
-export function setParentPhone(phone: string) {
-  localStorage.setItem(PARENT_KEY, phone.replace(/\D/g, ""));
+export function getParentPhone(userId?: string | null) {
+  if (typeof window === "undefined") return "";
+  return (
+    localStorage.getItem(parentKey(userId)) ||
+    localStorage.getItem(PARENT_KEY) ||
+    ""
+  );
+}
+
+export function setParentPhone(phone: string, userId?: string | null) {
+  localStorage.setItem(parentKey(userId), phone.replace(/\D/g, ""));
 }
 
 export function isFocusLockEnabled() {
@@ -32,7 +40,7 @@ export function setFocusLockEnabled(on: boolean) {
 
 /** When signed-in student leaves tab/window, notify parent via WhatsApp. */
 export default function FocusLock() {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
   const [banner, setBanner] = useState<string | null>(null);
   const lastAlert = useRef(0);
@@ -49,7 +57,7 @@ export default function FocusLock() {
       user?.primaryEmailAddress?.emailAddress ||
       "Student";
     const msg = buildParentTabSwitchMessage(name);
-    const phone = getParentPhone();
+    const phone = getParentPhone(userId);
 
     setBanner(
       phone
@@ -84,7 +92,7 @@ export default function FocusLock() {
     }
 
     setTimeout(() => setBanner(null), 6000);
-  }, [isSignedIn, user]);
+  }, [isSignedIn, user, userId]);
 
   useEffect(() => {
     if (!isSignedIn) return;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { User } from "lucide-react";
 import EyeFocusGuard from "@/components/EyeFocusGuard";
 import {
@@ -11,28 +11,42 @@ import {
   setFocusLockEnabled,
 } from "@/components/FocusLock";
 import type { Grade } from "@/lib/curriculum";
-
-const GRADE_KEY = "sl_grade";
+import {
+  hardResetUser,
+  loadProgress,
+  saveProgress,
+  type UserProgress,
+} from "@/lib/user-store";
 
 export default function ProfilePage() {
   const { user, isSignedIn } = useUser();
+  const { userId } = useAuth();
   const [phone, setPhone] = useState("");
   const [grade, setGrade] = useState<Grade>("12");
   const [focusOn, setFocusOn] = useState(true);
   const [eyeGuard, setEyeGuard] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [progress, setProgress] = useState<UserProgress | null>(null);
 
   useEffect(() => {
-    setPhone(getParentPhone());
+    setPhone(getParentPhone(userId));
     setFocusOn(isFocusLockEnabled());
-    const g = localStorage.getItem(GRADE_KEY) as Grade | null;
-    if (g) setGrade(g);
-  }, []);
+    if (userId) {
+      const p = loadProgress(userId);
+      setProgress(p);
+      setGrade(p.grade);
+    }
+  }, [userId]);
 
   const save = () => {
-    setParentPhone(phone);
+    setParentPhone(phone, userId);
     setFocusLockEnabled(focusOn);
-    localStorage.setItem(GRADE_KEY, grade);
+    if (userId) {
+      const p = loadProgress(userId);
+      p.grade = grade;
+      saveProgress(p);
+      setProgress(p);
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -46,8 +60,8 @@ export default function ProfilePage() {
         Focus identity &amp; device permissions
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Camera + microphone power the eye-focus alarm. Parent number powers
-        WhatsApp tab-switch alerts.
+        Each login has its own XP, mistakes, and plan. Camera powers the 30s
+        eye-focus alarm.
       </p>
 
       <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -56,12 +70,19 @@ export default function ProfilePage() {
             <span className="font-semibold text-slate-900">Signed in: </span>
             {isSignedIn
               ? user?.primaryEmailAddress?.emailAddress || user?.fullName
-              : "Not signed in — Sign In from the header"}
+              : "Not signed in"}
           </div>
           <div className="mt-1">
             <span className="font-semibold text-slate-900">Name: </span>
             {user?.fullName || "—"}
           </div>
+          {progress && (
+            <div className="mt-1 text-xs text-slate-500">
+              XP {progress.xp} · Streak {progress.streak}d · Mistakes{" "}
+              {progress.mistakes.length} · Account data since{" "}
+              {new Date(progress.createdAt).toLocaleDateString()}
+            </div>
+          )}
         </div>
 
         <label className="mt-5 block text-sm font-semibold text-slate-700">
@@ -105,15 +126,34 @@ export default function ProfilePage() {
           Enable camera + mic eye-focus alarm
         </label>
 
-        <button
-          type="button"
-          onClick={save}
-          className="mt-6 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white"
-        >
-          Save profile
-        </button>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={save}
+            className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white"
+          >
+            Save profile
+          </button>
+          {userId && (
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  confirm(
+                    "Reset ALL progress for this account on this device? (XP, mistakes, quizzes)"
+                  )
+                ) {
+                  setProgress(hardResetUser(userId));
+                }
+              }}
+              className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-bold text-rose-700"
+            >
+              Fresh start
+            </button>
+          )}
+        </div>
         {saved && (
-          <span className="ml-3 text-xs font-semibold text-emerald-600">
+          <span className="ml-1 mt-2 inline-block text-xs font-semibold text-emerald-600">
             Saved
           </span>
         )}

@@ -19,9 +19,12 @@ const academic = [
   { href: "/ai-tutor", label: "Gemini AI Tutor" },
   { href: "/safe-search", label: "In-App Safe YouTube" },
   { href: "/quiz", label: "Chapter Rapid Quizzes" },
+  { href: "/feynman", label: "Feynman Mode (Teach-back)" },
+  { href: "/mistakes", label: "Mistake Vault" },
 ];
 
 const focusTools = [
+  { href: "/blueprint", label: "Board Blueprint" },
   { href: "/extreme", label: "Extreme Mode (Paid)" },
   { href: "/common-room", label: "Common Room Q&A" },
   { href: "/profile", label: "Focus Profile & Camera" },
