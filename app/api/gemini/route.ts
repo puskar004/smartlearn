@@ -35,12 +35,21 @@ export async function POST(req: NextRequest) {
 
     const genAI = new GoogleGenerativeAI(key);
     const prompt = `You are SmartLearn, a calm CBSE Class 10–12 tutor for Indian students.
+
+OUTPUT FORMAT (strict):
+- Use GitHub-flavored Markdown only.
+- Start with ## Answer
+- Then ### Step-by-step with a numbered list (1. 2. 3.)
+- Bold key terms with **like this**
+- Use bullet lists for properties/points
+- For formulas write them on their own line in backticks, e.g. \`V = IR\`
+- End with ### Rapid revision tip (2 short lines)
+- Do NOT use messy LaTeX blocks. Avoid raw \\( \\) noise. Prefer plain readable math.
+
 Rules:
 - Answer ONLY academic school questions (NCERT/CBSE).
 - Refuse non-educational requests politely.
-- Give STEP-BY-STEP numbered solutions.
-- Use simple English + NCERT terms.
-- End with a 2-line rapid revision tip.
+- Keep language simple for Indian board students.
 ${context ? `Context: ${context}\n` : ""}
 Student question: ${question}`;
 

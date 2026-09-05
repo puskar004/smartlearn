@@ -123,8 +123,12 @@ export default function ProfilePage() {
             checked={eyeGuard}
             onChange={(e) => setEyeGuard(e.target.checked)}
           />
-          Enable camera + mic eye-focus alarm
+          Enable camera + mic eye-focus alarm (allow permission when asked)
         </label>
+        <p className="mt-1 text-[11px] text-slate-400">
+          Works best in Chrome. Keep face lit and centered. Closed eyes / looking
+          away ~30s triggers alarm.
+        </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
           <button

@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { Brain, Loader2, Sparkles } from "lucide-react";
 import { loadProgress, saveProgress } from "@/lib/user-store";
+import MarkdownAnswer from "@/components/MarkdownAnswer";
 
 export default function FeynmanPage() {
   const { userId, isSignedIn } = useAuth();
@@ -119,8 +120,8 @@ SIMPLER VERSION: <5-8 line NCERT-simple re-explanation a Class student can memor
         </p>
       )}
       {feedback && (
-        <div className="mt-4 whitespace-pre-wrap rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-relaxed text-slate-700 shadow-sm">
-          {feedback}
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <MarkdownAnswer content={feedback} />
         </div>
       )}
     </div>

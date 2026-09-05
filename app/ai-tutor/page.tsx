@@ -3,6 +3,7 @@
 import { FormEvent, Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Bot, Loader2, Send, Sparkles } from "lucide-react";
+import MarkdownAnswer from "@/components/MarkdownAnswer";
 
 function AiInner() {
   const sp = useSearchParams();
@@ -21,7 +22,12 @@ function AiInner() {
       const res = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, context }),
+        body: JSON.stringify({
+          question,
+          context,
+          format:
+            "Respond in clean GitHub-flavored Markdown: use ## headings, numbered lists, **bold** key terms, and $...$ only if needed as plain text. No messy symbols.",
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
@@ -42,8 +48,8 @@ function AiInner() {
         Step-by-step NCERT solutions
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Ask any Class 10–12 doubt. Gemini responds with numbered steps and a
-        rapid revision tip. Non-study queries are refused.
+        Answers render as clean formatted notes (headings, lists, bold) — easy
+        to revise.
       </p>
 
       <form onSubmit={ask} className="mt-8 space-y-3">
@@ -82,13 +88,11 @@ function AiInner() {
       )}
 
       {answer && (
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3 text-sm font-bold text-slate-900">
             <Bot className="h-4 w-4 text-violet-600" /> SmartLearn Tutor
           </div>
-          <div className="prose prose-sm max-w-none whitespace-pre-wrap text-slate-700">
-            {answer}
-          </div>
+          <MarkdownAnswer content={answer} />
         </div>
       )}
     </div>
