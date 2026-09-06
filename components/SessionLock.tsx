@@ -38,17 +38,10 @@ export default function SessionLockChrome() {
   useEffect(() => {
     if (!locked) return;
 
-    const enterFs = () => {
-      try {
-        void document.documentElement.requestFullscreen?.();
-      } catch {
-        // ignore
-      }
-    };
-    enterFs();
-
+    // Don't force fullscreen during camera/mic/share dialogs — parent calls after ready
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Block Esc from being the only exit during test; browser may still exit FS
+      if (e.key === "Escape" && reason === "test") {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -60,20 +53,11 @@ export default function SessionLockChrome() {
     window.addEventListener("popstate", onPop);
     window.addEventListener("keydown", onKey, true);
 
-    const onFs = () => {
-      if (!document.fullscreenElement) {
-        // soft re-request
-        setTimeout(enterFs, 400);
-      }
-    };
-    document.addEventListener("fullscreenchange", onFs);
-
     return () => {
       window.removeEventListener("popstate", onPop);
       window.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("fullscreenchange", onFs);
     };
-  }, [locked]);
+  }, [locked, reason]);
 
   if (!locked) return null;
 

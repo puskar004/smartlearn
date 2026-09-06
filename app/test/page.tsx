@@ -93,17 +93,30 @@ export default function StudentTestPage() {
   useEffect(() => {
     if (inTest) {
       setSessionLock(true, "test");
-      try {
-        void document.documentElement.requestFullscreen?.();
-      } catch {
-        // ignore
-      }
       return () => setSessionLock(false);
     }
     setSessionLock(false);
     setProctorReady(false);
     setSetupError(null);
   }, [inTest]);
+
+  // Start exam clock only after proctor is ready (permissions don't burn timer)
+  useEffect(() => {
+    if (!proctorReady || !test || result) return;
+    const secs = Math.max(60, test.durationMin * 60);
+    setLeft(secs);
+    // try fullscreen after permissions so dialogs aren't blocked
+    const t = window.setTimeout(() => {
+      try {
+        if (!document.fullscreenElement) {
+          void document.documentElement.requestFullscreen?.();
+        }
+      } catch {
+        // ignore — some browsers block FS with screen share
+      }
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [proctorReady, test, result]);
 
   const goTo = (i: number) => {
     if (!test) return;
@@ -118,26 +131,42 @@ export default function StudentTestPage() {
 
   const submit = useCallback(
     async (auto = false, reason?: string) => {
-      if (!test || submitting || result) return;
+      if (!test || result) return;
+      if (submitting) return;
       setSubmitting(true);
       setError(reason || null);
       try {
+        const payload = {
+          action: "submit" as const,
+          code: test.code,
+          answers: answers.map((a) => (a < 0 ? -1 : a)),
+        };
         const res = await fetch("/api/tests", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "submit",
-            code: test.code,
-            answers: answers.map((a) => (a < 0 ? -1 : a)),
-          }),
+          body: JSON.stringify(payload),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Submit failed");
-        setResult({ score: data.result.score, total: data.result.total });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            (data && data.error) || `Submit failed (${res.status})`
+          );
+        }
+        setResult({
+          score: Number(data.result?.score ?? 0),
+          total: Number(data.result?.total ?? test.questions.length),
+        });
         if (auto && !reason) setError("Time over — answers auto-submitted.");
         if (reason) setError(reason);
+        try {
+          if (document.fullscreenElement) void document.exitFullscreen();
+        } catch {
+          // ignore
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed");
+        const msg = err instanceof Error ? err.message : "Submit failed";
+        setError(msg);
+        // Proctor fail still ends UI
         if (reason) {
           setResult({ score: 0, total: test.questions.length });
         }
@@ -148,6 +177,19 @@ export default function StudentTestPage() {
     },
     [test, submitting, result, answers]
   );
+
+  const requestSubmit = useCallback(() => {
+    if (!test || !proctorReady || submitting) return;
+    const incomplete =
+      counts.not_answered + counts.not_visited + counts.marked;
+    if (incomplete > 0) {
+      const ok = window.confirm(
+        `${incomplete} question(s) still incomplete. Submit anyway?`
+      );
+      if (!ok) return;
+    }
+    void submit(false);
+  }, [test, proctorReady, submitting, counts, submit]);
 
   const onProctorFail = useCallback(
     (reason: string) => {
@@ -443,20 +485,47 @@ export default function StudentTestPage() {
                 >
                   <ChevronLeft className="h-3.5 w-3.5" /> Back
                 </button>
+                {qi < n - 1 ? (
+                  <button
+                    type="button"
+                    disabled={!proctorReady}
+                    onClick={() => {
+                      setVisited((v) => {
+                        const n2 = [...v];
+                        n2[qi] = true;
+                        return n2;
+                      });
+                      goTo(qi + 1);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-500"
+                  >
+                    Save &amp; Next <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!proctorReady || submitting}
+                    onClick={() => requestSubmit()}
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
+                  >
+                    {submitting ? "Submitting…" : "Save & Submit test"}
+                  </button>
+                )}
+              </div>
+
+              {/* Always-visible submit on last Q + sticky bar */}
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  disabled={!proctorReady}
-                  onClick={() => {
-                    setVisited((v) => {
-                      const n2 = [...v];
-                      n2[qi] = true;
-                      return n2;
-                    });
-                    if (qi < n - 1) goTo(qi + 1);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white hover:bg-sky-500"
+                  disabled={!proctorReady || submitting}
+                  onClick={() => requestSubmit()}
+                  className="w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 disabled:opacity-50"
                 >
-                  Save &amp; Next <ChevronRight className="h-3.5 w-3.5" />
+                  {submitting
+                    ? "Submitting…"
+                    : qi >= n - 1
+                      ? "Submit test (last question)"
+                      : `Submit test (${counts.answered + counts.answered_marked}/${n} answered)`}
                 </button>
               </div>
             </div>
@@ -527,23 +596,24 @@ export default function StudentTestPage() {
               <button
                 type="button"
                 disabled={submitting || !proctorReady}
-                onClick={() => {
-                  const leftQ =
-                    counts.not_answered +
-                    counts.not_visited +
-                    counts.marked;
-                  const ok =
-                    leftQ === 0 ||
-                    window.confirm(
-                      `${leftQ} question(s) still incomplete. Submit anyway?`
-                    );
-                  if (ok) void submit(false);
-                }}
-                className="mt-4 w-full rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow hover:bg-emerald-500 disabled:opacity-60"
+                onClick={() => requestSubmit()}
+                className="mt-4 w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-black text-white shadow hover:bg-emerald-500 disabled:opacity-60"
               >
                 {submitting ? "Submitting…" : "Submit test"}
               </button>
             </aside>
+          </div>
+
+          {/* Mobile sticky submit */}
+          <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:hidden">
+            <button
+              type="button"
+              disabled={submitting || !proctorReady}
+              onClick={() => requestSubmit()}
+              className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white disabled:opacity-50"
+            >
+              {submitting ? "Submitting…" : "Submit test"}
+            </button>
           </div>
         </div>
       )}

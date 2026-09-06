@@ -164,22 +164,25 @@ export default function FocusLock() {
       if (isPdfReading()) return;
       if (document.visibilityState === "hidden") {
         alertParent();
+      } else if (document.visibilityState === "visible") {
+        // Coming back — force fullscreen again during student session
+        try {
+          if (
+            document.documentElement.dataset.sessionLock === "test" &&
+            !document.fullscreenElement
+          ) {
+            void document.documentElement.requestFullscreen?.();
+          }
+        } catch {
+          // ignore
+        }
       }
     };
 
-    const onBlur = () => {
-      if (!armed.current) return;
-      if (isPdfReading()) return;
-      // blur often fires with tab switch
-      if (document.visibilityState === "hidden") alertParent();
-    };
-
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("blur", onBlur);
     return () => {
       window.clearTimeout(armTimer);
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("blur", onBlur);
     };
   }, [isSignedIn, userId, role, onTeacher, alertParent]);
 

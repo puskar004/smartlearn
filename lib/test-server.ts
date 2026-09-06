@@ -154,8 +154,12 @@ export async function submitTest(
 ) {
   const test = await findTestByCode(code);
   if (!test) throw new Error("Test not found");
-  if (!test.active) throw new Error("Test is closed");
-  if (Date.now() > test.endsAt) throw new Error("Time is over");
+  if (!test.active) throw new Error("Test is closed by teacher");
+  // Grace: setup/proctor can eat clock; still accept while test is active
+  // (hard stop only if closed or 2h past end)
+  if (Date.now() > test.endsAt + 2 * 60 * 60 * 1000) {
+    throw new Error("Test window expired");
+  }
 
   let score = 0;
   test.questions.forEach((q, i) => {
