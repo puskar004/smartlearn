@@ -165,6 +165,9 @@ export default function ChapterQuizPage() {
       <div className="text-xs font-bold uppercase tracking-wide text-amber-600">
         Class {chapter.grade} · {chapter.subjectName} · Q {idx + 1}/
         {questions.length}
+        <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold normal-case text-emerald-700">
+          Subject-locked
+        </span>
       </div>
       <h1 className="mt-1 text-xl font-extrabold text-slate-900">
         {chapter.title}

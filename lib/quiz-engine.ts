@@ -74,24 +74,34 @@ function toQuestion(
   };
 }
 
-/** Board-level MCQs matched to chapter; options fully shuffled. */
+/** Board-level MCQs matched to chapter; options fully shuffled. Subject-locked. */
 export function buildChapterQuiz(
   chapter: Chapter & { subjectName?: string; subjectId?: string },
   count = 10
 ): QuizQuestion[] {
   const pool = questionsForChapter({
     title: chapter.title,
-    topics: chapter.topics,
+    topics: chapter.topics || [],
     subjectName: chapter.subjectName,
     subjectId: chapter.subjectId,
     chapterId: chapter.id,
   });
 
-  const seed = hash(chapter.id + chapter.title);
+  if (!pool.length) return [];
+
+  const seed = hash(chapter.id + chapter.title + (chapter.subjectName || ""));
   const rand = rng(seed);
   const picked: BankQ[] = [];
   const used = new Set<number>();
 
+  // Prefer first half of pool (higher chapter relevance scores)
+  const prefer = Math.min(pool.length, Math.max(count, Math.ceil(pool.length * 0.6)));
+  while (picked.length < count && used.size < prefer) {
+    const i = Math.floor(rand() * prefer);
+    if (used.has(i)) continue;
+    used.add(i);
+    picked.push(pool[i]);
+  }
   while (picked.length < count && used.size < pool.length) {
     const i = Math.floor(rand() * pool.length);
     if (used.has(i)) continue;
@@ -99,7 +109,6 @@ export function buildChapterQuiz(
     picked.push(pool[i]);
   }
 
-  // if still short, wrap
   let k = 0;
   while (picked.length < count) {
     picked.push(pool[k % pool.length]);

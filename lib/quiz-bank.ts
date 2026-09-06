@@ -1,9 +1,15 @@
 /**
  * Board-style CBSE MCQs (valid concepts, not fluff).
- * Keyed loosely by subject; matched to chapter title/topics.
+ * Strict subject lock via quiz-subject.ts — never mix Physics into History etc.
  */
 
 import { MATHS_12_CH1_RF } from "./quiz-maths-12-ch1";
+import {
+  resolveQuizSubject,
+  subjectLabel,
+  subjectOfBankQ,
+  type QuizSubject,
+} from "@/lib/quiz-subject";
 
 export type BankQ = {
   prompt: string;
@@ -394,6 +400,77 @@ const CHAPTER_BANKS: Record<string, BankQ[]> = {
   "12-maths-ch1": MATHS_12_CH1_RF as BankQ[],
 };
 
+function chapterLocalFallback(
+  title: string,
+  subject: QuizSubject,
+  topics: string[]
+): BankQ[] {
+  const label = subjectLabel(subject);
+  const topicHint = topics[0] || title;
+  return [
+    {
+      tags: [subject, title],
+      prompt: `In ${label} chapter “${title}”, the most board-relevant practice is:`,
+      options: [
+        "NCERT text + examples + previous year questions of this chapter",
+        "Random questions from a completely different subject",
+        "Only social media one-liners",
+        "Skipping definitions and diagrams",
+      ],
+      correctIndex: 0,
+      explanation: `Stay inside ${label} — CBSE marks NCERT language for this chapter.`,
+    },
+    {
+      tags: [subject, title],
+      prompt: `Key idea to revise first in “${title}” (${label}) is usually:`,
+      options: [
+        `Core definitions and examples related to “${topicHint}”`,
+        "Unrelated current affairs only",
+        "A different subject’s formula sheet",
+        "Skipping NCERT in-text questions",
+      ],
+      correctIndex: 0,
+      explanation: "Chapter keywords + one example beat mixed-subject cramming.",
+    },
+    {
+      tags: [subject, title],
+      prompt: `While answering a long question from “${title}”, you should:`,
+      options: [
+        `Use ${label} NCERT terms, steps and labelled diagrams from this chapter`,
+        "Copy Physics answers into a History paper",
+        "Write only one word always",
+        "Ignore units and keywords",
+      ],
+      correctIndex: 0,
+      explanation: "Subject-correct NCERT structure scores in board exams.",
+    },
+    {
+      tags: [subject, title],
+      prompt: `Self-check for “${title}” means:`,
+      options: [
+        `Timed MCQs only from ${label} / this chapter`,
+        "Mixing Chemistry MCQs into a Maths quiz",
+        "Only re-reading silently once",
+        "Avoiding any mistakes log",
+      ],
+      correctIndex: 0,
+      explanation: "Active recall must stay on the same subject and chapter.",
+    },
+    {
+      tags: [subject, title],
+      prompt: `If a question is clearly from another subject (not ${label}), you should:`,
+      options: [
+        "Skip it — it does not belong to this chapter quiz",
+        "Answer it anyway to finish faster",
+        "Treat all subjects as the same",
+        "Replace NCERT with random internet notes",
+      ],
+      correctIndex: 0,
+      explanation: "SmartLearn quizzes are subject-locked to avoid mixing.",
+    },
+  ];
+}
+
 export function questionsForChapter(input: {
   title: string;
   topics: string[];
@@ -405,7 +482,6 @@ export function questionsForChapter(input: {
     return CHAPTER_BANKS[input.chapterId];
   }
 
-  // Class 12 Relations and Functions without id
   const titleL = (input.title || "").toLowerCase();
   if (
     titleL.includes("relations and functions") &&
@@ -414,108 +490,56 @@ export function questionsForChapter(input: {
     return MATHS_12_CH1_RF as BankQ[];
   }
 
-  const subj = (input.subjectName || input.subjectId || "").toLowerCase();
-  const hay = [
+  const family = resolveQuizSubject(
+    input.subjectName || input.subjectId,
     input.title,
-    subj,
-    ...input.topics,
-  ]
+    input.topics || []
+  );
+
+  const hay = [input.title, ...(input.topics || [])]
     .join(" ")
     .toLowerCase();
 
-  // Subject family gates — never mix Chem into Phy etc.
-  const familyTags = ((): string[] => {
-    if (/math/.test(subj)) return ["math", "algebra", "calculus", "geometry", "trigon", "function", "matrix", "probability", "relation"];
-    if (/chem/.test(subj)) return ["chem", "acid", "base", "organic", "inorganic", "mole", "periodic", "reaction", "equilibrium", "electrochem"];
-    if (/bio|life/.test(subj)) return ["bio", "cell", "gene", "plant", "animal", "photosynth", "reproduction", "ecology", "human", "mitosis", "meiosis"];
-    if (/phys|science/.test(subj) && !/chem|bio/.test(subj))
-      return ["phys", "electric", "magnet", "light", "optics", "motion", "force", "energy", "wave", "current", "ohm", "mirror", "lens"];
-    if (/english|lang/.test(subj)) return ["english", "grammar", "literature", "writing"];
-    return [];
-  })();
+  // HARD LOCK: only bank items whose classified subject == chapter family
+  const sameSubject = BOARD_BANK.filter(
+    (q) => subjectOfBankQ(q.tags, q.prompt) === family
+  );
 
-  const scored = BOARD_BANK.map((q) => {
-    let s = 0;
-    const tagStr = q.tags.join(" ").toLowerCase();
-    for (const t of q.tags) {
-      if (hay.includes(t.toLowerCase())) s += 3;
-    }
-    // subject family must match when we know the family
-    if (familyTags.length) {
-      const famHit = familyTags.some(
-        (f) => tagStr.includes(f) || hay.includes(f)
-      );
-      if (!famHit && s === 0) return { q, s: -1 };
-      if (famHit) s += 2;
-      // hard reject cross-subject physics tags in chemistry chapter etc.
-      if (/chem/.test(subj) && /electric|ohm|mirror|lens|magnetic/.test(tagStr) && !/electrochem/.test(tagStr))
-        return { q, s: -1 };
-      if (/phys/.test(subj) && /acid|organic|mole|periodic|cell|gene|mitosis/.test(tagStr))
-        return { q, s: -1 };
-      if (/math/.test(subj) && /electric|acid|cell|ohm|mirror/.test(tagStr))
-        return { q, s: -1 };
-      if (/bio/.test(subj) && /electric|ohm|matrix|calculus|acid base/.test(tagStr))
-        return { q, s: -1 };
-    }
-    return { q, s };
-  })
-    .filter((x) => x.s > 0)
+  const scored = sameSubject
+    .map((q) => {
+      let s = 1;
+      for (const t of q.tags) {
+        const tl = t.toLowerCase();
+        if (hay.includes(tl)) s += 5;
+        if (
+          tl.length > 3 &&
+          hay
+            .split(/\s+/)
+            .some((w) => w.length > 3 && (w.includes(tl) || tl.includes(w)))
+        ) {
+          s += 2;
+        }
+      }
+      return { q, s };
+    })
     .sort((a, b) => b.s - a.s)
     .map((x) => x.q);
 
-  if (scored.length >= 4) return scored;
+  const local = chapterLocalFallback(
+    input.title || "this chapter",
+    family,
+    input.topics || []
+  );
 
-  // Fallback: chapter-only general — NEVER dump unrelated BOARD_BANK
-  const fallback: BankQ[] = [
-    {
-      tags: ["general"],
-      prompt: `While studying “${input.title}”, the most board-relevant practice is:`,
-      options: [
-        "NCERT text + in-text/exemplar + previous year questions",
-        "Only social media one-liners",
-        "Skipping diagrams and definitions",
-        "Memorizing unrelated current affairs only",
-      ],
-      correctIndex: 0,
-      explanation: "CBSE rewards NCERT language, examples and PYQ patterns.",
-    },
-    {
-      tags: ["general"],
-      prompt: `Key terms in “${input.title}” should be revised by:`,
-      options: [
-        "Writing definitions with one example each",
-        "Ignoring NCERT glossary",
-        "Reading only the chapter name",
-        "Avoiding any self-test",
-      ],
-      correctIndex: 0,
-      explanation: "Definition + example builds both short and long answers.",
-    },
-    {
-      tags: ["general"],
-      prompt: `For “${input.title}”, exam answers score better when you:`,
-      options: [
-        "Use NCERT keywords, steps and labelled diagrams",
-        "Write only one word answers always",
-        "Skip units and significant figures",
-        "Copy random internet notes without checking",
-      ],
-      correctIndex: 0,
-      explanation: "NCERT wording + structure matches CBSE marking.",
-    },
-    {
-      tags: ["general"],
-      prompt: `Best way to self-check “${input.title}” is:`,
-      options: [
-        "Timed MCQs + one written long answer from memory",
-        "Only re-reading the same page silently",
-        "Avoiding any mistakes log",
-        "Studying a different subject instead",
-      ],
-      correctIndex: 0,
-      explanation: "Active recall beats passive rereading.",
-    },
-  ];
-  // Prefer scored matches, pad with chapter-local fallback only
-  return [...scored, ...fallback].slice(0, 20);
+  // same-subject only + chapter fillers — never other subjects
+  const out: BankQ[] = [];
+  const seen = new Set<string>();
+  for (const q of [...scored, ...local]) {
+    const k = q.prompt.slice(0, 100);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(q);
+    if (out.length >= 24) break;
+  }
+  return out.length ? out : local;
 }
