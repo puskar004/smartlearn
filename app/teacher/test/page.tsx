@@ -9,8 +9,10 @@ import {
   Loader2,
   Plus,
   Sparkles,
+  Trash2,
   Users,
   XCircle,
+  Monitor,
 } from "lucide-react";
 
 type Mcq = {
@@ -25,6 +27,7 @@ type Moment = {
   imageDataUrl?: string;
   audioDataUrl?: string;
   note?: string;
+  videoKey?: string;
 };
 
 type TestRow = {
@@ -42,6 +45,7 @@ type TestRow = {
       total: number;
       at: number;
       moments?: Moment[];
+      videoKeys?: string[];
     }
   >;
   endsAt: number;
@@ -79,6 +83,7 @@ export default function TeacherTestPage() {
   const [momentsFor, setMomentsFor] = useState<{
     name: string;
     moments: Moment[];
+    videoKeys: string[];
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -191,6 +196,22 @@ export default function TeacherTestPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "close", code }),
     });
+    void load();
+  };
+
+  const deleteTest = async (code: string) => {
+    if (
+      !window.confirm(
+        "Delete this test and all student moments/videos permanently?"
+      )
+    )
+      return;
+    await fetch("/api/tests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", code }),
+    });
+    setMomentsFor(null);
     void load();
   };
 
@@ -374,16 +395,28 @@ export default function TeacherTestPage() {
                     </span>
                   </div>
                 </div>
-                {t.active && (
+                <div className="flex flex-wrap gap-1">
+                  {t.active && (
+                    <button
+                      type="button"
+                      onClick={() => void closeTest(t.code)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800"
+                    >
+                      <XCircle className="h-3 w-3" /> Close (stop joins)
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => void closeTest(t.code)}
+                    onClick={() => void deleteTest(t.code)}
                     className="inline-flex items-center gap-1 rounded-lg bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700"
                   >
-                    <XCircle className="h-3 w-3" /> Close
+                    <Trash2 className="h-3 w-3" /> Delete forever
                   </button>
-                )}
+                </div>
               </div>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Code stays valid until you Close or Delete.
+              </p>
               <div className="mt-3 flex items-center gap-1 text-xs font-semibold text-slate-600">
                 <Users className="h-3.5 w-3.5" />
                 Submissions ({subs.length})
@@ -410,12 +443,14 @@ export default function TeacherTestPage() {
                             setMomentsFor({
                               name: s.name,
                               moments: s.moments || [],
+                              videoKeys: s.videoKeys || [],
                             })
                           }
-                          className="rounded-lg bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100"
+                          className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100"
                         >
-                          View moments during test (
-                          {(s.moments || []).length})
+                          <Monitor className="h-3 w-3" /> See student screen (
+                          {(s.moments || []).length} snaps ·{" "}
+                          {(s.videoKeys || []).length} videos)
                         </button>
                       </li>
                     ))}
@@ -431,7 +466,7 @@ export default function TeacherTestPage() {
           <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-slate-900">
-                {momentsFor.name} · test moments
+                See student screen · {momentsFor.name}
               </h3>
               <button
                 type="button"
@@ -441,40 +476,64 @@ export default function TeacherTestPage() {
                 Close
               </button>
             </div>
-            {momentsFor.moments.length === 0 ? (
+            <p className="mt-1 text-[10px] text-slate-500">
+              Photos + voice every 30s · screen video chunks · kept until you
+              delete the test
+            </p>
+
+            {momentsFor.videoKeys.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <div className="text-xs font-bold text-slate-800">
+                  Screen recordings
+                </div>
+                {momentsFor.videoKeys.map((vk) => (
+                  <video
+                    key={vk}
+                    controls
+                    src={`/api/tests?video=${encodeURIComponent(vk)}`}
+                    className="w-full rounded-lg bg-black"
+                  />
+                ))}
+              </div>
+            )}
+
+            {momentsFor.moments.length === 0 &&
+            momentsFor.videoKeys.length === 0 ? (
               <p className="mt-4 text-xs text-slate-400">
-                No snapshots yet (student may have denied screen/mic).
+                No captures yet (student still starting or denied share).
               </p>
             ) : (
               <ul className="mt-4 space-y-4">
-                {momentsFor.moments.map((m, i) => (
-                  <li
-                    key={i}
-                    className="rounded-xl border border-slate-100 p-2 text-xs"
-                  >
-                    <div className="text-[10px] text-slate-400">
-                      {new Date(m.at).toLocaleString()}
-                    </div>
-                    {m.note && (
-                      <div className="mt-1 text-amber-700">{m.note}</div>
-                    )}
-                    {m.imageDataUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={m.imageDataUrl}
-                        alt="moment"
-                        className="mt-2 max-h-48 w-full rounded-lg object-contain bg-slate-50"
-                      />
-                    )}
-                    {m.audioDataUrl && (
-                      <audio
-                        controls
-                        src={m.audioDataUrl}
-                        className="mt-2 w-full"
-                      />
-                    )}
-                  </li>
-                ))}
+                {momentsFor.moments
+                  .filter((m) => m.imageDataUrl || m.audioDataUrl)
+                  .map((m, i) => (
+                    <li
+                      key={i}
+                      className="rounded-xl border border-slate-100 p-2 text-xs"
+                    >
+                      <div className="text-[10px] text-slate-400">
+                        {new Date(m.at).toLocaleString()}
+                      </div>
+                      {m.note && (
+                        <div className="mt-1 text-amber-700">{m.note}</div>
+                      )}
+                      {m.imageDataUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.imageDataUrl}
+                          alt="moment"
+                          className="mt-2 max-h-48 w-full rounded-lg object-contain bg-slate-50"
+                        />
+                      )}
+                      {m.audioDataUrl && (
+                        <audio
+                          controls
+                          src={m.audioDataUrl}
+                          className="mt-2 w-full"
+                        />
+                      )}
+                    </li>
+                  ))}
               </ul>
             )}
           </div>

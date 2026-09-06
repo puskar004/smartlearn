@@ -8,24 +8,20 @@ type MomentPayload = {
   imageDataUrl?: string;
   audioDataUrl?: string;
   note?: string;
+  videoKey?: string;
 };
 
 type Props = {
   active: boolean;
   testCode: string;
-  /** Only after proctor was ready — share stopped / cam ended */
   onProctorFail: (reason: string) => void;
-  /** Setup failed — do NOT auto-submit; let student retry */
   onSetupError?: (reason: string) => void;
   onReady?: () => void;
   onMoment?: (m: MomentPayload) => void;
 };
 
-/**
- * Camera + mic + screen share for tests.
- * - Setup errors → onSetupError (retry, no auto-submit)
- * - After ready: if user stops share → onProctorFail (exit)
- */
+const INTERVAL_MS = 30_000;
+
 export default function TestProctor({
   active,
   testCode,
@@ -40,6 +36,7 @@ export default function TestProctor({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewRef = useRef<HTMLVideoElement | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const readyRef = useRef(false);
   const cancelledRef = useRef(false);
 
@@ -64,8 +61,17 @@ export default function TestProctor({
     readyRef.current = false;
     let timer: ReturnType<typeof setInterval> | undefined;
     let firstTick: ReturnType<typeof setTimeout> | undefined;
+    let chunkTimer: ReturnType<typeof setInterval> | undefined;
 
     const stopAll = () => {
+      try {
+        if (recorderRef.current?.state === "recording") {
+          recorderRef.current.stop();
+        }
+      } catch {
+        // ignore
+      }
+      recorderRef.current = null;
       micRef.current?.getTracks().forEach((t) => t.stop());
       camRef.current?.getTracks().forEach((t) => t.stop());
       screenRef.current?.getTracks().forEach((t) => t.stop());
@@ -85,10 +91,35 @@ export default function TestProctor({
     };
 
     const failLive = (msg: string) => {
-      // only after successful ready — avoids auto-submit during permission dialogs
       if (cancelledRef.current || !readyRef.current) return;
       readyRef.current = false;
       failRef.current(msg);
+    };
+
+    const uploadVideoBlob = async (blob: Blob) => {
+      if (blob.size < 500 || blob.size > 1_500_000) return;
+      const dataUrl = await blobToDataUrl(blob);
+      try {
+        const res = await fetch("/api/tests", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "video",
+            code: testCode,
+            dataUrl: dataUrl.slice(0, 2_000_000),
+          }),
+        });
+        const data = await res.json();
+        if (data.videoKey) {
+          momentRef.current?.({
+            at: Date.now(),
+            note: "screen-video",
+            videoKey: data.videoKey,
+          });
+        }
+      } catch {
+        // ignore
+      }
     };
 
     const setup = async () => {
@@ -96,7 +127,6 @@ export default function TestProctor({
       setMicOk(false);
       setScreenOk(false);
 
-      // 1) Camera + mic together (one permission prompt often)
       setStatus("Allow camera + microphone…");
       try {
         const av = await navigator.mediaDevices.getUserMedia({
@@ -107,14 +137,12 @@ export default function TestProctor({
           av.getTracks().forEach((t) => t.stop());
           return;
         }
-
         const vTrack = av.getVideoTracks()[0];
         const aTrack = av.getAudioTracks()[0];
         if (!vTrack || vTrack.readyState === "ended") {
-          failSetup("Camera not available. Check system settings and retry.");
+          failSetup("Camera not available. Retry.");
           return;
         }
-        // Do NOT use vTrack.muted — browsers often report muted=true for local tracks
         if (!vTrack.enabled) vTrack.enabled = true;
 
         camRef.current = new MediaStream([vTrack]);
@@ -123,69 +151,47 @@ export default function TestProctor({
           micRef.current = new MediaStream([aTrack]);
           setMicOk(true);
         } else {
-          // try mic alone
-          try {
-            micRef.current = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: false,
-            });
-            setMicOk(true);
-          } catch {
-            failSetup("Microphone required. Allow mic and press Retry.");
-            return;
-          }
+          micRef.current = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+          setMicOk(true);
         }
 
         const cv = document.createElement("video");
         cv.muted = true;
         cv.playsInline = true;
-        cv.setAttribute("playsinline", "true");
         cv.srcObject = camRef.current;
         await cv.play().catch(() => undefined);
         camVideoRef.current = cv;
-
         if (previewRef.current) {
           previewRef.current.srcObject = camRef.current;
           void previewRef.current.play().catch(() => undefined);
         }
-
-        // Wait until we actually get frames (proves shutter/light works)
         const gotFrame = await waitForVideoFrame(cv, 4000);
         if (!gotFrame) {
-          failSetup(
-            "Camera opened but no video frames. Close other apps using the camera, then Retry."
-          );
+          failSetup("No camera frames. Close other apps using camera, Retry.");
           return;
         }
-
         setCamOk(true);
-        vTrack.onended = () => {
-          failLive("Camera was turned off — test exited.");
-        };
+        vTrack.onended = () => failLive("Camera turned off — test exited.");
       } catch (e) {
         const name = e instanceof Error ? e.name : "";
-        if (name === "NotAllowedError") {
-          failSetup("Camera/mic blocked. Allow access in browser, then Retry.");
-        } else if (name === "NotFoundError") {
-          failSetup("No camera found. Plug in a camera and Retry.");
-        } else if (name === "NotReadableError") {
-          failSetup(
-            "Camera is busy in another app. Close Zoom/Meet/etc., then Retry."
-          );
-        } else {
-          failSetup("Could not open camera/mic. Allow permissions and Retry.");
-        }
+        if (name === "NotAllowedError")
+          failSetup("Allow camera/mic, then Retry.");
+        else if (name === "NotReadableError")
+          failSetup("Camera busy in another app. Close it, Retry.");
+        else failSetup("Camera/mic failed. Retry.");
         return;
       }
 
-      // 2) Screen share
-      setStatus("Share screen → pick This tab / Chrome Tab (this SmartLearn page)");
+      setStatus("Share This tab / Chrome Tab (SmartLearn test page)…");
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const screen: MediaStream = await (
           navigator.mediaDevices as any
         ).getDisplayMedia({
-          video: true,
+          video: { frameRate: 8 },
           audio: false,
           preferCurrentTab: true,
           selfBrowserSurface: "include",
@@ -196,7 +202,7 @@ export default function TestProctor({
         }
         const sTrack = screen.getVideoTracks()[0];
         if (!sTrack) {
-          failSetup("Screen share failed. Retry and choose a tab.");
+          failSetup("Screen share failed. Retry.");
           return;
         }
         screenRef.current = screen;
@@ -207,36 +213,82 @@ export default function TestProctor({
         await v.play().catch(() => undefined);
         videoRef.current = v;
         setScreenOk(true);
+        sTrack.onended = () =>
+          failLive("Screen sharing stopped — test exited.");
 
-        sTrack.onended = () => {
-          failLive("Screen sharing stopped — you exited the test.");
-        };
+        // Continuous screen recording in ~30s chunks for teacher
+        try {
+          const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+            ? "video/webm;codecs=vp8"
+            : MediaRecorder.isTypeSupported("video/webm")
+              ? "video/webm"
+              : "";
+          const rec = mime
+            ? new MediaRecorder(screen, {
+                mimeType: mime,
+                videoBitsPerSecond: 250_000,
+              })
+            : new MediaRecorder(screen);
+          let chunks: BlobPart[] = [];
+          rec.ondataavailable = (e) => {
+            if (e.data.size) chunks.push(e.data);
+          };
+          rec.onstop = () => {
+            const blob = new Blob(chunks, { type: "video/webm" });
+            chunks = [];
+            void uploadVideoBlob(blob);
+          };
+          rec.start(1000);
+          recorderRef.current = rec;
+          // every 30s stop/start to flush a chunk
+          chunkTimer = setInterval(() => {
+            try {
+              if (recorderRef.current?.state === "recording") {
+                recorderRef.current.stop();
+                // restart
+                chunks = [];
+                const r2 = mime
+                  ? new MediaRecorder(screen, {
+                      mimeType: mime,
+                      videoBitsPerSecond: 250_000,
+                    })
+                  : new MediaRecorder(screen);
+                r2.ondataavailable = (e) => {
+                  if (e.data.size) chunks.push(e.data);
+                };
+                r2.onstop = () => {
+                  const blob = new Blob(chunks, { type: "video/webm" });
+                  chunks = [];
+                  void uploadVideoBlob(blob);
+                };
+                r2.start(1000);
+                recorderRef.current = r2;
+              }
+            } catch {
+              // ignore
+            }
+          }, INTERVAL_MS);
+        } catch {
+          // video optional if MediaRecorder fails
+        }
       } catch {
-        failSetup(
-          "Screen share required. Click Retry, then choose This tab / Chrome Tab."
-        );
+        failSetup("Screen share required. Retry → This tab.");
         return;
       }
 
       if (cancelledRef.current) return;
-
       readyRef.current = true;
-      setStatus("Proctoring active · snapshot every 1 min");
+      setStatus("Proctoring ON · photo+voice+video every 30s");
       readyCbRef.current?.();
 
       const tick = async () => {
         if (cancelledRef.current || !readyRef.current) return;
-
         const camTrack = camRef.current?.getVideoTracks()[0];
-        // Only fail if track truly ended — not muted flag
         if (!camTrack || camTrack.readyState === "ended") {
           failLive("Camera disconnected — test exited.");
           return;
         }
-        if (!camTrack.enabled) {
-          camTrack.enabled = true;
-        }
-
+        if (!camTrack.enabled) camTrack.enabled = true;
         const screenTrack = screenRef.current?.getVideoTracks()[0];
         if (!screenTrack || screenTrack.readyState === "ended") {
           failLive("Screen share ended — test exited.");
@@ -244,7 +296,6 @@ export default function TestProctor({
         }
 
         const moment: MomentPayload = { at: Date.now() };
-
         try {
           const v = videoRef.current;
           if (v && v.videoWidth > 0) {
@@ -264,13 +315,11 @@ export default function TestProctor({
                 );
                 ctx.drawImage(camV, w - pw - 8, h - ph - 8, pw, ph);
               }
-              moment.imageDataUrl = canvas.toDataURL("image/jpeg", 0.45);
+              moment.imageDataUrl = canvas.toDataURL("image/jpeg", 0.42);
             }
-          } else {
-            moment.note = "Screen frame pending";
           }
         } catch {
-          moment.note = "Snapshot skipped";
+          moment.note = "snap skip";
         }
 
         try {
@@ -309,7 +358,7 @@ export default function TestProctor({
             }
           }
         } catch {
-          // audio optional on tick
+          // ignore
         }
 
         momentRef.current?.(moment);
@@ -333,27 +382,25 @@ export default function TestProctor({
         }
       };
 
-      firstTick = setTimeout(() => void tick(), 8000);
-      timer = setInterval(() => void tick(), 60_000);
+      firstTick = setTimeout(() => void tick(), 5000);
+      timer = setInterval(() => void tick(), INTERVAL_MS);
     };
 
     void setup();
-
     return () => {
       cancelledRef.current = true;
       readyRef.current = false;
       if (timer) clearInterval(timer);
       if (firstTick) clearTimeout(firstTick);
-      // stop tracks WITHOUT calling failLive (cleanup ≠ user stop)
+      if (chunkTimer) clearInterval(chunkTimer);
       stopAll();
     };
-    // only re-run when active/test/retry — NOT when parent callbacks change
   }, [active, testCode, retryKey]);
 
   if (!active) return null;
 
   return (
-    <div className="mb-4 space-y-2">
+    <div className="mb-3 space-y-2">
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
         <span className="inline-flex items-center gap-1">
           <Camera
@@ -379,31 +426,30 @@ export default function TestProctor({
                 : "h-3.5 w-3.5 text-slate-400"
             }
           />
-          Share {screenOk ? "ON" : "…"}
+          Share+Video {screenOk ? "ON" : "…"}
         </span>
         <span className="min-w-0 flex-1 text-amber-800/90">{status}</span>
         {!readyRef.current && (
           <button
             type="button"
             onClick={() => setRetryKey((k) => k + 1)}
-            className="rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-500"
+            className="rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] font-bold text-white"
           >
-            Retry permissions
+            Retry
           </button>
         )}
       </div>
-      {/* Live preview proves camera is on */}
       <div className="flex items-center gap-3">
         <video
           ref={previewRef}
           muted
           playsInline
           autoPlay
-          className="h-16 w-16 rounded-full border-2 border-emerald-400 object-cover bg-slate-900"
+          className="h-14 w-14 rounded-full border-2 border-emerald-400 object-cover bg-slate-900"
         />
         <p className="text-[10px] text-slate-500">
-          Your camera preview (must stay on). Share <strong>this tab</strong> when
-          asked — not another window.
+          Every 30s: photo + voice + screen video → teacher (kept until teacher
+          deletes test).
         </p>
       </div>
     </div>

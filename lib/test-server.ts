@@ -10,6 +10,15 @@ export type TestMcq = {
   explanation?: string;
 };
 
+export type ProctorMoment = {
+  at: number;
+  imageDataUrl?: string;
+  audioDataUrl?: string;
+  note?: string;
+  /** path key for saved screen video chunk */
+  videoKey?: string;
+};
+
 export type LiveTest = {
   id: string;
   code: string;
@@ -21,9 +30,9 @@ export type LiveTest = {
   questions: TestMcq[];
   createdAt: number;
   startsAt: number;
+  /** Informational only — test stays joinable until teacher closes */
   endsAt: number;
   active: boolean;
-  /** studentId → answers + proctor moments */
   submissions: Record<
     string,
     {
@@ -32,12 +41,9 @@ export type LiveTest = {
       score: number;
       total: number;
       at: number;
-      moments?: {
-        at: number;
-        imageDataUrl?: string;
-        audioDataUrl?: string;
-        note?: string;
-      }[];
+      moments?: ProctorMoment[];
+      /** screen recording chunk keys */
+      videoKeys?: string[];
     }
   >;
 };
@@ -47,9 +53,16 @@ type Meta = {
   [k: string]: unknown;
 };
 
+function dataDir() {
+  return process.env.VERCEL ? "/tmp" : path.join(process.cwd(), ".data");
+}
+
 function filePath() {
-  const base = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), ".data");
-  return path.join(base, "smartlearn-tests.json");
+  return path.join(dataDir(), "smartlearn-tests.json");
+}
+
+function videoDir() {
+  return path.join(dataDir(), "test-videos");
 }
 
 async function readFile(): Promise<LiveTest[]> {
@@ -71,30 +84,55 @@ async function writeFile(tests: LiveTest[]) {
   await fs.writeFile(fp, JSON.stringify({ tests }), "utf8");
 }
 
-function metaOf(user: { publicMetadata?: Record<string, unknown> | null }): Meta {
+function metaOf(user: {
+  publicMetadata?: Record<string, unknown> | null;
+}): Meta {
   const m = (user.publicMetadata || {}) as Record<string, unknown>;
   return (m.smartlearn as Meta) || {};
+}
+
+/** Strip heavy moments before Clerk metadata (size limits) */
+function lightTest(t: LiveTest): LiveTest {
+  const submissions: LiveTest["submissions"] = {};
+  for (const [sid, s] of Object.entries(t.submissions || {})) {
+    submissions[sid] = {
+      name: s.name,
+      answers: s.answers,
+      score: s.score,
+      total: s.total,
+      at: s.at,
+      videoKeys: s.videoKeys,
+      moments: (s.moments || []).slice(0, 5).map((m) => ({
+        at: m.at,
+        note: m.note,
+        videoKey: m.videoKey,
+        // keep tiny thumbs only in file store; drop huge base64 from clerk
+      })),
+    };
+  }
+  return { ...t, submissions };
 }
 
 export function genTestCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "T";
-  for (let i = 0; i < 5; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 5; i++)
+    s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
 
 export async function saveTest(test: LiveTest) {
   const list = await readFile();
-  const next = [test, ...list.filter((t) => t.id !== test.id)].slice(0, 80);
+  const next = [test, ...list.filter((t) => t.id !== test.id)].slice(0, 100);
   await writeFile(next);
 
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(test.teacherId);
     const sm = metaOf(user);
-    const liveTests = [test, ...(sm.liveTests || [])]
+    const liveTests = [lightTest(test), ...(sm.liveTests || [])]
       .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
-      .slice(0, 20);
+      .slice(0, 30);
     await client.users.updateUserMetadata(test.teacherId, {
       publicMetadata: {
         ...user.publicMetadata,
@@ -109,17 +147,35 @@ export async function saveTest(test: LiveTest) {
 
 export async function findTestByCode(code: string): Promise<LiveTest | null> {
   const c = code.trim().toUpperCase();
+  const map = new Map<string, LiveTest>();
+
   for (const t of await readFile()) {
-    if (t.code === c) return t;
+    if (t.code === c) map.set(t.id, t);
   }
+
   try {
     const client = await clerkClient();
     let offset = 0;
-    for (let page = 0; page < 10; page++) {
+    for (let page = 0; page < 12; page++) {
       const res = await client.users.getUserList({ limit: 100, offset });
       for (const u of res.data) {
         for (const t of metaOf(u).liveTests || []) {
-          if (t.code === c) return t;
+          if (t.code === c) {
+            const existing = map.get(t.id);
+            // prefer file copy if it has richer submissions/moments
+            if (!existing) map.set(t.id, t);
+            else {
+              map.set(t.id, {
+                ...t,
+                ...existing,
+                submissions: {
+                  ...(t.submissions || {}),
+                  ...(existing.submissions || {}),
+                },
+                active: existing.active && t.active ? existing.active : t.active && existing.active !== false ? existing.active : t.active,
+              });
+            }
+          }
         }
       }
       offset += 100;
@@ -128,7 +184,12 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
   } catch (e) {
     console.error("findTestByCode", e);
   }
-  return null;
+
+  const list = Array.from(map.values());
+  if (!list.length) return null;
+  // Prefer active tests
+  list.sort((a, b) => Number(b.active) - Number(a.active) || b.createdAt - a.createdAt);
+  return list[0];
 }
 
 export async function listTeacherTests(teacherId: string) {
@@ -139,11 +200,43 @@ export async function listTeacherTests(teacherId: string) {
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(teacherId);
-    for (const t of metaOf(user).liveTests || []) map.set(t.id, t);
+    for (const t of metaOf(user).liveTests || []) {
+      if (t.teacherId === teacherId || !t.teacherId) {
+        const ex = map.get(t.id);
+        map.set(t.id, ex ? { ...t, ...ex, submissions: { ...t.submissions, ...ex.submissions } } : t);
+      }
+    }
   } catch {
     // ignore
   }
   return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function deleteTest(teacherId: string, code: string) {
+  const t = await findTestByCode(code);
+  if (!t || t.teacherId !== teacherId) throw new Error("Not found");
+  t.active = false;
+  await saveTest(t);
+
+  // remove from file list optional hard delete
+  const list = (await readFile()).filter((x) => x.id !== t.id);
+  await writeFile(list);
+
+  try {
+    const client = await clerkClient();
+    const user = await client.users.getUser(teacherId);
+    const sm = metaOf(user);
+    const liveTests = (sm.liveTests || []).filter((x) => x.id !== t.id);
+    await client.users.updateUserMetadata(teacherId, {
+      publicMetadata: {
+        ...user.publicMetadata,
+        smartlearn: { ...sm, liveTests },
+      },
+    });
+  } catch {
+    // ignore
+  }
+  return true;
 }
 
 export async function submitTest(
@@ -153,13 +246,8 @@ export async function submitTest(
   answers: number[]
 ) {
   const test = await findTestByCode(code);
-  if (!test) throw new Error("Test not found");
+  if (!test) throw new Error("Invalid code — test not found or deleted");
   if (!test.active) throw new Error("Test is closed by teacher");
-  // Grace: setup/proctor can eat clock; still accept while test is active
-  // (hard stop only if closed or 2h past end)
-  if (Date.now() > test.endsAt + 2 * 60 * 60 * 1000) {
-    throw new Error("Test window expired");
-  }
 
   let score = 0;
   test.questions.forEach((q, i) => {
@@ -174,6 +262,7 @@ export async function submitTest(
     total: test.questions.length,
     at: Date.now(),
     moments: prev?.moments || [],
+    videoKeys: prev?.videoKeys || [],
   };
   await saveTest(test);
   return test.submissions[studentId];
@@ -183,12 +272,7 @@ export async function addTestMoment(
   code: string,
   studentId: string,
   name: string,
-  moment: {
-    at: number;
-    imageDataUrl?: string;
-    audioDataUrl?: string;
-    note?: string;
-  }
+  moment: ProctorMoment
 ) {
   const test = await findTestByCode(code);
   if (!test) throw new Error("Test not found");
@@ -201,22 +285,66 @@ export async function addTestMoment(
     total: test.questions.length,
     at: Date.now(),
     moments: [],
+    videoKeys: [],
   };
-  const moments = [
-    {
-      at: moment.at || Date.now(),
-      imageDataUrl: moment.imageDataUrl
-        ? String(moment.imageDataUrl).slice(0, 140_000)
-        : undefined,
-      audioDataUrl: moment.audioDataUrl
-        ? String(moment.audioDataUrl).slice(0, 140_000)
-        : undefined,
-      note: moment.note ? String(moment.note).slice(0, 200) : undefined,
-    },
-    ...(cur.moments || []),
-  ].slice(0, 40);
 
-  test.submissions[studentId] = { ...cur, name, moments };
+  const entry: ProctorMoment = {
+    at: moment.at || Date.now(),
+    imageDataUrl: moment.imageDataUrl
+      ? String(moment.imageDataUrl).slice(0, 160_000)
+      : undefined,
+    audioDataUrl: moment.audioDataUrl
+      ? String(moment.audioDataUrl).slice(0, 160_000)
+      : undefined,
+    note: moment.note ? String(moment.note).slice(0, 200) : undefined,
+    videoKey: moment.videoKey,
+  };
+
+  const moments = [entry, ...(cur.moments || [])].slice(0, 120);
+  const videoKeys = moment.videoKey
+    ? Array.from(new Set([moment.videoKey, ...(cur.videoKeys || [])])).slice(
+        0,
+        80
+      )
+    : cur.videoKeys || [];
+
+  test.submissions[studentId] = { ...cur, name, moments, videoKeys };
   await saveTest(test);
   return moments;
+}
+
+export async function saveVideoChunk(
+  code: string,
+  studentId: string,
+  base64: string,
+  ext = "webm"
+) {
+  const test = await findTestByCode(code);
+  if (!test) throw new Error("Test not found");
+  if (!test.active) throw new Error("Test closed");
+
+  const dir = videoDir();
+  await fs.mkdir(dir, { recursive: true });
+  const key = `${test.code}_${studentId}_${Date.now()}.${ext}`;
+  const raw = base64.replace(/^data:[^;]+;base64,/, "");
+  const buf = Buffer.from(raw, "base64");
+  // cap ~1.5MB per chunk
+  if (buf.length > 1_600_000) throw new Error("Video chunk too large");
+  await fs.writeFile(path.join(dir, key), buf);
+
+  await addTestMoment(code, studentId, "Student", {
+    at: Date.now(),
+    note: "screen-video-chunk",
+    videoKey: key,
+  });
+  return key;
+}
+
+export async function readVideoChunk(key: string): Promise<Buffer | null> {
+  try {
+    const safe = path.basename(key);
+    return await fs.readFile(path.join(videoDir(), safe));
+  } catch {
+    return null;
+  }
 }

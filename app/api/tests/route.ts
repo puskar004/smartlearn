@@ -2,10 +2,13 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import {
   addTestMoment,
+  deleteTest,
   findTestByCode,
   genTestCode,
   listTeacherTests,
+  readVideoChunk,
   saveTest,
+  saveVideoChunk,
   submitTest,
   type LiveTest,
   type TestMcq,
@@ -14,18 +17,44 @@ import {
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const mine = req.nextUrl.searchParams.get("mine");
+  const video = req.nextUrl.searchParams.get("video");
   const { userId } = await auth();
+
+  if (video) {
+    if (!userId)
+      return NextResponse.json({ error: "Sign in" }, { status: 401 });
+    const buf = await readVideoChunk(video);
+    if (!buf) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return new NextResponse(new Uint8Array(buf), {
+      headers: {
+        "Content-Type": "video/webm",
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  }
 
   if (code) {
     const t = await findTestByCode(code);
-    if (!t) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    // strip correct answers for students taking test
-    const publicQ = t.questions.map(({ correctIndex, explanation, ...rest }) => rest);
+    if (!t)
+      return NextResponse.json(
+        { error: "Invalid code — test not found or teacher deleted it" },
+        { status: 404 }
+      );
+    if (!t.active && userId !== t.teacherId) {
+      return NextResponse.json(
+        { error: "Test is closed by teacher" },
+        { status: 403 }
+      );
+    }
+    const publicQ = t.questions.map(
+      ({ correctIndex, explanation, ...rest }) => rest
+    );
     const isTeacher = userId === t.teacherId;
     return NextResponse.json({
       ok: true,
       test: {
         ...t,
+        // stay live until teacher closes — ignore endsAt for join
         questions: isTeacher ? t.questions : publicQ,
         submissions: isTeacher ? t.submissions : {},
       },
@@ -80,6 +109,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, test: t });
   }
 
+  if (action === "delete") {
+    const code = String(body.code || "");
+    try {
+      await deleteTest(userId, code);
+      return NextResponse.json({ ok: true });
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Delete failed" },
+        { status: 400 }
+      );
+    }
+  }
+
   if (action === "moment") {
     const code = String(body.code || "");
     const moment = body.moment || {};
@@ -94,6 +136,7 @@ export async function POST(req: NextRequest) {
         imageDataUrl: moment.imageDataUrl,
         audioDataUrl: moment.audioDataUrl,
         note: moment.note,
+        videoKey: moment.videoKey,
       });
       return NextResponse.json({ ok: true, count: moments.length });
     } catch (e) {
@@ -104,14 +147,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // create
+  if (action === "video") {
+    const code = String(body.code || "");
+    const dataUrl = String(body.dataUrl || "");
+    if (!dataUrl) {
+      return NextResponse.json({ error: "No video data" }, { status: 400 });
+    }
+    try {
+      const key = await saveVideoChunk(code, userId, dataUrl, "webm");
+      return NextResponse.json({ ok: true, videoKey: key });
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Video save failed" },
+        { status: 400 }
+      );
+    }
+  }
+
+  // create — stays live until teacher closes (endsAt is soft/info only)
   const title = String(body.title || "Class Test").slice(0, 120);
   const durationMin = Math.min(180, Math.max(5, Number(body.durationMin) || 30));
   let questions = (body.questions || []) as TestMcq[];
 
-  // optional: raw text / extracted PDF text → ask client to send MCQs already parsed
   if ((!questions || questions.length === 0) && body.rawText) {
-    // lightweight auto-parse of numbered MCQs if Gemini not used
     questions = parseSimpleMcq(String(body.rawText));
   }
 
@@ -122,34 +180,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const normalized: TestMcq[] = questions.map((q, i) => ({
-    id: q.id || `q-${i + 1}`,
-    prompt: String(q.prompt || "").slice(0, 800),
-    options: (q.options || []).map((o) => String(o).slice(0, 200)).slice(0, 6),
-    correctIndex: Math.max(0, Number(q.correctIndex) || 0),
-    explanation: q.explanation ? String(q.explanation).slice(0, 400) : undefined,
-  })).filter((q) => q.prompt && q.options.length >= 2);
+  const normalized: TestMcq[] = questions
+    .map((q, i) => ({
+      id: q.id || `q-${i + 1}`,
+      prompt: String(q.prompt || "").slice(0, 800),
+      options: (q.options || []).map((o) => String(o).slice(0, 200)).slice(0, 6),
+      correctIndex: Math.max(0, Number(q.correctIndex) || 0),
+      explanation: q.explanation
+        ? String(q.explanation).slice(0, 400)
+        : undefined,
+    }))
+    .filter((q) => q.prompt && q.options.length >= 2);
 
   if (!normalized.length) {
     return NextResponse.json({ error: "No valid MCQs" }, { status: 400 });
   }
 
   const now = Date.now();
+  const YEAR = 365 * 24 * 60 * 60 * 1000;
   const test: LiveTest = {
     id: `test-${now}`,
     code: genTestCode(),
     title,
     teacherId: userId,
-    teacherName:
-      user?.fullName ||
-      user?.firstName ||
-      "Teacher",
+    teacherName: user?.fullName || user?.firstName || "Teacher",
     classCode: body.classCode ? String(body.classCode) : undefined,
     durationMin,
     questions: normalized,
     createdAt: now,
     startsAt: now,
-    endsAt: now + durationMin * 60_000,
+    // far future — only teacher close ends joinability
+    endsAt: now + YEAR,
     active: true,
     submissions: {},
   };
@@ -159,10 +220,16 @@ export async function POST(req: NextRequest) {
 }
 
 function parseSimpleMcq(raw: string): TestMcq[] {
-  const blocks = raw.split(/\n(?=\d+[\).])/).filter((b) => b.trim().length > 10);
+  const blocks = raw
+    .split(/\n(?=\d+[\).])/)
+    .filter((b) => b.trim().length > 10);
   const out: TestMcq[] = [];
   for (const b of blocks.slice(0, 40)) {
-    const lines = b.trim().split(/\n/).map((l) => l.trim()).filter(Boolean);
+    const lines = b
+      .trim()
+      .split(/\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length < 3) continue;
     const prompt = lines[0].replace(/^\d+[\).]\s*/, "");
     const opts = lines

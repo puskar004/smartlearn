@@ -383,24 +383,66 @@ export default function BlueprintPage() {
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <Pill
-            icon={<CalendarDays className="h-4 w-4 text-violet-600" />}
-            title="Personalized Plan"
-            sub="Based on your syllabus"
-            tone="bg-violet-50"
-          />
-          <Pill
-            icon={<Clock className="h-4 w-4 text-sky-600" />}
-            title="Smart Scheduling"
-            sub="Balanced & realistic"
-            tone="bg-sky-50"
-          />
-          <Pill
-            icon={<LineChart className="h-4 w-4 text-emerald-600" />}
-            title="Track Your Progress"
-            sub="Stay consistent"
-            tone="bg-emerald-50"
-          />
+          <button
+            type="button"
+            onClick={() => {
+              setView("builder");
+              document
+                .getElementById("sl-plan-builder")
+                ?.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="text-left"
+          >
+            <Pill
+              icon={<CalendarDays className="h-4 w-4 text-violet-600" />}
+              title="Personalized Plan"
+              sub="Based on your syllabus"
+              tone="bg-violet-50 hover:ring-2 hover:ring-violet-200"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (plan.length) setView("plan");
+              else createPlan();
+              window.setTimeout(
+                () =>
+                  document
+                    .getElementById("sl-plan-schedule")
+                    ?.scrollIntoView({ behavior: "smooth" }),
+                100
+              );
+            }}
+            className="text-left"
+          >
+            <Pill
+              icon={<Clock className="h-4 w-4 text-sky-600" />}
+              title="Smart Scheduling"
+              sub={
+                plan.length
+                  ? `${plan.length} days · day-by-day`
+                  : "Create plan to unlock"
+              }
+              tone="bg-sky-50 hover:ring-2 hover:ring-sky-200"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              document
+                .getElementById("sl-plan-progress")
+                ?.scrollIntoView({ behavior: "smooth" });
+              if (plan.length) setView("plan");
+            }}
+            className="text-left"
+          >
+            <Pill
+              icon={<LineChart className="h-4 w-4 text-emerald-600" />}
+              title="Track Your Progress"
+              sub={`${progress.pct}% overall · live data`}
+              tone="bg-emerald-50 hover:ring-2 hover:ring-emerald-200"
+            />
+          </button>
         </div>
       </div>
 
@@ -509,7 +551,10 @@ export default function BlueprintPage() {
       </div>
 
       {view === "builder" ? (
-        <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_280px]">
+        <div
+          id="sl-plan-builder"
+          className="mt-5 grid gap-5 lg:grid-cols-[1fr_280px]"
+        >
           {/* Chapter picker */}
           <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -603,7 +648,7 @@ export default function BlueprintPage() {
           </div>
 
           {/* Progress card */}
-          <aside className="space-y-4">
+          <aside id="sl-plan-progress" className="space-y-4">
             <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between">
                 <h3 className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
@@ -721,10 +766,10 @@ export default function BlueprintPage() {
         </div>
       ) : (
         /* Plan view */
-        <div className="mt-5 space-y-4">
+        <div id="sl-plan-schedule" className="mt-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-bold text-slate-900">
-              Your day-by-day plan ({plan.length} days)
+              Smart schedule · {plan.length} days
             </h2>
             <button
               type="button"
