@@ -53,6 +53,28 @@ function lightClassroom(c: Classroom): Classroom {
   };
 }
 
+function lightMaterialBank(
+  bank: Record<string, TeacherMaterial[]> | undefined
+): Record<string, TeacherMaterial[]> {
+  const out: Record<string, TeacherMaterial[]> = {};
+  for (const [code, list] of Object.entries(bank || {})) {
+    out[code] = (list || [])
+      .filter((m) => m?.url && !String(m.url).startsWith("data:"))
+      .map((m) => ({
+        ...m,
+        url: String(m.url).slice(0, 500),
+        title: String(m.title || "").slice(0, 120),
+        subject: String(m.subject || "General").slice(0, 60),
+        teacherName: String(m.teacherName || "").slice(0, 80),
+        type: m.type || "notes",
+        id: m.id || `mat-${Date.now()}`,
+        createdAt: m.createdAt || Date.now(),
+      }))
+      .slice(0, 30);
+  }
+  return out;
+}
+
 async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
@@ -61,6 +83,7 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
     classrooms: (smartlearn.classrooms || [])
       .slice(0, 20)
       .map(lightClassroom),
+    materialBank: lightMaterialBank(smartlearn.materialBank),
     teacherRemarks: (smartlearn.teacherRemarks || []).slice(0, 20),
   };
   await client.users.updateUserMetadata(userId, {
@@ -187,7 +210,12 @@ export async function listTeacherClassrooms(
   teacherId: string
 ): Promise<Classroom[]> {
   const meta = await getTeacherMeta(teacherId);
-  return meta.classrooms || [];
+  const rooms = meta.classrooms || [];
+  // Merge materialBank into each room so teacher UI + students stay in sync
+  return rooms.map((r) => ({
+    ...r,
+    materials: materialsForRoom(meta, r.code, r),
+  }));
 }
 
 export async function getClassroomForTeacher(
@@ -466,10 +494,16 @@ export async function listStudentClassrooms(userId: string): Promise<
     const kicked = Boolean(
       sess?.active && (sess.kickedIds || []).includes(userId)
     );
-    // Keep all materials with a url (http, /api, or data)
-    const materials = (found.classroom.materials || []).filter(
-      (m) => m && m.url && String(m.url).trim().length > 0
-    );
+    // Pull materials from teacher materialBank + classroom
+    let materials: TeacherMaterial[] = [];
+    try {
+      const tMeta = await getTeacherMeta(found.teacherId);
+      materials = materialsForRoom(tMeta, code, found.classroom);
+    } catch {
+      materials = (found.classroom.materials || []).filter(
+        (m) => m && m.url && String(m.url).trim().length > 0
+      );
+    }
     out.push({
       code: found.classroom.code,
       name: found.classroom.name || `Class ${code}`,
@@ -512,30 +546,94 @@ export async function addMaterialToClass(
       "Invalid file URL. Use Publish after selecting PDF, or paste a Drive https link."
     );
   }
-  if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("/api/")) {
+  if (
+    !url.startsWith("http://") &&
+    !url.startsWith("https://") &&
+    !url.startsWith("/api/")
+  ) {
     throw new Error("Material link must be https:// or uploaded file URL.");
   }
-  return updateClassroom(teacherId, code, (c) => {
-    const m: TeacherMaterial = {
-      ...material,
-      url: url.slice(0, 500),
-      title: String(material.title || "Notes").slice(0, 120),
-      subject: String(material.subject || "General").slice(0, 60),
-      id: `mat-${Date.now()}`,
-      createdAt: Date.now(),
-    };
-    const alerts = pushAlert(c, {
-      kind: "material",
-      title: `New ${m.subject} notes`,
-      body: `${m.title} · ${m.subject}`,
-      href: "/join-class",
-    });
-    return {
+
+  const normalized = code.trim().toUpperCase();
+  const m: TeacherMaterial = {
+    ...material,
+    url: url.slice(0, 500),
+    title: String(material.title || "Notes").slice(0, 120),
+    subject: String(material.subject || "General").slice(0, 60),
+    id: `mat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    createdAt: Date.now(),
+  };
+
+  // 1) Always write materialBank first (source of truth for students)
+  const client = await clerkClient();
+  const user = await client.users.getUser(teacherId);
+  const meta = metaOf(user);
+  const bank = { ...(meta.materialBank || {}) };
+  bank[normalized] = [m, ...(bank[normalized] || [])].slice(0, 30);
+
+  // 2) Also mirror onto classroom for teacher UI
+  const rooms = meta.classrooms || [];
+  const idx = rooms.findIndex((c) => c.code === normalized);
+  let nextRoom: Classroom | null = null;
+  const classrooms = [...rooms];
+  if (idx >= 0) {
+    const c = rooms[idx];
+    nextRoom = {
       ...c,
       materials: [m, ...(c.materials || [])].slice(0, 40),
-      alerts,
+      alerts: pushAlert(c, {
+        kind: "material",
+        title: `New ${m.subject} notes`,
+        body: `${m.title} · ${m.subject}`,
+        href: "/join-class",
+      }),
     };
+    classrooms[idx] = nextRoom;
+  } else {
+    // class code missing in list — still keep bank entry
+    nextRoom = {
+      code: normalized,
+      name: normalized,
+      teacherId,
+      teacherName: material.teacherName || "Teacher",
+      createdAt: Date.now(),
+      students: [],
+      materials: [m],
+      liveSession: null,
+      alerts: [],
+      attendanceLog: [],
+    };
+    classrooms.unshift(nextRoom);
+  }
+
+  await saveMeta(teacherId, {
+    ...meta,
+    role: "teacher",
+    classrooms: classrooms.slice(0, 20),
+    materialBank: bank,
   });
+
+  return nextRoom;
+}
+
+/** Materials for a class: bank first, then classroom.materials */
+export function materialsForRoom(
+  meta: SmartlearnMeta,
+  code: string,
+  room?: Classroom | null
+): TeacherMaterial[] {
+  const c = code.toUpperCase();
+  const fromBank = meta.materialBank?.[c] || [];
+  const fromRoom = room?.materials || [];
+  const map = new Map<string, TeacherMaterial>();
+  for (const m of [...fromBank, ...fromRoom]) {
+    if (!m?.id && !m?.url) continue;
+    const key = m.id || m.url;
+    if (!map.has(key) && m.url) map.set(key, m);
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+  );
 }
 
 export async function startLive(

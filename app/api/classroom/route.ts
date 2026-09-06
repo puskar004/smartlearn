@@ -101,6 +101,34 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, classroom: room });
     }
 
+    if (action === "materials" && code) {
+      const studentRooms = await listStudentClassrooms(userId);
+      const hit = studentRooms.find((r) => r.code === code.toUpperCase());
+      if (hit) {
+        return NextResponse.json({
+          ok: true,
+          materials: hit.materials || [],
+          code: hit.code,
+          name: hit.name,
+        });
+      }
+      const mine = await listTeacherClassrooms(userId);
+      const own = mine.find((r) => r.code === code.toUpperCase());
+      if (own) {
+        return NextResponse.json({
+          ok: true,
+          materials: own.materials || [],
+          code: own.code,
+          name: own.name,
+        });
+      }
+      return NextResponse.json({
+        ok: true,
+        materials: [],
+        code: code.toUpperCase(),
+      });
+    }
+
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Server error";

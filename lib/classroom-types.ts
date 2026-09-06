@@ -103,6 +103,11 @@ export type Classroom = {
 export type SmartlearnMeta = {
   role?: "student" | "teacher";
   classrooms?: Classroom[];
+  /**
+   * Teacher materials by class code — primary source for student "See materials".
+   * Kept separate so classroom fat fields don't wipe notes.
+   */
+  materialBank?: Record<string, TeacherMaterial[]>;
   /** primary / last joined (compat) */
   joinedClassCode?: string | null;
   /** student can join multiple teacher codes */

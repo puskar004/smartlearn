@@ -129,7 +129,26 @@ export default function JoinClassPage() {
       const d = await res.json();
       const list = (d.classrooms || []) as JoinedRoom[];
       const codes = (d.codes || []) as string[];
-      mergeRooms(list, codes);
+
+      // Extra fetch materials per code so notes always show
+      const enriched: JoinedRoom[] = [];
+      for (const r of list.length ? list : codes.map((c) => ({ code: c, name: c, materials: [] as TeacherMaterial[] }))) {
+        try {
+          const mr = await fetch(
+            `/api/classroom?action=materials&code=${encodeURIComponent(r.code)}`,
+            { cache: "no-store" }
+          );
+          const md = await mr.json();
+          enriched.push({
+            ...r,
+            name: md.name || r.name,
+            materials: (md.materials?.length ? md.materials : r.materials) || [],
+          });
+        } catch {
+          enriched.push(r);
+        }
+      }
+      mergeRooms(enriched, codes);
     } catch {
       mergeRooms([], getJoinedClasses(userId));
     } finally {
