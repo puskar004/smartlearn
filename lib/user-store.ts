@@ -39,6 +39,10 @@ export type UserProgress = {
   boardExamDate: string | null;
   /** Chapters student selected for their personal syllabus / board plan */
   planChapterIds: string[];
+  /** Chapter ids marked done in study plan */
+  planDoneChapterIds: string[];
+  /** Generated plan day keys (yyyy-mm-dd) marked complete */
+  planDoneDays: string[];
 };
 
 const PREFIX = "sl_user_v2_";
@@ -64,6 +68,8 @@ export function emptyProgress(userId: string): UserProgress {
     chaptersOpened: [],
     boardExamDate: null,
     planChapterIds: [],
+    planDoneChapterIds: [],
+    planDoneDays: [],
   };
 }
 
