@@ -46,17 +46,31 @@ export function setRole(userId: string, role: "student" | "teacher") {
 
 export function getJoinedClasses(userId: string): string[] {
   if (typeof window === "undefined") return [];
+  const set = new Set<string>();
   try {
     const raw = localStorage.getItem(JOINS_KEY + userId);
     if (raw) {
-      const arr = JSON.parse(raw) as string[];
-      if (Array.isArray(arr)) return arr.map((c) => c.toUpperCase());
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr)) {
+        for (const c of arr) {
+          const v = String(c || "")
+            .trim()
+            .toUpperCase();
+          if (v) set.add(v);
+        }
+      }
     }
   } catch {
     // ignore
   }
-  const one = localStorage.getItem(JOIN_KEY + userId);
-  return one ? [one.toUpperCase()] : [];
+  // Always merge single-key too (fixes empty JOINS_KEY array wiping JOIN_KEY)
+  try {
+    const one = localStorage.getItem(JOIN_KEY + userId);
+    if (one) set.add(one.trim().toUpperCase());
+  } catch {
+    // ignore
+  }
+  return [...set];
 }
 
 export function getJoinedClass(userId: string): string | null {

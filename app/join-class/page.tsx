@@ -18,6 +18,7 @@ import {
 import {
   apiJoinClassroom,
   apiLeaveClassroom,
+  getJoinedClass,
   getJoinedClasses,
   getRole,
   removeJoinedClass,
@@ -26,6 +27,7 @@ import {
   type TeacherMaterial,
 } from "@/lib/teacher-store";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
+import { ROLE_EVENT } from "@/lib/role-events";
 
 type JoinedRoom = {
   code: string;
@@ -37,7 +39,7 @@ type JoinedRoom = {
 function openMaterial(m: TeacherMaterial) {
   const u = (m.url || "").trim();
   if (!u) {
-    alert("No file link. Ask teacher to re-upload the PDF or paste a Drive link.");
+    alert("No file link. Ask teacher to re-upload.");
     return;
   }
   if (u.startsWith("data:")) {
@@ -67,116 +69,123 @@ export default function JoinClassPage() {
   const [rooms, setRooms] = useState<JoinedRoom[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(true);
   const [openMats, setOpenMats] = useState<Record<string, boolean>>({});
 
-  const mergeRooms = useCallback(
-    (apiList: JoinedRoom[], extraCodes: string[] = []) => {
-      if (!userId) return;
-      const local = getJoinedClasses(userId);
-      const byCode = new Map<string, JoinedRoom>();
-
-      for (const c of [...local, ...extraCodes]) {
-        const code = c.toUpperCase();
-        if (!code) continue;
-        byCode.set(code, {
-          code,
-          name: `Class ${code}`,
-          teacherName: "",
+  const loadMaterialsForCode = async (
+    classCode: string,
+    fallback?: JoinedRoom
+  ): Promise<JoinedRoom> => {
+    const c = classCode.toUpperCase();
+    try {
+      const mr = await fetch(
+        `/api/classroom?action=materials&code=${encodeURIComponent(c)}`,
+        { cache: "no-store" }
+      );
+      const md = await mr.json();
+      return {
+        code: c,
+        name: md.name || fallback?.name || `Class ${c}`,
+        teacherName: fallback?.teacherName || "",
+        materials: (md.materials || []) as TeacherMaterial[],
+      };
+    } catch {
+      return (
+        fallback || {
+          code: c,
+          name: `Class ${c}`,
           materials: [],
-        });
-      }
-      for (const r of apiList) {
-        const code = (r.code || "").toUpperCase();
-        if (!code) continue;
-        const prev = byCode.get(code);
-        byCode.set(code, {
-          code,
-          name: r.name || prev?.name || `Class ${code}`,
-          teacherName: r.teacherName || prev?.teacherName || "",
-          materials: r.materials?.length
-            ? r.materials
-            : prev?.materials || [],
-        });
-      }
+        }
+      );
+    }
+  };
 
-      const next = Array.from(byCode.values());
-      setRooms(next);
-      if (next.length) {
-        setJoinedClasses(
-          userId,
-          next.map((r) => r.code)
-        );
-        // default expand materials for each class
-        setOpenMats((prev) => {
-          const o = { ...prev };
-          for (const r of next) {
-            if (o[r.code] === undefined) o[r.code] = true;
-          }
-          return o;
-        });
-      }
-    },
-    [userId]
-  );
-
-  const refresh = useCallback(async () => {
+  const syncFromLocalAndServer = useCallback(async () => {
     if (!userId) return;
+
+    // 1) Always start from localStorage (sidebar source of truth)
+    const localCodes = getJoinedClasses(userId);
+    const seed: JoinedRoom[] = localCodes.map((c) => ({
+      code: c,
+      name: `Class ${c}`,
+      materials: [],
+    }));
+    if (seed.length) {
+      setRooms(seed);
+      setOpenMats((p) => {
+        const o = { ...p };
+        for (const r of seed) o[r.code] = o[r.code] ?? true;
+        return o;
+      });
+    }
+
+    // 2) Server joined list
+    let serverList: JoinedRoom[] = [];
+    let serverCodes: string[] = [];
     try {
       const res = await fetch("/api/classroom?action=joined", {
         cache: "no-store",
       });
       const d = await res.json();
-      const list = (d.classrooms || []) as JoinedRoom[];
-      const codes = (d.codes || []) as string[];
-
-      const base =
-        list.length > 0
-          ? list
-          : codes.map((c) => ({
-              code: c,
-              name: `Class ${c}`,
-              materials: [] as TeacherMaterial[],
-            }));
-      // Always pull materials by class code (source of truth)
-      const enriched: JoinedRoom[] = await Promise.all(
-        base.map(async (r) => {
-          try {
-            const mr = await fetch(
-              `/api/classroom?action=materials&code=${encodeURIComponent(r.code)}`,
-              { cache: "no-store" }
-            );
-            const md = await mr.json();
-            const mats = (md.materials || []) as TeacherMaterial[];
-            return {
-              ...r,
-              name: md.name || r.name,
-              materials: mats.length ? mats : r.materials || [],
-            };
-          } catch {
-            return r;
-          }
-        })
-      );
-      mergeRooms(enriched, codes);
+      serverList = (d.classrooms || []) as JoinedRoom[];
+      serverCodes = (d.codes || serverList.map((r) => r.code) || []) as string[];
     } catch {
-      mergeRooms([], getJoinedClasses(userId));
-    } finally {
-      setFetching(false);
+      // ignore
     }
-  }, [userId, mergeRooms]);
 
-  useEffect(() => {
-    if (!userId) return;
-    if (getRole(userId) === "teacher") {
-      setFetching(false);
+    // 3) Union of all codes
+    const allCodes = [
+      ...new Set(
+        [
+          ...localCodes,
+          ...serverCodes,
+          ...serverList.map((r) => r.code),
+        ]
+          .map((c) => String(c || "").toUpperCase())
+          .filter(Boolean)
+      ),
+    ];
+
+    if (!allCodes.length) {
+      setRooms([]);
       return;
     }
-    // show local joins instantly
-    mergeRooms([], getJoinedClasses(userId));
-    setFetching(false);
-    void refresh();
-  }, [userId, refresh, mergeRooms]);
+
+    // Keep localStorage in sync
+    setJoinedClasses(userId, allCodes);
+
+    // 4) Load materials for every code
+    const full = await Promise.all(
+      allCodes.map(async (c) => {
+        const fromServer = serverList.find(
+          (r) => (r.code || "").toUpperCase() === c
+        );
+        return loadMaterialsForCode(c, fromServer);
+      })
+    );
+
+    setRooms(full);
+    setOpenMats((p) => {
+      const o = { ...p };
+      for (const r of full) o[r.code] = o[r.code] ?? true;
+      return o;
+    });
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || getRole(userId) === "teacher") return;
+    void syncFromLocalAndServer();
+    const onRole = () => void syncFromLocalAndServer();
+    window.addEventListener(ROLE_EVENT, onRole);
+    // refresh when tab focused
+    const onVis = () => {
+      if (document.visibilityState === "visible") void syncFromLocalAndServer();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener(ROLE_EVENT, onRole);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [userId, syncFromLocalAndServer]);
 
   if (!isSignedIn || !userId) {
     return (
@@ -189,8 +198,7 @@ export default function JoinClassPage() {
   if (getRole(userId) === "teacher") {
     return (
       <div className="px-6 py-16 text-center text-sm text-slate-500">
-        You are in <strong>Teacher mode</strong>. Switch to student in Profile if
-        you need to join a class.
+        You are in <strong>Teacher mode</strong>. Switch to student in Profile.
         <div className="mt-3">
           <Link href="/teacher" className="font-bold text-indigo-600 underline">
             Open Teacher Hub
@@ -203,7 +211,7 @@ export default function JoinClassPage() {
   const join = async () => {
     const trimmed = code.trim().toUpperCase();
     if (trimmed.length < 4) {
-      setMsg("Enter the full private code from your teacher (6 characters).");
+      setMsg("Enter the full private code (6 characters).");
       return;
     }
     setLoading(true);
@@ -240,26 +248,28 @@ export default function JoinClassPage() {
       setCode("");
       setMsg(`You have joined ${room?.name || roomCode}`);
 
-      // Show immediately under the form (don't wait for slow API)
-      setRooms((prev) => {
-        const others = prev.filter((r) => r.code !== roomCode);
-        return [
-          {
-            code: roomCode,
-            name: room?.name || `Class ${roomCode}`,
-            teacherName: room?.teacherName || "",
-            materials: (room?.materials || []) as TeacherMaterial[],
-          },
-          ...others,
-        ];
-      });
+      // Instant UI
+      const instant: JoinedRoom = {
+        code: roomCode,
+        name: room?.name || `Class ${roomCode}`,
+        teacherName: room?.teacherName || "",
+        materials: (room?.materials || []) as TeacherMaterial[],
+      };
+      setRooms((prev) => [
+        instant,
+        ...prev.filter((r) => r.code !== roomCode),
+      ]);
       setOpenMats((p) => ({ ...p, [roomCode]: true }));
 
-      // Then refresh from server for full materials
-      window.setTimeout(() => void refresh(), 800);
-      window.setTimeout(() => void refresh(), 2500);
+      // Load materials + confirm
+      const withMats = await loadMaterialsForCode(roomCode, instant);
+      setRooms((prev) => [
+        withMats,
+        ...prev.filter((r) => r.code !== roomCode),
+      ]);
+      void syncFromLocalAndServer();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Join failed. Try again.");
+      setMsg(e instanceof Error ? e.message : "Join failed");
     } finally {
       setLoading(false);
     }
@@ -272,24 +282,33 @@ export default function JoinClassPage() {
       removeJoinedClass(userId, c);
       setRooms((prev) => prev.filter((r) => r.code !== c.toUpperCase()));
       setMsg(`Left ${c}`);
-      await refresh();
     } catch {
-      setMsg("Could not leave class. Try again.");
+      setMsg("Could not leave class.");
     } finally {
       setLoading(false);
     }
   };
 
+  // Fallback: if state empty but localStorage has code, show it
+  const displayRooms =
+    rooms.length > 0
+      ? rooms
+      : getJoinedClasses(userId).map((c) => ({
+          code: c,
+          name: `Class ${c}`,
+          materials: [] as TeacherMaterial[],
+        }));
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-        <Link2 className="h-3.5 w-3.5" /> Join Teacher
+        <Link2 className="h-3.5 w-3.5" /> Class &amp; Notes
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
         Join class &amp; see notes
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Enter the code. Your joined class appears below with teacher PDFs.
+        Joined classes and teacher PDFs show below.
       </p>
 
       <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -313,7 +332,7 @@ export default function JoinClassPage() {
           type="button"
           onClick={() => void join()}
           disabled={loading}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 py-3 text-sm font-bold text-white shadow-md shadow-violet-600/25 hover:bg-violet-500 disabled:opacity-60"
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 py-3 text-sm font-bold text-white disabled:opacity-60"
         >
           {loading && <Loader2 className="h-4 w-4 animate-spin" />}
           Join class
@@ -325,60 +344,74 @@ export default function JoinClassPage() {
         )}
       </div>
 
-      {fetching && rooms.length === 0 ? (
-        <div className="mt-10 flex justify-center text-slate-400">
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-      ) : rooms.length === 0 ? (
+      {displayRooms.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-          No class joined yet. Enter the code your teacher shared.
+          No class joined yet.
+          {getJoinedClass(userId) && (
+            <button
+              type="button"
+              className="mt-3 block w-full font-bold text-indigo-600"
+              onClick={() => void syncFromLocalAndServer()}
+            >
+              Reload joined class {getJoinedClass(userId)}
+            </button>
+          )}
         </div>
       ) : (
         <div className="mt-8 space-y-4">
-          <h2 className="text-lg font-extrabold text-slate-900">
-            You have joined {rooms.length} class
-            {rooms.length > 1 ? "es" : ""}
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-extrabold text-slate-900">
+              You have joined {displayRooms.length} class
+              {displayRooms.length > 1 ? "es" : ""}
+            </h2>
+            <button
+              type="button"
+              onClick={() => void syncFromLocalAndServer()}
+              className="text-xs font-bold text-indigo-600"
+            >
+              Refresh
+            </button>
+          </div>
 
-          {rooms.map((r) => {
+          {displayRooms.map((r) => {
             const mats = r.materials || [];
             const open = openMats[r.code] !== false;
             return (
               <div
                 key={r.code}
-                className="overflow-hidden rounded-3xl border-2 border-emerald-200 bg-white shadow-md"
+                className="overflow-hidden rounded-3xl border-2 border-emerald-300 bg-white shadow-md"
               >
                 <div className="bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-4 text-white sm:px-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-100">
+                    You have joined this class
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-100">
-                        You have joined this class
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-xl font-black">
+                      <div className="flex items-center gap-2 text-xl font-black">
                         <CheckCircle2 className="h-6 w-6" />
                         {r.name || r.code}
                       </div>
-                      <div className="mt-1 font-mono text-sm font-bold tracking-[0.2em] text-emerald-50">
+                      <div className="mt-1 font-mono text-sm font-bold tracking-[0.25em]">
                         {r.code}
                       </div>
-                      {r.teacherName && (
+                      {r.teacherName ? (
                         <div className="mt-1 text-xs text-emerald-50">
                           Teacher: {r.teacherName}
                         </div>
-                      )}
+                      ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-2">
                       <Link
                         href="/live-class"
-                        className="rounded-lg bg-white/20 px-3 py-1.5 text-[11px] font-bold text-white ring-1 ring-white/40 hover:bg-white/30"
+                        className="rounded-lg bg-white/20 px-3 py-1.5 text-[11px] font-bold ring-1 ring-white/40"
                       >
-                        Live class
+                        Live
                       </Link>
                       <button
                         type="button"
                         onClick={() => void leave(r.code)}
                         disabled={loading}
-                        className="rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-emerald-800 disabled:opacity-60"
+                        className="rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-emerald-800"
                       >
                         Leave
                       </button>
@@ -391,12 +424,12 @@ export default function JoinClassPage() {
                   onClick={() =>
                     setOpenMats((p) => ({ ...p, [r.code]: !open }))
                   }
-                  className="flex w-full items-center justify-between gap-2 border-b border-slate-100 bg-indigo-50/80 px-4 py-3 text-left sm:px-5"
+                  className="flex w-full items-center justify-between bg-indigo-50 px-4 py-3 text-left sm:px-5"
                 >
                   <span className="inline-flex items-center gap-2 text-sm font-bold text-indigo-900">
                     <FileText className="h-4 w-4" />
                     See materials
-                    <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                    <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] text-white">
                       {mats.length}
                     </span>
                   </span>
@@ -409,18 +442,20 @@ export default function JoinClassPage() {
 
                 {open && (
                   <div className="px-4 py-4 sm:px-5">
-                    <p className="mb-3 text-xs text-slate-500">
-                      PDFs, notes and links uploaded by your teacher for this
-                      class.
-                    </p>
                     {mats.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-xs text-slate-500">
-                        No materials yet. When teacher uploads a PDF, it will
-                        appear here. Pull to refresh or reopen this page.
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
+                        No PDFs yet for this class.
                         <button
                           type="button"
-                          onClick={() => void refresh()}
-                          className="mt-3 block w-full text-xs font-bold text-indigo-600"
+                          onClick={async () => {
+                            const updated = await loadMaterialsForCode(r.code, r);
+                            setRooms((prev) =>
+                              prev.map((x) =>
+                                x.code === r.code ? updated : x
+                              )
+                            );
+                          }}
+                          className="mt-2 block w-full font-bold text-indigo-600"
                         >
                           Refresh materials
                         </button>
@@ -429,10 +464,10 @@ export default function JoinClassPage() {
                       <ul className="space-y-2">
                         {mats.map((m) => (
                           <li
-                            key={m.id}
-                            className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-3 hover:border-indigo-200 hover:bg-indigo-50/50"
+                            key={m.id || m.url}
+                            className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3"
                           >
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-100">
+                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
                               {m.type === "video" ? (
                                 <Video className="h-5 w-5 text-rose-500" />
                               ) : (
@@ -448,17 +483,13 @@ export default function JoinClassPage() {
                                   {m.subject || "General"}
                                 </span>
                                 {" · "}
-                                {m.type === "video"
-                                  ? "Video"
-                                  : m.type === "link"
-                                    ? "Link"
-                                    : "PDF / Notes"}
+                                {m.type === "notes" ? "PDF" : m.type}
                               </div>
                             </div>
                             <button
                               type="button"
                               onClick={() => openMaterial(m)}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-indigo-500"
+                              className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-[11px] font-bold text-white"
                             >
                               <ExternalLink className="h-3.5 w-3.5" />
                               Open
