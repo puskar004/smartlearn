@@ -265,23 +265,27 @@ export default function JoinClassPage() {
                         a.href = u;
                         a.download = `${m.title || "notes"}.pdf`;
                         a.click();
-                        // also open in new tab for viewing
-                        const w = window.open();
-                        if (w) {
-                          w.document.write(
-                            `<iframe src="${u}" style="width:100%;height:100%;border:0"></iframe>`
-                          );
-                        }
                       } catch {
                         window.open(u, "_blank");
                       }
+                      return;
+                    }
+                    // stored server PDF
+                    if (
+                      u.includes("/api/classroom/material") ||
+                      u.startsWith("/api/")
+                    ) {
+                      window.open(u, "_blank", "noopener,noreferrer");
                       return;
                     }
                     if (u.includes("drive.google.com")) {
                       window.open(u, "_blank", "noopener,noreferrer");
                       return;
                     }
-                    if (u.toLowerCase().includes(".pdf") || m.type === "notes") {
+                    if (
+                      u.toLowerCase().includes(".pdf") ||
+                      m.type === "notes"
+                    ) {
                       window.open(
                         `/api/pdf-proxy?url=${encodeURIComponent(u)}`,
                         "_blank",

@@ -188,6 +188,27 @@ export async function apiAddMaterial(
   return res.json();
 }
 
+/** Upload PDF/image file up to 5MB (stored as file, not Clerk base64). */
+export async function apiUploadMaterialFile(opts: {
+  code: string;
+  title: string;
+  subject: string;
+  type: "notes" | "video" | "link";
+  file: File;
+}) {
+  const fd = new FormData();
+  fd.set("code", opts.code);
+  fd.set("title", opts.title);
+  fd.set("subject", opts.subject);
+  fd.set("type", opts.type);
+  fd.set("file", opts.file);
+  const res = await fetch("/api/classroom/material", {
+    method: "POST",
+    body: fd,
+  });
+  return res.json();
+}
+
 export async function apiStartLive(
   code: string,
   title: string,

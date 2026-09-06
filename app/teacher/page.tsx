@@ -30,6 +30,7 @@ import {
   apiRenameClassroom,
   apiSendRemark,
   apiStartLive,
+  apiUploadMaterialFile,
   getRole,
   setRole,
   type Classroom,
@@ -56,6 +57,7 @@ function TeacherInner() {
   const [selected, setSelected] = useState<StudentSnapshot | null>(null);
   const [matTitle, setMatTitle] = useState("");
   const [matUrl, setMatUrl] = useState("");
+  const [matFile, setMatFile] = useState<File | null>(null);
   const [matType, setMatType] = useState<"notes" | "video" | "link">("notes");
   const [matSubject, setMatSubject] = useState("Physics");
   const [liveTitle, setLiveTitle] = useState("Doubt clearing hour");
@@ -253,53 +255,53 @@ function TeacherInner() {
       setError("Title required.");
       return;
     }
-    const hasUrl = matUrl.trim().length > 0;
-    if (!hasUrl) {
-      setError("Provide either a Drive/link OR an offline PDF (one is enough).");
-      return;
-    }
-    // data: or http(s) only
-    const url = normalizeMaterialUrl(matUrl);
-    if (
-      !url.startsWith("data:") &&
-      !url.startsWith("http://") &&
-      !url.startsWith("https://")
-    ) {
-      setError("Link must start with https:// (Drive / YouTube / any URL).");
-      return;
-    }
-    // Clerk meta size — huge data URLs fail with unprocessable
-    if (url.startsWith("data:") && url.length > 350_000) {
-      setError(
-        "PDF too large to store. Use a Google Drive link (Anyone with link) instead."
-      );
+    const hasFile = !!matFile;
+    const hasUrl = matUrl.trim().length > 0 && !matUrl.startsWith("data:");
+    if (!hasFile && !hasUrl) {
+      setError("Provide either a Drive/link OR a PDF file (up to 5MB).");
       return;
     }
     setBusy(true);
     setMatNote(null);
     setError(null);
     try {
-      const data = await apiAddMaterial(activeCode, {
-        title: matTitle.trim(),
-        url,
-        type: matType,
-        subject: matSubject.trim() || "General",
-        teacherName: user?.fullName || "Teacher",
-      });
-      if (!data.ok) throw new Error(data.error || "Upload failed");
-      if (data.classroom) setRoom(data.classroom);
+      if (hasFile && matFile) {
+        const data = await apiUploadMaterialFile({
+          code: activeCode,
+          title: matTitle.trim(),
+          subject: matSubject.trim() || "General",
+          type: matType,
+          file: matFile,
+        });
+        if (!data.ok) throw new Error(data.error || "Upload failed");
+        if (data.classroom) setRoom(data.classroom);
+        setMatNote(
+          `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB) · ${matSubject || "General"}`
+        );
+      } else {
+        const url = normalizeMaterialUrl(matUrl);
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+          throw new Error("Link must start with https://");
+        }
+        const data = await apiAddMaterial(activeCode, {
+          title: matTitle.trim(),
+          url,
+          type: matType,
+          subject: matSubject.trim() || "General",
+          teacherName: user?.fullName || "Teacher",
+        });
+        if (!data.ok) throw new Error(data.error || "Upload failed");
+        if (data.classroom) setRoom(data.classroom);
+        setMatNote(
+          `Published link · ${matSubject || "General"} — students see it under Join Teacher.`
+        );
+      }
       setMatTitle("");
       setMatUrl("");
-      setMatNote(
-        `Published · ${matSubject || "General"} — students see it under Join Teacher.`
-      );
+      setMatFile(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
-      setError(
-        /unprocessable|413|payload|too large|metadata/i.test(msg)
-          ? "File/link too large for server. Use a short Drive link (Share → Anyone with the link)."
-          : msg
-      );
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -307,24 +309,21 @@ function TeacherInner() {
 
   const onOfflinePdf = (file: File | null) => {
     if (!file) return;
-    if (file.size > 280_000) {
+    const max = 5 * 1024 * 1024;
+    if (file.size > max) {
       setError(
-        "PDF max ~280KB for direct upload. Prefer Google Drive link for larger files."
+        `PDF max 5MB. Your file is ${(file.size / (1024 * 1024)).toFixed(1)}MB — compress or use Drive.`
       );
       return;
     }
     setError(null);
-    // exclusive: clear previous link when picking PDF
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      setMatUrl(dataUrl);
-      setMatType("notes");
-      if (!matTitle.trim()) setMatTitle(file.name.replace(/\.pdf$/i, ""));
-      setMatNote(`Ready: ${file.name} (offline PDF · clears when you paste a link)`);
-    };
-    reader.onerror = () => setError("Could not read PDF file.");
-    reader.readAsDataURL(file);
+    setMatFile(file);
+    setMatUrl(""); // exclusive: file OR link
+    setMatType("notes");
+    if (!matTitle.trim()) setMatTitle(file.name.replace(/\.pdf$/i, ""));
+    setMatNote(
+      `Ready: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) — click Publish`
+    );
   };
 
   const startLive = async (schedule = false) => {
@@ -678,22 +677,23 @@ function TeacherInner() {
                       />
                     </label>
                     <input
-                      value={matUrl.startsWith("data:") ? "" : matUrl}
+                      value={matFile ? "" : matUrl}
                       onChange={(e) => {
                         setMatUrl(e.target.value);
-                        // exclusive: pasting link clears offline PDF attachment mode
+                        if (e.target.value.trim()) setMatFile(null);
                       }}
-                      placeholder="Paste ONE: https:// Drive / YouTube link (or use Offline PDF above)"
+                      placeholder="Or paste https:// Drive / YouTube link"
                       className={`${field} sm:col-span-2`}
+                      disabled={!!matFile}
                     />
                     <p className="sm:col-span-2 text-[10px] text-slate-400">
-                      Use either a link <strong>or</strong> offline PDF — not
-                      both required. Drive: Share → Anyone with the link.
+                      PDF from device up to <strong>5 MB</strong>, or a Drive
+                      link — one is enough.
                     </p>
-                    {matUrl.startsWith("data:") && (
+                    {matFile && (
                       <p className="sm:col-span-2 text-[11px] font-semibold text-emerald-700">
-                        Offline PDF attached ({Math.round(matUrl.length / 1024)}{" "}
-                        KB data)
+                        PDF ready: {matFile.name} (
+                        {(matFile.size / (1024 * 1024)).toFixed(2)} MB)
                       </p>
                     )}
                   </div>
