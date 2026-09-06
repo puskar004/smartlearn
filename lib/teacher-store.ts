@@ -206,7 +206,23 @@ export async function apiUploadMaterialFile(opts: {
     method: "POST",
     body: fd,
   });
-  return res.json();
+  const text = await res.text();
+  let data: { ok?: boolean; error?: string; classroom?: unknown; size?: number; durable?: boolean } = {};
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = {
+      ok: false,
+      error: text.slice(0, 120) || `Upload failed (${res.status})`,
+    };
+  }
+  if (!res.ok && !data.error) {
+    data.error =
+      res.status === 422
+        ? "Unprocessable — try a Drive link instead of file upload."
+        : `Upload failed (${res.status})`;
+  }
+  return data;
 }
 
 export async function apiStartLive(

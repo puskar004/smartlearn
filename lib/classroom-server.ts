@@ -16,13 +16,57 @@ function metaOf(user: { publicMetadata?: Record<string, unknown> | null }): Smar
   return (m.smartlearn as SmartlearnMeta) || {};
 }
 
+/** Keep Clerk metadata small — no data: URLs, trim fat fields */
+function lightClassroom(c: Classroom): Classroom {
+  return {
+    ...c,
+    materials: (c.materials || [])
+      .filter((m) => m.url && !m.url.startsWith("data:"))
+      .map((m) => ({
+        ...m,
+        url: String(m.url).slice(0, 500),
+        title: String(m.title || "").slice(0, 120),
+        subject: String(m.subject || "").slice(0, 60),
+      }))
+      .slice(0, 40),
+    alerts: (c.alerts || []).slice(0, 12),
+    attendanceLog: (c.attendanceLog || []).slice(0, 20).map((r) => ({
+      ...r,
+      attendees: (r.attendees || []).slice(0, 40),
+    })),
+    students: (c.students || []).slice(0, 80).map((s) => ({
+      ...s,
+      recentMistakes: (s.recentMistakes || []).slice(0, 3),
+      weakSubjects: (s.weakSubjects || []).slice(0, 5),
+      email: s.email ? String(s.email).slice(0, 80) : undefined,
+    })),
+    liveSession: c.liveSession
+      ? {
+          ...c.liveSession,
+          messages: (c.liveSession.messages || []).slice(-40),
+          attendees: (c.liveSession.attendees || []).slice(0, 80),
+          meetUrl: c.liveSession.meetUrl
+            ? String(c.liveSession.meetUrl).slice(0, 300)
+            : undefined,
+        }
+      : null,
+  };
+}
+
 async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
+  const cleaned: SmartlearnMeta = {
+    ...smartlearn,
+    classrooms: (smartlearn.classrooms || [])
+      .slice(0, 20)
+      .map(lightClassroom),
+    teacherRemarks: (smartlearn.teacherRemarks || []).slice(0, 20),
+  };
   await client.users.updateUserMetadata(userId, {
     publicMetadata: {
       ...user.publicMetadata,
-      smartlearn,
+      smartlearn: cleaned,
     },
   });
 }
@@ -337,21 +381,33 @@ export async function addMaterialToClass(
   code: string,
   material: Omit<TeacherMaterial, "id" | "createdAt">
 ) {
+  const url = String(material.url || "").trim();
+  if (!url || url.startsWith("data:")) {
+    throw new Error(
+      "Invalid file URL. Use Publish after selecting PDF, or paste a Drive https link."
+    );
+  }
+  if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("/api/")) {
+    throw new Error("Material link must be https:// or uploaded file URL.");
+  }
   return updateClassroom(teacherId, code, (c) => {
     const m: TeacherMaterial = {
       ...material,
+      url: url.slice(0, 500),
+      title: String(material.title || "Notes").slice(0, 120),
+      subject: String(material.subject || "General").slice(0, 60),
       id: `mat-${Date.now()}`,
       createdAt: Date.now(),
     };
     const alerts = pushAlert(c, {
       kind: "material",
       title: `New ${m.subject} notes`,
-      body: `${m.title} · ${m.subject} · ${m.type}`,
+      body: `${m.title} · ${m.subject}`,
       href: "/join-class",
     });
     return {
       ...c,
-      materials: [m, ...(c.materials || [])].slice(0, 100),
+      materials: [m, ...(c.materials || [])].slice(0, 40),
       alerts,
     };
   });

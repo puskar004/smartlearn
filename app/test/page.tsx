@@ -68,6 +68,11 @@ export default function StudentTestPage() {
     score: number;
     total: number;
   } | null>(null);
+  const [tabWarn, setTabWarn] = useState<string | null>(null);
+  const [tabWarnCount, setTabWarnCount] = useState(0);
+  const tabLeaveCount = useRef(0);
+  const tabGraceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabCountdown = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const inTest = Boolean(test && !result);
   const n = test?.questions.length || 0;
@@ -111,11 +116,14 @@ export default function StudentTestPage() {
   useEffect(() => {
     if (inTest) {
       setSessionLock(true, "test");
+      tabLeaveCount.current = 0;
+      setTabWarnCount(0);
       return () => setSessionLock(false);
     }
     setSessionLock(false);
     setProctorReady(false);
     setSetupError(null);
+    setTabWarn(null);
   }, [inTest]);
 
   // Track fullscreen — required to attempt
@@ -235,6 +243,72 @@ export default function StudentTestPage() {
     },
     [test, submitting, result, answers]
   );
+
+  // Tab-switch: 5s grace · 2 warnings · 3rd leave = instant submit
+  useEffect(() => {
+    if (!inTest || !proctorReady || result) return;
+
+    const clearGrace = () => {
+      if (tabGraceTimer.current) clearTimeout(tabGraceTimer.current);
+      if (tabCountdown.current) clearInterval(tabCountdown.current);
+      tabGraceTimer.current = null;
+      tabCountdown.current = null;
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        tabLeaveCount.current += 1;
+        const n = tabLeaveCount.current;
+        setTabWarnCount(n);
+
+        if (n >= 3) {
+          clearGrace();
+          setTabWarn("3rd tab switch — submitting test now.");
+          void submit(true, "Left the test window 3 times — auto-submitted.");
+          return;
+        }
+
+        let sec = 5;
+        setTabWarn(`Warning ${n}/2 · Return in ${sec}s or test auto-submits!`);
+        clearGrace();
+        tabCountdown.current = setInterval(() => {
+          sec -= 1;
+          if (sec <= 0) return;
+          setTabWarn(`Warning ${n}/2 · Return in ${sec}s or test auto-submits!`);
+        }, 1000);
+        tabGraceTimer.current = setTimeout(() => {
+          clearGrace();
+          if (document.visibilityState === "hidden") {
+            setTabWarn("Time up — submitting…");
+            void submit(
+              true,
+              `Tab switch warning ${n}: did not return in 5s — auto-submitted.`
+            );
+          }
+        }, 5000);
+      } else if (tabGraceTimer.current) {
+        clearGrace();
+        const n = tabLeaveCount.current;
+        setTabWarn(
+          n >= 2
+            ? "Last warning used. One more leave = instant submit."
+            : `Back in test. Warnings used: ${n}/2.`
+        );
+        window.setTimeout(() => setTabWarn(null), 2500);
+        try {
+          void document.documentElement.requestFullscreen?.();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      clearGrace();
+    };
+  }, [inTest, proctorReady, result, submit]);
 
   const requestSubmit = useCallback(() => {
     if (!test || !canAttempt || submitting) return;
@@ -447,6 +521,14 @@ export default function StudentTestPage() {
               </div>
             </div>
           </div>
+          {tabWarn && (
+            <div className="bg-rose-600 px-3 py-2 text-center text-xs font-bold text-white animate-pulse">
+              {tabWarn}
+              {tabWarnCount > 0 && (
+                <span className="ml-2 opacity-90">({tabWarnCount}/2 used)</span>
+              )}
+            </div>
+          )}
           {/* Subject / paper strip */}
           <div className="flex items-stretch border-t border-[#c45a00]/80 bg-[#fff8e7]">
             <div className="border-r border-amber-300 bg-[#1a237e] px-4 py-1.5 text-[12px] font-bold text-white">

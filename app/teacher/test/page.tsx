@@ -73,8 +73,10 @@ async function extractPdfText(file: File): Promise<string> {
 
 export default function TeacherTestPage() {
   const { userId, isSignedIn } = useAuth();
-  const [title, setTitle] = useState("Unit Test · Physics");
+  const [title, setTitle] = useState("Unit Test");
+  const [subject, setSubject] = useState("Physics");
   const [durationMin, setDurationMin] = useState(30);
+  const [joinWindowMin, setJoinWindowMin] = useState(15);
   const [rawText, setRawText] = useState("");
   const [questions, setQuestions] = useState<Mcq[]>([]);
   const [tests, setTests] = useState<TestRow[]>([]);
@@ -175,13 +177,17 @@ export default function TeacherTestPage() {
         body: JSON.stringify({
           action: "create",
           title,
+          subject,
           durationMin,
+          joinWindowMin,
           questions: qs,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Create failed");
-      setMsg(`Test live · code ${data.test.code} — share with students`);
+      setMsg(
+        `Live · code ${data.test.code} · join open ${joinWindowMin} min · each student gets ${durationMin} min`
+      );
       setQuestions([]);
       setRawText("");
       void load();
@@ -250,16 +256,25 @@ export default function TeacherTestPage() {
       <div className="mt-6 space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-semibold text-slate-700">
-            Title
+            Test title
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className={inputCls}
-              placeholder="e.g. Physics Unit 1 Test"
+              placeholder="e.g. Unit 1 MCQ"
             />
           </label>
           <label className="text-xs font-semibold text-slate-700">
-            Duration (minutes)
+            Subject
+            <input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className={inputCls}
+              placeholder="Physics / Chemistry / Maths…"
+            />
+          </label>
+          <label className="text-xs font-semibold text-slate-700">
+            Student duration (minutes)
             <input
               type="number"
               min={5}
@@ -268,6 +283,21 @@ export default function TeacherTestPage() {
               onChange={(e) => setDurationMin(Number(e.target.value) || 30)}
               className={inputCls}
             />
+          </label>
+          <label className="text-xs font-semibold text-slate-700">
+            Code join window (minutes)
+            <input
+              type="number"
+              min={5}
+              max={120}
+              value={joinWindowMin}
+              onChange={(e) => setJoinWindowMin(Number(e.target.value) || 15)}
+              className={inputCls}
+            />
+            <span className="mt-1 block text-[10px] font-normal text-slate-400">
+              Students can enter the code only within this time after publish
+              (default 15).
+            </span>
           </label>
         </div>
 
@@ -511,9 +541,13 @@ export default function TeacherTestPage() {
                 {momentsFor.videoKeys.map((vk) => (
                   <video
                     key={vk}
+                    src={
+                      vk.startsWith("http")
+                        ? vk
+                        : `/api/tests?video=${encodeURIComponent(vk)}`
+                    }
                     controls
-                    src={`/api/tests?video=${encodeURIComponent(vk)}`}
-                    className="w-full rounded-lg bg-black"
+                    className="mt-2 max-h-48 w-full rounded-lg bg-black"
                   />
                 ))}
               </div>

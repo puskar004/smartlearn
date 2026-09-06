@@ -273,10 +273,17 @@ function TeacherInner() {
           type: matType,
           file: matFile,
         });
-        if (!data.ok) throw new Error(data.error || "Upload failed");
-        if (data.classroom) setRoom(data.classroom);
+        if (!data.ok) {
+          throw new Error(
+            data.error ||
+              (typeof data === "string" ? data : "Upload failed")
+          );
+        }
+        if (data.classroom) setRoom(data.classroom as Classroom);
         setMatNote(
-          `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB) · ${matSubject || "General"}`
+          data.durable === false
+            ? `Saved locally only — students may not see it. Prefer Drive link.`
+            : `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB) · open from Join Teacher`
         );
       } else {
         const url = normalizeMaterialUrl(matUrl);
@@ -301,7 +308,11 @@ function TeacherInner() {
       setMatFile(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
-      setError(msg);
+      setError(
+        /unprocessable|422|entity|metadata|too large|clerk/i.test(msg)
+          ? "Upload blocked (server limit). Use a Google Drive link: Share → Anyone with the link → paste below."
+          : msg
+      );
     } finally {
       setBusy(false);
     }

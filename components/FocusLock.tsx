@@ -99,8 +99,9 @@ export default function FocusLock() {
     if (!isSignedIn || !userId) return;
     if (getRole(userId) !== "student") return;
     if (path.startsWith("/teacher")) return;
-    // Tab-switch lock ONLY during live test
+    // Tab-switch ONLY during live test — but Test page has its own 5s/2-warning handler
     if (!onTest) return;
+    if (document.documentElement.dataset.sessionLock === "test") return;
     if (!isFocusLockEnabled()) return;
     if (isPdfReading()) return;
     if (document.querySelector("[data-pdf-reader='1']")) return;

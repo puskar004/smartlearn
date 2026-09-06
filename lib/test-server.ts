@@ -29,12 +29,16 @@ export type LiveTest = {
   title: string;
   teacherId: string;
   teacherName: string;
+  /** Subject label e.g. Physics */
+  subject?: string;
   classCode?: string;
   durationMin: number;
+  /** Students may join only until this time (default startsAt + 15 min) */
+  joinUntil?: number;
   questions: TestMcq[];
   createdAt: number;
   startsAt: number;
-  /** Informational only — test stays joinable until teacher closes */
+  /** Soft/info — student timer uses durationMin from their start */
   endsAt: number;
   active: boolean;
   submissions: Record<
@@ -391,24 +395,50 @@ export async function saveVideoChunk(
   if (!test) throw new Error("Test not found");
   if (!test.active) throw new Error("Test closed");
 
-  const dir = videoDir();
-  await fs.mkdir(dir, { recursive: true });
-  const key = `${test.code}_${studentId}_${Date.now()}.${ext}`;
   const raw = base64.replace(/^data:[^;]+;base64,/, "");
   const buf = Buffer.from(raw, "base64");
-  // cap ~1.5MB per chunk
-  if (buf.length > 1_600_000) throw new Error("Video chunk too large");
-  await fs.writeFile(path.join(dir, key), buf);
+  if (buf.length < 200) throw new Error("Video chunk too small");
+  if (buf.length > 2_500_000) throw new Error("Video chunk too large");
+
+  const localKey = `${test.code}_${studentId}_${Date.now()}.${ext}`;
+  try {
+    const dir = videoDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, localKey), buf);
+  } catch {
+    // ignore local
+  }
+
+  // Prefer durable remote URL so teacher can play after cold start
+  let storeKey = localKey;
+  try {
+    const { uploadBufferRemote } = await import("@/lib/remote-upload");
+    const remote = await uploadBufferRemote(buf, localKey, "video/webm");
+    if (remote) storeKey = remote;
+  } catch {
+    // keep local key
+  }
 
   await addTestMoment(code, studentId, "Student", {
     at: Date.now(),
     note: "screen-video-chunk",
-    videoKey: key,
+    videoKey: storeKey,
   });
-  return key;
+  return storeKey;
 }
 
 export async function readVideoChunk(key: string): Promise<Buffer | null> {
+  // Remote URL — caller should redirect; return null to signal remote
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    try {
+      const res = await fetch(key);
+      if (!res.ok) return null;
+      const ab = await res.arrayBuffer();
+      return Buffer.from(ab);
+    } catch {
+      return null;
+    }
+  }
   try {
     const safe = path.basename(key);
     return await fs.readFile(path.join(videoDir(), safe));

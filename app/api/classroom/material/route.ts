@@ -9,6 +9,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** Allow up to ~5.5MB multipart on Node runtime */
+export const maxDuration = 60;
 
 /** Serve stored PDF when local key still exists (same instance). Prefer durable https URLs. */
 export async function GET(req: NextRequest) {

@@ -25,6 +25,10 @@ export async function GET(req: NextRequest) {
   if (video) {
     if (!userId)
       return NextResponse.json({ error: "Sign in" }, { status: 401 });
+    // Durable remote URL stored as video key
+    if (video.startsWith("http://") || video.startsWith("https://")) {
+      return NextResponse.redirect(video);
+    }
     const buf = await readVideoChunk(video);
     if (!buf) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return new NextResponse(new Uint8Array(buf), {
@@ -61,13 +65,23 @@ export async function GET(req: NextRequest) {
         { status: 403 }
       );
     }
+    const isTeacher = userId === t.teacherId;
+    const joinUntil =
+      t.joinUntil || t.startsAt + 15 * 60_000;
+    if (!isTeacher && t.active && Date.now() > joinUntil) {
+      return NextResponse.json(
+        {
+          error:
+            "Join window closed (15 minutes after test went live). Ask teacher to publish a new test.",
+        },
+        { status: 403 }
+      );
+    }
     const publicQ = t.questions.map(
       ({ correctIndex, explanation, ...rest }) => rest
     );
-    const isTeacher = userId === t.teacherId;
     const mySub =
       userId && t.submissions?.[userId] ? t.submissions[userId] : null;
-    // Final attempt only (proctor moments may create empty stub submissions)
     const doneAttempt = Boolean(
       mySub &&
         mySub.at &&
@@ -82,9 +96,11 @@ export async function GET(req: NextRequest) {
       priorResult: doneAttempt
         ? { score: mySub!.score, total: mySub!.total, at: mySub!.at }
         : null,
+      joinUntil,
       test: {
         ...t,
-        // Timer is durationMin from student start — endsAt is informational only
+        subject: t.subject,
+        joinUntil,
         durationMin: t.durationMin || 30,
         questions: isTeacher ? t.questions : publicQ,
         submissions: isTeacher ? t.submissions : {},
@@ -195,9 +211,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // create — stays live until teacher closes (endsAt is soft/info only)
+  // create
   const title = String(body.title || "Class Test").slice(0, 120);
+  const subject = String(body.subject || "").slice(0, 80) || undefined;
   const durationMin = Math.min(180, Math.max(5, Number(body.durationMin) || 30));
+  const joinWindowMin = Math.min(
+    120,
+    Math.max(5, Number(body.joinWindowMin) || 15)
+  );
   let questions = (body.questions || []) as TestMcq[];
 
   if ((!questions || questions.length === 0) && body.rawText) {
@@ -228,26 +249,30 @@ export async function POST(req: NextRequest) {
   }
 
   const now = Date.now();
-  const YEAR = 365 * 24 * 60 * 60 * 1000;
   const test: LiveTest = {
     id: `test-${now}`,
     code: genTestCode(),
-    title,
+    title: subject ? `${title} · ${subject}` : title,
+    subject,
     teacherId: userId,
     teacherName: user?.fullName || user?.firstName || "Teacher",
     classCode: body.classCode ? String(body.classCode) : undefined,
     durationMin,
+    joinUntil: now + joinWindowMin * 60_000,
     questions: normalized,
     createdAt: now,
     startsAt: now,
-    // far future — only teacher close ends joinability
-    endsAt: now + YEAR,
+    endsAt: now + durationMin * 60_000,
     active: true,
     submissions: {},
   };
 
   await saveTest(test);
-  return NextResponse.json({ ok: true, test });
+  return NextResponse.json({
+    ok: true,
+    test,
+    note: `Code valid for join for ${joinWindowMin} min. Each student gets ${durationMin} min once they start.`,
+  });
 }
 
 function parseSimpleMcq(raw: string): TestMcq[] {

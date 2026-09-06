@@ -98,19 +98,20 @@ export default function TestProctor({
     };
 
     const uploadVideoBlob = async (blob: Blob) => {
-      if (blob.size < 500 || blob.size > 1_500_000) return;
-      const dataUrl = await blobToDataUrl(blob);
+      // Accept smaller chunks; max ~2.2MB base64-safe
+      if (blob.size < 300 || blob.size > 1_800_000) return;
       try {
+        const dataUrl = await blobToDataUrl(blob);
         const res = await fetch("/api/tests", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "video",
             code: testCode,
-            dataUrl: dataUrl.slice(0, 2_000_000),
+            dataUrl,
           }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (data.videoKey) {
           momentRef.current?.({
             at: Date.now(),
@@ -119,7 +120,7 @@ export default function TestProctor({
           });
         }
       } catch {
-        // ignore
+        // ignore network
       }
     };
 
@@ -217,58 +218,54 @@ export default function TestProctor({
         sTrack.onended = () =>
           failLive("Screen sharing stopped — test exited.");
 
-        // Continuous screen recording in ~30s chunks for teacher
+        // Continuous screen recording — flush every 8s to teacher
         try {
           const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
             ? "video/webm;codecs=vp8"
             : MediaRecorder.isTypeSupported("video/webm")
               ? "video/webm"
               : "";
-          const rec = mime
-            ? new MediaRecorder(screen, {
-                mimeType: mime,
-                videoBitsPerSecond: 250_000,
-              })
-            : new MediaRecorder(screen);
           let chunks: BlobPart[] = [];
-          rec.ondataavailable = (e) => {
-            if (e.data.size) chunks.push(e.data);
+          const startRec = () => {
+            try {
+              const rec = mime
+                ? new MediaRecorder(screen, {
+                    mimeType: mime,
+                    videoBitsPerSecond: 400_000,
+                  })
+                : new MediaRecorder(screen);
+              chunks = [];
+              rec.ondataavailable = (e) => {
+                if (e.data && e.data.size) chunks.push(e.data);
+              };
+              rec.onstop = () => {
+                const blob = new Blob(chunks, { type: "video/webm" });
+                chunks = [];
+                if (blob.size >= 300) void uploadVideoBlob(blob);
+              };
+              rec.start(1000);
+              recorderRef.current = rec;
+            } catch {
+              // ignore
+            }
           };
-          rec.onstop = () => {
-            const blob = new Blob(chunks, { type: "video/webm" });
-            chunks = [];
-            void uploadVideoBlob(blob);
-          };
-          rec.start(1000);
-          recorderRef.current = rec;
-          // every 30s stop/start to flush a chunk
+          startRec();
           chunkTimer = setInterval(() => {
             try {
-              if (recorderRef.current?.state === "recording") {
-                recorderRef.current.stop();
-                // restart
-                chunks = [];
-                const r2 = mime
-                  ? new MediaRecorder(screen, {
-                      mimeType: mime,
-                      videoBitsPerSecond: 250_000,
-                    })
-                  : new MediaRecorder(screen);
-                r2.ondataavailable = (e) => {
-                  if (e.data.size) chunks.push(e.data);
-                };
-                r2.onstop = () => {
-                  const blob = new Blob(chunks, { type: "video/webm" });
-                  chunks = [];
-                  void uploadVideoBlob(blob);
-                };
-                r2.start(1000);
-                recorderRef.current = r2;
+              const cur = recorderRef.current;
+              if (cur && cur.state === "recording") {
+                cur.stop();
+                // restart next tick
+                window.setTimeout(() => {
+                  if (!cancelledRef.current && screenRef.current) startRec();
+                }, 200);
+              } else if (!cancelledRef.current && screenRef.current) {
+                startRec();
               }
             } catch {
               // ignore
             }
-          }, 10_000);
+          }, 8_000);
         } catch {
           // video optional if MediaRecorder fails
         }
