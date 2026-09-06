@@ -290,12 +290,13 @@ export default function JoinClassPage() {
   };
 
   // Fallback: if state empty but localStorage has code, show it
-  const displayRooms =
+  const displayRooms: JoinedRoom[] =
     rooms.length > 0
       ? rooms
       : getJoinedClasses(userId).map((c) => ({
           code: c,
           name: `Class ${c}`,
+          teacherName: "",
           materials: [] as TeacherMaterial[],
         }));
 
