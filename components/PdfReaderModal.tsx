@@ -53,14 +53,22 @@ export default function PdfReaderModal({
     setPdfReading(open);
     if (!open) return;
     setMode(pdf ? "reader" : "portal");
+    // Keep flag true for whole open duration (survives focus blips)
+    document.documentElement.dataset.pdfOpen = "1";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // Re-assert every few seconds while open (focus lock safety)
+    const keep = window.setInterval(() => {
+      document.documentElement.dataset.pdfOpen = "1";
+    }, 1000);
     return () => {
+      window.clearInterval(keep);
       setPdfReading(false);
+      delete document.documentElement.dataset.pdfOpen;
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
@@ -71,6 +79,7 @@ export default function PdfReaderModal({
   return (
     <div
       className="fixed inset-0 z-[120] flex flex-col bg-slate-950/80 p-1 backdrop-blur-sm sm:p-3"
+      data-pdf-reader="1"
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-600 bg-white shadow-2xl">

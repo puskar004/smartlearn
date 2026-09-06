@@ -383,7 +383,7 @@ function NcertInner() {
 
       {/* Filters */}
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <div className="flex rounded-full bg-white/80 p-1 shadow-sm ring-1 ring-slate-200/80">
+        <div className="flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
           {(["10", "11", "12"] as Grade[]).map((g) => (
             <button
               key={g}
@@ -397,10 +397,10 @@ function NcertInner() {
                 }
               }}
               className={cn(
-                "rounded-full px-4 py-1.5 text-sm font-bold",
+                "rounded-full px-4 py-1.5 text-sm font-bold transition",
                 grade === g
-                  ? "bg-white text-indigo-700 shadow"
-                  : "bg-white/20 text-white hover:bg-white/30"
+                  ? "bg-indigo-600 text-white shadow"
+                  : "bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               )}
             >
               Class {g}

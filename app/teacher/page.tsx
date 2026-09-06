@@ -53,6 +53,7 @@ function TeacherInner() {
   const [liveSubject, setLiveSubject] = useState("Physics");
   const [liveMins, setLiveMins] = useState(40);
   const [meetUrl, setMeetUrl] = useState("https://meet.google.com/");
+  const [scheduleLocal, setScheduleLocal] = useState("");
   const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +122,31 @@ function TeacherInner() {
       await navigator.clipboard.writeText(room.code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      // Broadcast for students who already linked this class (notifications)
+      try {
+        localStorage.setItem(
+          "sl_class_code_share",
+          JSON.stringify({
+            code: room.code,
+            name: room.name,
+            at: Date.now(),
+          })
+        );
+        // Also push into each joined student's notification channel via storage event
+        for (const s of room.students || []) {
+          localStorage.setItem(
+            `sl_notify_student_${s.studentId}`,
+            JSON.stringify({
+              title: "Class code from teacher",
+              body: `Join/open class ${room.name} with code ${room.code}`,
+              href: "/join-class",
+              at: Date.now(),
+            })
+          );
+        }
+      } catch {
+        // ignore
+      }
     } catch {
       // ignore
     }
@@ -173,11 +199,19 @@ function TeacherInner() {
     reader.readAsDataURL(file);
   };
 
-  const startLive = async () => {
+  const startLive = async (schedule = false) => {
     if (!activeCode) return;
     if (!meetUrl.trim() || !meetUrl.includes("http")) {
       setError("Paste a valid Google Meet link first.");
       return;
+    }
+    let scheduledAt: number | undefined;
+    if (schedule && scheduleLocal) {
+      scheduledAt = new Date(scheduleLocal).getTime();
+      if (Number.isNaN(scheduledAt) || scheduledAt < Date.now()) {
+        setError("Pick a future date/time to schedule.");
+        return;
+      }
     }
     setBusy(true);
     setError(null);
@@ -187,10 +221,25 @@ function TeacherInner() {
         liveTitle,
         liveSubject,
         liveMins,
-        meetUrl.trim()
+        meetUrl.trim(),
+        scheduledAt
       );
       if (!data.ok) throw new Error(data.error || "Could not start live");
       if (data.classroom) setRoom(data.classroom);
+      // Notify joined students via local broadcast key they poll
+      try {
+        localStorage.setItem(
+          `sl_live_alert_${activeCode}`,
+          JSON.stringify({
+            title: liveTitle,
+            meetUrl: meetUrl.trim(),
+            at: Date.now(),
+            scheduledAt,
+          })
+        );
+      } catch {
+        // ignore
+      }
       router.replace("/teacher?tab=live");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Live start failed");
@@ -567,17 +616,34 @@ function TeacherInner() {
                         placeholder="https://meet.google.com/xxx-xxxx-xxx"
                         className={`${field} sm:col-span-3`}
                       />
+                      <label className="sm:col-span-3 text-[11px] font-semibold text-slate-600">
+                        Schedule for later (optional)
+                        <input
+                          type="datetime-local"
+                          value={scheduleLocal}
+                          onChange={(e) => setScheduleLocal(e.target.value)}
+                          className={`${field} mt-1 w-full`}
+                        />
+                      </label>
                       <button
                         type="button"
-                        onClick={() => void startLive()}
+                        onClick={() => void startLive(false)}
                         disabled={busy}
-                        className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white sm:col-span-3"
+                        className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white sm:col-span-2"
                       >
-                        Go live with Meet link
+                        Go live now
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void startLive(true)}
+                        disabled={busy || !scheduleLocal}
+                        className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                      >
+                        Schedule meeting
                       </button>
                     </div>
                     <p className="mt-2 text-[11px] text-slate-500">
-                      Create a meeting at{" "}
+                      Create Meet at{" "}
                       <a
                         href="https://meet.google.com/new"
                         target="_blank"
@@ -586,7 +652,8 @@ function TeacherInner() {
                       >
                         meet.google.com/new
                       </a>{" "}
-                      → paste the link here → students see Join Meet.
+                      → paste link. Students open{" "}
+                      <strong>Live Class</strong> to join + chat.
                     </p>
                   </div>
                 ) : (

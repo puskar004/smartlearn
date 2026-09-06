@@ -167,13 +167,17 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "startLive") {
+      const scheduledAt = body.scheduledAt
+        ? Number(body.scheduledAt)
+        : undefined;
       const room = await startLive(
         userId,
         String(body.code || ""),
         String(body.title || "Live session"),
         String(body.subject || "General"),
         Number(body.minutes) || 40,
-        body.meetUrl ? String(body.meetUrl) : undefined
+        body.meetUrl ? String(body.meetUrl) : undefined,
+        scheduledAt
       );
       if (!room) {
         return NextResponse.json({ ok: false, error: "Class not found" }, { status: 404 });

@@ -48,9 +48,15 @@ export default function AppTopBar() {
     sync();
     window.addEventListener(ROLE_EVENT, sync);
     window.addEventListener("sl-notifications", sync);
+    window.addEventListener("sl-progress", sync);
+    window.addEventListener("sl-tasks", sync);
+    window.addEventListener("focus", sync);
     return () => {
       window.removeEventListener(ROLE_EVENT, sync);
       window.removeEventListener("sl-notifications", sync);
+      window.removeEventListener("sl-progress", sync);
+      window.removeEventListener("sl-tasks", sync);
+      window.removeEventListener("focus", sync);
     };
   }, [userId]);
 

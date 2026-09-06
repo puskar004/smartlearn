@@ -38,6 +38,8 @@ export type LiveSession = {
   joinCode: string;
   /** Google Meet / Zoom link */
   meetUrl?: string;
+  /** Future start time — student dashboard shows scheduled class */
+  scheduledAt?: number;
   messages: { id: string; author: string; text: string; at: number }[];
 };
 

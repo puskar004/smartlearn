@@ -174,12 +174,19 @@ export default function CommonRoomPage() {
   }, [left]);
 
   useEffect(() => {
-    if (!lightbox) return;
+    if (!lightbox) {
+      delete document.documentElement.dataset.modalOpen;
+      return;
+    }
+    document.documentElement.dataset.modalOpen = "1";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setLightbox(null);
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      delete document.documentElement.dataset.modalOpen;
+      window.removeEventListener("keydown", onKey);
+    };
   }, [lightbox]);
 
   const onFile = async (file: File | null) => {
@@ -199,7 +206,10 @@ export default function CommonRoomPage() {
 
   const startReply = (m: Msg) => {
     setReplyTo(m);
-    textRef.current?.focus();
+    window.setTimeout(() => {
+      textRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      textRef.current?.focus();
+    }, 50);
   };
 
   const post = async (e: FormEvent) => {
@@ -405,14 +415,18 @@ export default function CommonRoomPage() {
               {m.imageDataUrl && (
                 <button
                   type="button"
-                  onClick={() => setLightbox(m.imageDataUrl!)}
-                  className="group relative mt-3 block max-w-full overflow-hidden rounded-xl border border-slate-100"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setLightbox(m.imageDataUrl!);
+                  }}
+                  className="group relative mt-3 block max-w-full cursor-zoom-in overflow-hidden rounded-xl border border-slate-100"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={m.imageDataUrl}
                     alt="shared"
-                    className="max-h-64 w-auto object-contain transition group-hover:opacity-95"
+                    className="pointer-events-none max-h-64 w-auto object-contain transition group-hover:opacity-95"
                   />
                   <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
                     <ZoomIn className="h-3 w-3" /> Enlarge
@@ -422,10 +436,14 @@ export default function CommonRoomPage() {
               <div className="mt-3">
                 <button
                   type="button"
-                  onClick={() => startReply(m)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-700 hover:bg-sky-50"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startReply(m);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-800 hover:bg-sky-100"
                 >
-                  <Reply className="h-3 w-3" /> Reply
+                  <Reply className="h-3.5 w-3.5" /> Reply
                 </button>
               </div>
             </li>
@@ -435,15 +453,19 @@ export default function CommonRoomPage() {
 
       {lightbox && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
+          className="fixed inset-0 z-[400] flex items-center justify-center bg-black/90 p-4"
           onClick={() => setLightbox(null)}
           role="dialog"
           aria-modal
+          data-modal-open="1"
         >
           <button
             type="button"
-            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            onClick={() => setLightbox(null)}
+            className="absolute right-4 top-4 z-10 rounded-full bg-white/20 p-2 text-white hover:bg-white/30"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightbox(null);
+            }}
           >
             <X className="h-5 w-5" />
           </button>

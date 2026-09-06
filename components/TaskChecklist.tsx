@@ -18,6 +18,7 @@ import {
   type StudyTask,
   type TaskCadence,
 } from "@/lib/tasks";
+import { addXp } from "@/lib/user-store";
 import { cn } from "@/lib/utils";
 
 export default function TaskChecklist({
@@ -136,7 +137,14 @@ export default function TaskChecklist({
                 >
                   <button
                     type="button"
-                    onClick={() => setTasks(toggleTaskDone(userId, t.id))}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const was = t.completed;
+                      const next = toggleTaskDone(userId, t.id);
+                      setTasks(next);
+                      if (!was) addXp(userId, 3);
+                    }}
                     className="mt-0.5 shrink-0"
                     title="Toggle done"
                   >
@@ -148,7 +156,14 @@ export default function TaskChecklist({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setTasks(toggleTaskDone(userId, t.id))}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const was = t.completed;
+                      const next = toggleTaskDone(userId, t.id);
+                      setTasks(next);
+                      if (!was) addXp(userId, 3);
+                    }}
                     className="min-w-0 flex-1 text-left"
                   >
                     <div

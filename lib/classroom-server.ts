@@ -227,19 +227,23 @@ export async function startLive(
   title: string,
   subject: string,
   minutes: number,
-  meetUrl?: string
+  meetUrl?: string,
+  scheduledAt?: number
 ) {
   return updateClassroom(teacherId, code, (c) => {
+    const now = Date.now();
+    const start = scheduledAt && scheduledAt > now ? scheduledAt : now;
     const live: LiveSession = {
-      id: `live-${Date.now()}`,
+      id: `live-${now}`,
       title,
       subject,
-      startedAt: Date.now(),
-      endsAt: Date.now() + minutes * 60_000,
-      active: true,
+      startedAt: start,
+      endsAt: start + minutes * 60_000,
+      active: !scheduledAt || scheduledAt <= now,
       joinCode: makeCode(4),
       meetUrl: meetUrl?.trim() || undefined,
-      messages: [],
+      scheduledAt: scheduledAt && scheduledAt > now ? scheduledAt : undefined,
+      messages: c.liveSession?.messages || [],
     };
     return { ...c, liveSession: live };
   });

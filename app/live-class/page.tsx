@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { Loader2, Radio, Shield } from "lucide-react";
+import { Loader2, Radio, Send, Shield } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
 import { setSessionLock } from "@/components/SessionLock";
-import { getJoinedClass, getRole } from "@/lib/teacher-store";
+import { getJoinedClass, getRole, apiPostMessage } from "@/lib/teacher-store";
+import { displayName } from "@/lib/display-name";
+
+type Msg = { id: string; author: string; text: string; at: number };
 
 type LiveInfo = {
   title: string;
@@ -15,18 +18,23 @@ type LiveInfo = {
   joinCode: string;
   active: boolean;
   endsAt: number;
+  messages: Msg[];
+  scheduledAt?: number;
 };
 
 export default function LiveClassPage() {
   const { userId, isSignedIn } = useAuth();
+  const { user } = useUser();
   const [live, setLive] = useState<LiveInfo | null>(null);
   const [className, setClassName] = useState("");
+  const [classCode, setClassCode] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) return;
-    setLoading(true);
     try {
       const res = await fetch("/api/classroom?action=joined");
       const data = await res.json();
@@ -34,9 +42,11 @@ export default function LiveClassPage() {
       if (!room) {
         setLive(null);
         setError("Join a teacher class first (Join Teacher).");
+        setLoading(false);
         return;
       }
       setClassName(room.name || "");
+      setClassCode(room.code || data.joined || "");
       const sess = room.liveSession;
       if (sess?.active) {
         setLive({
@@ -46,6 +56,20 @@ export default function LiveClassPage() {
           joinCode: sess.joinCode,
           active: true,
           endsAt: sess.endsAt,
+          messages: sess.messages || [],
+          scheduledAt: sess.scheduledAt,
+        });
+        setError(null);
+      } else if (sess?.scheduledAt && sess.scheduledAt > Date.now()) {
+        setLive({
+          title: sess.title,
+          subject: sess.subject,
+          meetUrl: sess.meetUrl,
+          joinCode: sess.joinCode || "",
+          active: false,
+          endsAt: sess.endsAt || sess.scheduledAt,
+          messages: [],
+          scheduledAt: sess.scheduledAt,
         });
         setError(null);
       } else {
@@ -63,17 +87,39 @@ export default function LiveClassPage() {
     if (!userId) return;
     if (getRole(userId) === "teacher") return;
     void load();
-    const id = setInterval(() => void load(), 8000);
+    const id = setInterval(() => void load(), 5000);
     return () => clearInterval(id);
   }, [userId, load]);
 
   useEffect(() => {
     if (live?.active) {
       setSessionLock(true, "live");
+      try {
+        void document.documentElement.requestFullscreen?.();
+      } catch {
+        // ignore
+      }
       return () => setSessionLock(false);
     }
     setSessionLock(false);
   }, [live?.active]);
+
+  const send = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!msg.trim() || !classCode) return;
+    setSending(true);
+    try {
+      await apiPostMessage(
+        classCode,
+        displayName(user) || "Student",
+        msg.trim()
+      );
+      setMsg("");
+      await load();
+    } finally {
+      setSending(false);
+    }
+  };
 
   if (!isSignedIn) {
     return (
@@ -100,14 +146,13 @@ export default function LiveClassPage() {
   return (
     <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-8">
       <div className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
-        <Radio className="h-3.5 w-3.5" /> Live class · screen lock on
+        <Radio className="h-3.5 w-3.5" /> Live class
       </div>
       <h1 className="mt-3 text-2xl font-extrabold text-slate-900 sm:text-3xl">
         Attend online class
       </h1>
       <p className="mt-1 text-sm text-slate-500">
-        {className || getJoinedClass(userId) || "Your class"} · Google Meet opens
-        here · lock stays while session is live
+        {className || getJoinedClass(userId) || "Your class"}
       </p>
 
       {loading && (
@@ -116,36 +161,91 @@ export default function LiveClassPage() {
         </div>
       )}
 
-      {error && !live && (
+      {error && !live?.active && !live?.scheduledAt && (
         <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
           {error}
           <div className="mt-3">
-            <Link href="/join-class" className="font-bold text-indigo-600 underline">
+            <Link
+              href="/join-class"
+              className="font-bold text-indigo-600 underline"
+            >
               Join Teacher
             </Link>
           </div>
         </div>
       )}
 
-      {live && (
-        <div className="mt-6 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-800">
-            <span>
-              LIVE · {live.title} · {live.subject}
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <Shield className="h-3.5 w-3.5" /> Locked to this session
-            </span>
+      {live?.scheduledAt && !live.active && (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+          <strong>Scheduled:</strong> {live.title} · {live.subject}
+          <div className="mt-1 text-xs">
+            Starts {new Date(live.scheduledAt).toLocaleString()}
           </div>
-          <MeetFrame
-            meetUrl={live.meetUrl || ""}
-            title={`${live.title} · Meet`}
-          />
-          {!live.meetUrl && (
-            <p className="text-center text-xs text-amber-700">
-              Teacher has not set a Google Meet link yet.
-            </p>
+          {live.meetUrl && (
+            <div className="mt-3">
+              <MeetFrame meetUrl={live.meetUrl} title="Upcoming Meet" />
+            </div>
           )}
+        </div>
+      )}
+
+      {live?.active && (
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-800">
+              <span>
+                LIVE · {live.title} · {live.subject}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Shield className="h-3.5 w-3.5" /> Focus session
+              </span>
+            </div>
+            <MeetFrame meetUrl={live.meetUrl || ""} title={`${live.title} · Meet`} />
+          </div>
+
+          {/* In-room chat — teacher + students */}
+          <div className="flex min-h-[320px] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-3 py-2 text-xs font-bold text-slate-800">
+              Class chat
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto p-3">
+              {(live.messages || []).length === 0 && (
+                <p className="text-center text-[11px] text-slate-400">
+                  No messages yet
+                </p>
+              )}
+              {(live.messages || []).map((m) => (
+                <div
+                  key={m.id}
+                  className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs"
+                >
+                  <div className="font-bold text-slate-800">{m.author}</div>
+                  <div className="text-slate-600">{m.text}</div>
+                  <div className="text-[10px] text-slate-400">
+                    {new Date(m.at).toLocaleTimeString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => void send(e)}
+              className="flex gap-2 border-t border-slate-100 p-2"
+            >
+              <input
+                value={msg}
+                onChange={(e) => setMsg(e.target.value)}
+                placeholder="Message the class…"
+                className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-900 placeholder:text-slate-400"
+              />
+              <button
+                type="submit"
+                disabled={sending || !msg.trim()}
+                className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              >
+                <Send className="h-3 w-3" /> Send
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </div>

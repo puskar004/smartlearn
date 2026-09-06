@@ -133,15 +133,21 @@ export function saveTasks(userId: string, tasks: StudyTask[]) {
 }
 
 export function toggleTaskDone(userId: string, taskId: string) {
+  // Only flip the exact task id (full complete / uncomplete — no double-step bug)
   const tasks = loadTasks(userId).map((t) => {
     if (t.id !== taskId) return t;
     if (t.completed) {
-      return { ...t, completed: false, done: Math.max(0, t.done - 1) };
+      return { ...t, completed: false, done: 0 };
     }
-    const done = Math.min(t.target, t.done + 1);
-    return { ...t, done, completed: done >= t.target };
+    return { ...t, done: t.target, completed: true };
   });
   saveTasks(userId, tasks);
+  try {
+    window.dispatchEvent(new Event("sl-tasks"));
+    window.dispatchEvent(new Event("sl-progress"));
+  } catch {
+    // ignore
+  }
   return tasks;
 }
 
@@ -156,6 +162,11 @@ export function bumpTask(
     return { ...t, done, completed: done >= t.target };
   });
   saveTasks(userId, tasks);
+  try {
+    window.dispatchEvent(new Event("sl-tasks"));
+  } catch {
+    // ignore
+  }
   return tasks;
 }
 

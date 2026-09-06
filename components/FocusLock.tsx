@@ -56,7 +56,16 @@ export function setPdfReading(on: boolean) {
 }
 
 function isPdfReading() {
-  return document.documentElement.dataset.pdfOpen === "1";
+  return (
+    document.documentElement.dataset.pdfOpen === "1" ||
+    document.documentElement.dataset.modalOpen === "1"
+  );
+}
+
+export function setModalOpen(on: boolean) {
+  if (typeof document === "undefined") return;
+  if (on) document.documentElement.dataset.modalOpen = "1";
+  else delete document.documentElement.dataset.modalOpen;
 }
 
 /** Student-only tab-switch guardian (never on teacher routes). */
@@ -90,7 +99,9 @@ export default function FocusLock() {
     if (getRole(userId) !== "student") return;
     if (path.startsWith("/teacher")) return;
     if (!isFocusLockEnabled()) return;
+    // In-app PDF / lightbox / common-room modal is NOT a tab switch
     if (isPdfReading()) return;
+    if (document.querySelector("[data-pdf-reader='1']")) return;
 
     const now = Date.now();
     if (now - lastAlert.current < COOLDOWN_MS) return;
@@ -135,13 +146,17 @@ export default function FocusLock() {
       const g = ctx.createGain();
       o.connect(g);
       g.connect(ctx.destination);
-      o.frequency.value = 920;
-      g.gain.value = 0.08;
+      // Longer buzzer (~1.2s) so student notices
+      o.frequency.value = 880;
+      g.gain.value = 0.1;
       o.start();
+      setTimeout(() => {
+        o.frequency.value = 660;
+      }, 400);
       setTimeout(() => {
         o.stop();
         void ctx.close();
-      }, 400);
+      }, 1200);
     } catch {
       // ignore
     }

@@ -90,6 +90,12 @@ export default function ChapterQuizPage() {
         );
         bumpTask(userId, "daily-quiz", 1);
         bumpTask(userId, "weekly-pyq", Math.max(1, finalScore));
+        try {
+          window.dispatchEvent(new Event("sl-progress"));
+          window.dispatchEvent(new Event("sl-tasks"));
+        } catch {
+          // ignore
+        }
         setSaved(true);
       }
       setDone(true);

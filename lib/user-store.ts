@@ -135,16 +135,29 @@ export function hardResetUser(userId: string): UserProgress {
   return wiped;
 }
 
+export function touchStreak(p: UserProgress) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (p.lastStudyDay === today) return p;
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  p.streak = p.lastStudyDay === yesterday ? p.streak + 1 : 1;
+  p.lastStudyDay = today;
+  return p;
+}
+
+export function emitProgress() {
+  try {
+    window.dispatchEvent(new Event("sl-progress"));
+  } catch {
+    // ignore
+  }
+}
+
 export function addXp(userId: string, amount: number) {
   const p = loadProgress(userId);
-  p.xp += amount;
-  const today = new Date().toISOString().slice(0, 10);
-  if (p.lastStudyDay !== today) {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    p.streak = p.lastStudyDay === yesterday ? p.streak + 1 : 1;
-    p.lastStudyDay = today;
-  }
+  p.xp += Math.max(0, amount);
+  touchStreak(p);
   saveProgress(p);
+  emitProgress();
   return p;
 }
 
@@ -161,14 +174,10 @@ export function recordQuiz(
     at: Date.now(),
   }));
   p.mistakes = [...stamped, ...p.mistakes].slice(0, 200);
-  p.xp += result.score * 2;
-  const today = new Date().toISOString().slice(0, 10);
-  if (p.lastStudyDay !== today) {
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    p.streak = p.lastStudyDay === yesterday ? p.streak + 1 : 1;
-    p.lastStudyDay = today;
-  }
+  p.xp += Math.max(5, result.score * 2 + 5); // base XP + score
+  touchStreak(p);
   saveProgress(p);
+  emitProgress();
   return p;
 }
 

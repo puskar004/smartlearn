@@ -98,8 +98,21 @@ ONE EXAM LINE:
           { topic, score: sc, at: Date.now() },
           ...p.feynmanScores,
         ].slice(0, 50);
-        p.xp += Math.round(sc / 10);
+        p.xp += Math.max(5, Math.round(sc / 10));
+        const today = new Date().toISOString().slice(0, 10);
+        if (p.lastStudyDay !== today) {
+          const yesterday = new Date(Date.now() - 86400000)
+            .toISOString()
+            .slice(0, 10);
+          p.streak = p.lastStudyDay === yesterday ? p.streak + 1 : 1;
+          p.lastStudyDay = today;
+        }
         saveProgress(p);
+        try {
+          window.dispatchEvent(new Event("sl-progress"));
+        } catch {
+          // ignore
+        }
         bumpTask(userId, "weekly-feynman", 1);
         setHistory(p.feynmanScores);
       }
@@ -154,12 +167,33 @@ ONE EXAM LINE:
               <button
                 key={t}
                 type="button"
-                onClick={() => setTopic(t)}
-                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                onClick={() => {
+                  setTopic(t);
+                  setExplain("");
+                  setFeedback(null);
+                  setScore(null);
+                }}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                  topic === t
+                    ? "border-violet-500 bg-violet-600 text-white"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                }`}
               >
                 {t}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => {
+                setTopic("");
+                setExplain("");
+                setFeedback(null);
+                setScore(null);
+              }}
+              className="rounded-full border border-dashed border-violet-300 bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-700"
+            >
+              + New topic
+            </button>
           </div>
         </div>
       )}
