@@ -342,19 +342,39 @@ export default function TeacherTestPage() {
         {questions.length > 0 && (
           <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
             <div className="text-xs font-bold text-violet-800">
-              Preview · {questions.length} MCQs ready to publish
+              Edit answers · {questions.length} MCQs — set correct option before
+              publish
             </div>
-            <ul className="mt-2 max-h-48 space-y-2 overflow-y-auto text-[11px] text-slate-700">
-              {questions.slice(0, 10).map((q, i) => (
-                <li key={i}>
+            <ul className="mt-2 max-h-80 space-y-3 overflow-y-auto text-[11px] text-slate-700">
+              {questions.map((q, i) => (
+                <li
+                  key={i}
+                  className="rounded-lg border border-violet-100 bg-white p-2"
+                >
                   <strong>
-                    Q{i + 1}. {q.prompt.slice(0, 100)}
+                    Q{i + 1}. {q.prompt.slice(0, 140)}
                   </strong>
-                  <div className="text-slate-500">
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {q.options.map((o, j) => (
-                      <span key={j} className="mr-2">
-                        {String.fromCharCode(65 + j)}) {o.slice(0, 40)}
-                      </span>
+                      <button
+                        key={j}
+                        type="button"
+                        onClick={() => {
+                          setQuestions((prev) =>
+                            prev.map((qq, ii) =>
+                              ii === i ? { ...qq, correctIndex: j } : qq
+                            )
+                          );
+                        }}
+                        className={`rounded-md border px-2 py-1 text-left ${
+                          q.correctIndex === j
+                            ? "border-emerald-500 bg-emerald-50 font-bold text-emerald-800"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        {String.fromCharCode(65 + j)}) {o.slice(0, 48)}
+                        {q.correctIndex === j ? " ✓" : ""}
+                      </button>
                     ))}
                   </div>
                 </li>

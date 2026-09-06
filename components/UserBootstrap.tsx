@@ -11,13 +11,12 @@ import {
   getPendingGrade,
   getPendingRole,
 } from "@/lib/pending-role";
-import { apiCreateClassroom, getRole, setRole } from "@/lib/teacher-store";
+import { getRole, setRole } from "@/lib/teacher-store";
 import { emitRoleChanged } from "@/lib/role-events";
 import { loadProgress, saveProgress } from "@/lib/user-store";
 
 export default function UserBootstrap() {
   const { userId, isSignedIn } = useAuth();
-  const { user } = useUser();
   const router = useRouter();
   const booted = useRef<string | null>(null);
 
@@ -30,7 +29,6 @@ export default function UserBootstrap() {
     if (booted.current === userId) return;
     booted.current = userId;
 
-    const prev = getActiveUserId();
     bindUser(userId);
 
     const pending = getPendingRole();
@@ -38,6 +36,8 @@ export default function UserBootstrap() {
       setRole(userId, pending);
       clearPendingRole();
     }
+    // clear unused fresh-teacher flag without auto-creating a class
+    consumeTeacherFreshLogin();
 
     const pendingGrade = getPendingGrade();
     if (pendingGrade) {
@@ -58,46 +58,28 @@ export default function UserBootstrap() {
     const role = getRole(userId);
     emitRoleChanged();
 
-    const freshTeacher =
-      role === "teacher" &&
-      (consumeTeacherFreshLogin() || pending === "teacher" || prev !== userId);
-
-    void (async () => {
-      if (role === "teacher") {
-        if (freshTeacher || pending === "teacher") {
-          try {
-            const name = user?.firstName
-              ? `${user.firstName}'s Class`
-              : "My Class";
-            await apiCreateClassroom(name);
-          } catch (e) {
-            console.error("create class on login", e);
-          }
-        }
-        const path = window.location.pathname;
-        if (
-          path === "/" ||
-          path.startsWith("/login") ||
-          path.startsWith("/sign-in") ||
-          path.startsWith("/sign-up") ||
-          path.startsWith("/dashboard")
-        ) {
-          router.replace("/teacher?tab=code");
-        }
-      } else {
-        const path = window.location.pathname;
-        if (
-          path === "/" ||
-          path.startsWith("/login") ||
-          path.startsWith("/sign-in") ||
-          path.startsWith("/sign-up") ||
-          path.startsWith("/teacher")
-        ) {
-          router.replace("/dashboard");
-        }
+    // Do NOT auto-create classrooms — teacher creates manually
+    const path = window.location.pathname;
+    if (role === "teacher") {
+      if (
+        path === "/" ||
+        path.startsWith("/login") ||
+        path.startsWith("/sign-in") ||
+        path.startsWith("/sign-up") ||
+        path.startsWith("/dashboard")
+      ) {
+        router.replace("/teacher");
       }
-    })();
-  }, [isSignedIn, userId, user, router]);
+    } else if (
+      path === "/" ||
+      path.startsWith("/login") ||
+      path.startsWith("/sign-in") ||
+      path.startsWith("/sign-up") ||
+      path.startsWith("/teacher")
+    ) {
+      router.replace("/dashboard");
+    }
+  }, [isSignedIn, userId, router]);
 
   return null;
 }

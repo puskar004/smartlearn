@@ -26,6 +26,7 @@ import {
   apiGetRoom,
   apiListMyClasses,
   apiPostMessage,
+  apiLeaveAttendance,
   apiRenameClassroom,
   apiSendRemark,
   apiStartLive,
@@ -67,6 +68,10 @@ function TeacherInner() {
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState("");
   const [matNote, setMatNote] = useState<string | null>(null);
+  const [sentRemarks, setSentRemarks] = useState<
+    { studentId: string; name: string; text: string; at: number }[]
+  >([]);
+  const [penaltyNote, setPenaltyNote] = useState("");
 
   const showHomeBanner = tab === "students" || !sp.get("tab");
 
@@ -97,13 +102,23 @@ function TeacherInner() {
       setRole(userId, "teacher");
     }
     void refresh();
-    const id = setInterval(() => void refresh(), 8000);
+    const id = setInterval(() => void refresh(), 15_000);
     return () => clearInterval(id);
   }, [userId, refresh]);
 
   useEffect(() => {
     if (room?.name) setRenameTo(room.name);
   }, [room?.code, room?.name]);
+
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      const raw = localStorage.getItem(`sl_teacher_sent_remarks_${userId}`);
+      if (raw) setSentRemarks(JSON.parse(raw));
+    } catch {
+      // ignore
+    }
+  }, [userId]);
 
   if (!isSignedIn || !userId) {
     return (
@@ -216,29 +231,75 @@ function TeacherInner() {
     }
   };
 
+  const normalizeMaterialUrl = (raw: string) => {
+    let u = raw.trim();
+    // Google Drive share → direct-ish view URL students can open
+    const driveFile = u.match(
+      /drive\.google\.com\/file\/d\/([^/]+)/i
+    );
+    if (driveFile) {
+      return `https://drive.google.com/file/d/${driveFile[1]}/view`;
+    }
+    const driveOpen = u.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (u.includes("drive.google.com") && driveOpen) {
+      return `https://drive.google.com/file/d/${driveOpen[1]}/view`;
+    }
+    return u;
+  };
+
   const upload = async (e: FormEvent) => {
     e.preventDefault();
-    if (!activeCode || !matTitle.trim() || !matUrl.trim()) {
-      setError("Title and PDF/link required.");
+    if (!activeCode || !matTitle.trim()) {
+      setError("Title required.");
+      return;
+    }
+    const hasUrl = matUrl.trim().length > 0;
+    if (!hasUrl) {
+      setError("Provide either a Drive/link OR an offline PDF (one is enough).");
+      return;
+    }
+    // data: or http(s) only
+    const url = normalizeMaterialUrl(matUrl);
+    if (
+      !url.startsWith("data:") &&
+      !url.startsWith("http://") &&
+      !url.startsWith("https://")
+    ) {
+      setError("Link must start with https:// (Drive / YouTube / any URL).");
+      return;
+    }
+    // Clerk meta size — huge data URLs fail with unprocessable
+    if (url.startsWith("data:") && url.length > 350_000) {
+      setError(
+        "PDF too large to store. Use a Google Drive link (Anyone with link) instead."
+      );
       return;
     }
     setBusy(true);
     setMatNote(null);
+    setError(null);
     try {
       const data = await apiAddMaterial(activeCode, {
         title: matTitle.trim(),
-        url: matUrl.trim(),
+        url,
         type: matType,
-        subject: matSubject,
+        subject: matSubject.trim() || "General",
         teacherName: user?.fullName || "Teacher",
       });
       if (!data.ok) throw new Error(data.error || "Upload failed");
       if (data.classroom) setRoom(data.classroom);
       setMatTitle("");
       setMatUrl("");
-      setMatNote("Published to class.");
+      setMatNote(
+        `Published · ${matSubject || "General"} — students see it under Join Teacher.`
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setError(
+        /unprocessable|413|payload|too large|metadata/i.test(msg)
+          ? "File/link too large for server. Use a short Drive link (Share → Anyone with the link)."
+          : msg
+      );
     } finally {
       setBusy(false);
     }
@@ -246,18 +307,21 @@ function TeacherInner() {
 
   const onOfflinePdf = (file: File | null) => {
     if (!file) return;
-    if (file.size > 450_000) {
-      setError("PDF too large for direct upload (max ~450KB). Compress or use a Drive link.");
+    if (file.size > 280_000) {
+      setError(
+        "PDF max ~280KB for direct upload. Prefer Google Drive link for larger files."
+      );
       return;
     }
     setError(null);
+    // exclusive: clear previous link when picking PDF
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = String(reader.result || "");
       setMatUrl(dataUrl);
       setMatType("notes");
       if (!matTitle.trim()) setMatTitle(file.name.replace(/\.pdf$/i, ""));
-      setMatNote(`Ready: ${file.name} (offline PDF)`);
+      setMatNote(`Ready: ${file.name} (offline PDF · clears when you paste a link)`);
     };
     reader.onerror = () => setError("Could not read PDF file.");
     reader.readAsDataURL(file);
@@ -615,10 +679,17 @@ function TeacherInner() {
                     </label>
                     <input
                       value={matUrl.startsWith("data:") ? "" : matUrl}
-                      onChange={(e) => setMatUrl(e.target.value)}
-                      placeholder="Or paste https:// Drive / YouTube link…"
+                      onChange={(e) => {
+                        setMatUrl(e.target.value);
+                        // exclusive: pasting link clears offline PDF attachment mode
+                      }}
+                      placeholder="Paste ONE: https:// Drive / YouTube link (or use Offline PDF above)"
                       className={`${field} sm:col-span-2`}
                     />
+                    <p className="sm:col-span-2 text-[10px] text-slate-400">
+                      Use either a link <strong>or</strong> offline PDF — not
+                      both required. Drive: Share → Anyone with the link.
+                    </p>
                     {matUrl.startsWith("data:") && (
                       <p className="sm:col-span-2 text-[11px] font-semibold text-emerald-700">
                         Offline PDF attached ({Math.round(matUrl.length / 1024)}{" "}
@@ -658,19 +729,23 @@ function TeacherInner() {
                           {m.subject}
                         </div>
                       </div>
-                      <a
-                        href={m.url}
-                        target={m.url.startsWith("data:") ? undefined : "_blank"}
-                        rel="noreferrer"
-                        download={
-                          m.url.startsWith("data:")
-                            ? `${m.title || "notes"}.pdf`
-                            : undefined
-                        }
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const u = m.url || "";
+                          if (u.startsWith("data:")) {
+                            const a = document.createElement("a");
+                            a.href = u;
+                            a.download = `${m.title || "notes"}.pdf`;
+                            a.click();
+                            return;
+                          }
+                          window.open(u, "_blank", "noopener,noreferrer");
+                        }}
                         className="text-xs font-bold text-indigo-600 hover:underline"
                       >
-                        {m.url.startsWith("data:") ? "Download PDF" : "Open"}
-                      </a>
+                        Open
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -882,8 +957,101 @@ function TeacherInner() {
                           meetUrl={room.liveSession.meetUrl}
                           title="Teacher · Google Meet"
                         />
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          To remove someone from Google Meet, use Meet’s own
+                          controls (people → remove). Below: SmartLearn penalty
+                          + kick from live attendance.
+                        </p>
                       </div>
                     )}
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                      <div className="text-xs font-bold text-amber-900">
+                        Penalty / kick from live
+                      </div>
+                      <input
+                        value={penaltyNote}
+                        onChange={(e) => setPenaltyNote(e.target.value)}
+                        placeholder="Reason (misconduct, noise…)"
+                        className="mt-2 w-full rounded-lg border border-amber-200 px-2 py-1.5 text-xs"
+                      />
+                      <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                        {(room.liveSession.attendees || [])
+                          .filter((a) => !a.leftAt)
+                          .map((a) => (
+                            <li
+                              key={a.studentId + a.joinedAt}
+                              className="flex items-center justify-between gap-2 text-xs"
+                            >
+                              <span className="font-semibold text-slate-800">
+                                {a.name}
+                              </span>
+                              <button
+                                type="button"
+                                className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white"
+                                onClick={() => {
+                                  void (async () => {
+                                    const reason =
+                                      penaltyNote.trim() ||
+                                      "Penalty for live-class misconduct";
+                                    try {
+                                      await apiSendRemark(
+                                        a.studentId,
+                                        `⚠️ LIVE PENALTY: ${reason}`,
+                                        room.code,
+                                        room.name
+                                      );
+                                      await apiLeaveAttendance(room.code).catch(
+                                        () => null
+                                      );
+                                      // mark leave for that student via classroom API
+                                      await fetch("/api/classroom", {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          action: "leaveAttend",
+                                          code: room.code,
+                                          // server uses auth user — need teacher kick
+                                          studentId: a.studentId,
+                                        }),
+                                      });
+                                      // use kick action
+                                      await fetch("/api/classroom", {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          action: "kickLive",
+                                          code: room.code,
+                                          studentId: a.studentId,
+                                          reason,
+                                        }),
+                                      });
+                                      setMatNote(
+                                        `Penalty sent to ${a.name}. Remove them in Google Meet UI too.`
+                                      );
+                                      void refresh();
+                                    } catch {
+                                      setError("Could not apply penalty");
+                                    }
+                                  })();
+                                }}
+                              >
+                                Penalty + kick
+                              </button>
+                            </li>
+                          ))}
+                        {(room.liveSession.attendees || []).filter(
+                          (a) => !a.leftAt
+                        ).length === 0 && (
+                          <li className="text-[11px] text-amber-800/70">
+                            No students marked present yet.
+                          </li>
+                        )}
+                      </ul>
+                    </div>
                     <div className="mt-3 max-h-48 space-y-2 overflow-y-auto rounded-xl bg-white p-3">
                       {(room.liveSession.messages || []).map((m) => (
                         <div key={m.id} className="text-xs">
@@ -980,6 +1148,22 @@ function TeacherInner() {
                       placeholder={`Feedback for ${selected.name} on weak topics…`}
                       className={`${field} mt-1 w-full text-xs`}
                     />
+                    {sentRemarks.filter((r) => r.studentId === selected.studentId)
+                      .length > 0 && (
+                      <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto">
+                        {sentRemarks
+                          .filter((r) => r.studentId === selected.studentId)
+                          .slice(0, 5)
+                          .map((r, i) => (
+                            <li
+                              key={i}
+                              className="rounded-lg bg-indigo-50 px-2 py-1 text-[10px] text-indigo-900"
+                            >
+                              {new Date(r.at).toLocaleString()}: {r.text}
+                            </li>
+                          ))}
+                      </ul>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -995,9 +1179,27 @@ function TeacherInner() {
                             if (!data.ok) {
                               throw new Error(data.error || "Send failed");
                             }
+                            const entry = {
+                              studentId: selected.studentId,
+                              name: selected.name,
+                              text: feedback.trim(),
+                              at: Date.now(),
+                            };
+                            setSentRemarks((prev) => {
+                              const next = [entry, ...prev].slice(0, 40);
+                              try {
+                                localStorage.setItem(
+                                  `sl_teacher_sent_remarks_${userId}`,
+                                  JSON.stringify(next)
+                                );
+                              } catch {
+                                // ignore
+                              }
+                              return next;
+                            });
                             setFeedback("");
                             setMatNote(
-                              `Remark sent to ${selected.name} (student Remarks tab + notification)`
+                              `Remark sent to ${selected.name} (saved here + student Remarks)`
                             );
                           } catch (e) {
                             setError(
@@ -1016,12 +1218,7 @@ function TeacherInner() {
                 </div>
               )}
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-500">
-              <Link href="/profile" className="font-bold text-indigo-600 underline">
-                Settings
-              </Link>{" "}
-              → switch to Student mode if needed.
-            </div>
+
           </aside>
         </div>
       )}

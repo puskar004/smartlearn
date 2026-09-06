@@ -485,6 +485,51 @@ export async function markAttendance(
   });
 }
 
+export async function kickFromLive(
+  teacherId: string,
+  code: string,
+  studentId: string
+): Promise<Classroom | null> {
+  return updateClassroom(teacherId, code, (c) => {
+    const sess = c.liveSession;
+    if (!sess?.active) return c;
+    const now = Date.now();
+    const stamp = (list: AttendanceAttendee[]) =>
+      list.map((a) =>
+        a.studentId === studentId && !a.leftAt
+          ? { ...a, leftAt: now }
+          : a
+      );
+    return {
+      ...c,
+      liveSession: {
+        ...sess,
+        attendees: stamp(sess.attendees || []),
+        messages: [
+          ...(sess.messages || []),
+          {
+            id: `m-kick-${now}`,
+            author: "System",
+            text: `Student removed from live attendance (${studentId.slice(0, 8)}…)`,
+            at: now,
+          },
+        ].slice(-100),
+      },
+      attendanceLog: (c.attendanceLog || []).map((r) =>
+        r.sessionId === sess.id
+          ? { ...r, attendees: stamp(r.attendees || []) }
+          : r
+      ),
+      alerts: pushAlert(c, {
+        kind: "remark",
+        title: "Removed from live class",
+        body: "Teacher applied a penalty / kick from the session.",
+        href: "/remarks",
+      }),
+    };
+  });
+}
+
 export async function leaveAttendance(
   code: string,
   studentId: string

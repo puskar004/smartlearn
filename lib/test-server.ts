@@ -355,7 +355,7 @@ export async function addTestMoment(
     videoKey: moment.videoKey,
   };
 
-  const moments = [entry, ...(cur.moments || [])].slice(0, 120);
+  const moments = [entry, ...(cur.moments || [])].slice(0, 900);
   const videoKeys = moment.videoKey
     ? Array.from(new Set([moment.videoKey, ...(cur.videoKeys || [])])).slice(
         0,

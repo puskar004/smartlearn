@@ -414,23 +414,48 @@ export function questionsForChapter(input: {
     return MATHS_12_CH1_RF as BankQ[];
   }
 
+  const subj = (input.subjectName || input.subjectId || "").toLowerCase();
   const hay = [
     input.title,
-    input.subjectName || "",
-    input.subjectId || "",
+    subj,
     ...input.topics,
   ]
     .join(" ")
     .toLowerCase();
 
+  // Subject family gates — never mix Chem into Phy etc.
+  const familyTags = ((): string[] => {
+    if (/math/.test(subj)) return ["math", "algebra", "calculus", "geometry", "trigon", "function", "matrix", "probability", "relation"];
+    if (/chem/.test(subj)) return ["chem", "acid", "base", "organic", "inorganic", "mole", "periodic", "reaction", "equilibrium", "electrochem"];
+    if (/bio|life/.test(subj)) return ["bio", "cell", "gene", "plant", "animal", "photosynth", "reproduction", "ecology", "human", "mitosis", "meiosis"];
+    if (/phys|science/.test(subj) && !/chem|bio/.test(subj))
+      return ["phys", "electric", "magnet", "light", "optics", "motion", "force", "energy", "wave", "current", "ohm", "mirror", "lens"];
+    if (/english|lang/.test(subj)) return ["english", "grammar", "literature", "writing"];
+    return [];
+  })();
+
   const scored = BOARD_BANK.map((q) => {
     let s = 0;
+    const tagStr = q.tags.join(" ").toLowerCase();
     for (const t of q.tags) {
-      if (hay.includes(t.toLowerCase())) s += 2;
+      if (hay.includes(t.toLowerCase())) s += 3;
     }
-    // light subject boost
-    if (input.subjectName && q.tags.some((t) => input.subjectName!.toLowerCase().includes(t))) {
-      s += 1;
+    // subject family must match when we know the family
+    if (familyTags.length) {
+      const famHit = familyTags.some(
+        (f) => tagStr.includes(f) || hay.includes(f)
+      );
+      if (!famHit && s === 0) return { q, s: -1 };
+      if (famHit) s += 2;
+      // hard reject cross-subject physics tags in chemistry chapter etc.
+      if (/chem/.test(subj) && /electric|ohm|mirror|lens|magnetic/.test(tagStr) && !/electrochem/.test(tagStr))
+        return { q, s: -1 };
+      if (/phys/.test(subj) && /acid|organic|mole|periodic|cell|gene|mitosis/.test(tagStr))
+        return { q, s: -1 };
+      if (/math/.test(subj) && /electric|acid|cell|ohm|mirror/.test(tagStr))
+        return { q, s: -1 };
+      if (/bio/.test(subj) && /electric|ohm|matrix|calculus|acid base/.test(tagStr))
+        return { q, s: -1 };
     }
     return { q, s };
   })
@@ -440,7 +465,7 @@ export function questionsForChapter(input: {
 
   if (scored.length >= 4) return scored;
 
-  // Fallback: general board aptitude mixed with chapter name (still valid style)
+  // Fallback: chapter-only general — NEVER dump unrelated BOARD_BANK
   const fallback: BankQ[] = [
     {
       tags: ["general"],
@@ -466,7 +491,31 @@ export function questionsForChapter(input: {
       correctIndex: 0,
       explanation: "Definition + example builds both short and long answers.",
     },
-    ...BOARD_BANK.slice(0, 8),
+    {
+      tags: ["general"],
+      prompt: `For “${input.title}”, exam answers score better when you:`,
+      options: [
+        "Use NCERT keywords, steps and labelled diagrams",
+        "Write only one word answers always",
+        "Skip units and significant figures",
+        "Copy random internet notes without checking",
+      ],
+      correctIndex: 0,
+      explanation: "NCERT wording + structure matches CBSE marking.",
+    },
+    {
+      tags: ["general"],
+      prompt: `Best way to self-check “${input.title}” is:`,
+      options: [
+        "Timed MCQs + one written long answer from memory",
+        "Only re-reading the same page silently",
+        "Avoiding any mistakes log",
+        "Studying a different subject instead",
+      ],
+      correctIndex: 0,
+      explanation: "Active recall beats passive rereading.",
+    },
   ];
-  return [...scored, ...fallback];
+  // Prefer scored matches, pad with chapter-local fallback only
+  return [...scored, ...fallback].slice(0, 20);
 }

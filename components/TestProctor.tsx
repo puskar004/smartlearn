@@ -20,7 +20,8 @@ type Props = {
   onMoment?: (m: MomentPayload) => void;
 };
 
-const INTERVAL_MS = 30_000;
+/** Snap + short audio every second while test runs */
+const INTERVAL_MS = 1_000;
 
 export default function TestProctor({
   active,
@@ -267,7 +268,7 @@ export default function TestProctor({
             } catch {
               // ignore
             }
-          }, INTERVAL_MS);
+          }, 10_000);
         } catch {
           // video optional if MediaRecorder fails
         }
@@ -278,11 +279,14 @@ export default function TestProctor({
 
       if (cancelledRef.current) return;
       readyRef.current = true;
-      setStatus("Proctoring ON · photo+voice+video every 30s");
+      setStatus("Proctoring ON · snap every 1s · screen video continuous");
       readyCbRef.current?.();
 
+      let tickN = 0;
+      let posting = false;
       const tick = async () => {
         if (cancelledRef.current || !readyRef.current) return;
+        if (posting) return; // don't stack requests
         const camTrack = camRef.current?.getVideoTracks()[0];
         if (!camTrack || camTrack.readyState === "ended") {
           failLive("Camera disconnected — test exited.");
@@ -295,13 +299,14 @@ export default function TestProctor({
           return;
         }
 
+        tickN += 1;
         const moment: MomentPayload = { at: Date.now() };
         try {
           const v = videoRef.current;
           if (v && v.videoWidth > 0) {
             const canvas = document.createElement("canvas");
-            const w = 480;
-            const h = Math.round((v.videoHeight / v.videoWidth) * w) || 270;
+            const w = 400;
+            const h = Math.round((v.videoHeight / v.videoWidth) * w) || 225;
             canvas.width = w;
             canvas.height = h;
             const ctx = canvas.getContext("2d");
@@ -309,59 +314,63 @@ export default function TestProctor({
               ctx.drawImage(v, 0, 0, w, h);
               const camV = camVideoRef.current;
               if (camV && camV.videoWidth > 0) {
-                const pw = 96;
+                const pw = 72;
                 const ph = Math.round(
                   (camV.videoHeight / camV.videoWidth) * pw
                 );
-                ctx.drawImage(camV, w - pw - 8, h - ph - 8, pw, ph);
+                ctx.drawImage(camV, w - pw - 6, h - ph - 6, pw, ph);
               }
-              moment.imageDataUrl = canvas.toDataURL("image/jpeg", 0.42);
+              moment.imageDataUrl = canvas.toDataURL("image/jpeg", 0.35);
             }
           }
         } catch {
           moment.note = "snap skip";
         }
 
-        try {
-          const mic = micRef.current;
-          if (mic && typeof MediaRecorder !== "undefined") {
-            const mime = MediaRecorder.isTypeSupported("audio/webm")
-              ? "audio/webm"
-              : undefined;
-            const rec = mime
-              ? new MediaRecorder(mic, { mimeType: mime })
-              : new MediaRecorder(mic);
-            const chunks: BlobPart[] = [];
-            await new Promise<void>((resolve) => {
-              rec.ondataavailable = (e) => {
-                if (e.data.size) chunks.push(e.data);
-              };
-              rec.onstop = () => resolve();
-              rec.onerror = () => resolve();
-              try {
-                rec.start();
-                setTimeout(() => {
-                  try {
-                    if (rec.state === "recording") rec.stop();
-                    else resolve();
-                  } catch {
-                    resolve();
-                  }
-                }, 2000);
-              } catch {
-                resolve();
+        // audio every 5th snap (~5s) to avoid overlap
+        if (tickN % 5 === 0) {
+          try {
+            const mic = micRef.current;
+            if (mic && typeof MediaRecorder !== "undefined") {
+              const mime = MediaRecorder.isTypeSupported("audio/webm")
+                ? "audio/webm"
+                : undefined;
+              const rec = mime
+                ? new MediaRecorder(mic, { mimeType: mime })
+                : new MediaRecorder(mic);
+              const chunks: BlobPart[] = [];
+              await new Promise<void>((resolve) => {
+                rec.ondataavailable = (e) => {
+                  if (e.data.size) chunks.push(e.data);
+                };
+                rec.onstop = () => resolve();
+                rec.onerror = () => resolve();
+                try {
+                  rec.start();
+                  setTimeout(() => {
+                    try {
+                      if (rec.state === "recording") rec.stop();
+                      else resolve();
+                    } catch {
+                      resolve();
+                    }
+                  }, 800);
+                } catch {
+                  resolve();
+                }
+              });
+              const blob = new Blob(chunks, { type: mime || "audio/webm" });
+              if (blob.size > 100 && blob.size < 120_000) {
+                moment.audioDataUrl = await blobToDataUrl(blob);
               }
-            });
-            const blob = new Blob(chunks, { type: mime || "audio/webm" });
-            if (blob.size > 200 && blob.size < 180_000) {
-              moment.audioDataUrl = await blobToDataUrl(blob);
             }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
 
         momentRef.current?.(moment);
+        posting = true;
         try {
           await fetch("/api/tests", {
             method: "POST",
@@ -371,18 +380,20 @@ export default function TestProctor({
               code: testCode,
               moment: {
                 at: moment.at,
-                imageDataUrl: moment.imageDataUrl?.slice(0, 120_000),
-                audioDataUrl: moment.audioDataUrl?.slice(0, 120_000),
-                note: moment.note,
+                imageDataUrl: moment.imageDataUrl?.slice(0, 90_000),
+                audioDataUrl: moment.audioDataUrl?.slice(0, 80_000),
+                note: moment.note || `snap-${tickN}`,
               },
             }),
           });
         } catch {
           // offline
+        } finally {
+          posting = false;
         }
       };
 
-      firstTick = setTimeout(() => void tick(), 5000);
+      firstTick = setTimeout(() => void tick(), 800);
       timer = setInterval(() => void tick(), INTERVAL_MS);
     };
 

@@ -10,6 +10,7 @@ import {
   getStudentJoinedCodes,
   getStudentRemarks,
   joinClassroomAsStudent,
+  kickFromLive,
   leaveAttendance,
   leaveClassroomAsStudent,
   listTeacherClassrooms,
@@ -296,6 +297,26 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
       }
       const room = await leaveAttendance(code, userId);
+      return NextResponse.json({ ok: true, classroom: room });
+    }
+
+    if (action === "kickLive") {
+      const code = String(body.code || "").trim().toUpperCase();
+      const studentId = String(body.studentId || "");
+      if (!code || !studentId) {
+        return NextResponse.json(
+          { ok: false, error: "Code and student required" },
+          { status: 400 }
+        );
+      }
+      const room = await kickFromLive(userId, code, studentId);
+      if (!room) {
+        return NextResponse.json(
+          { ok: false, error: "Class not found" },
+          { status: 404 }
+        );
+      }
+      // also leave attendance stamp
       return NextResponse.json({ ok: true, classroom: room });
     }
 

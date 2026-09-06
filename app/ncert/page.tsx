@@ -377,7 +377,7 @@ function NcertInner() {
         </div>
 
         <p className="pointer-events-none absolute right-8 top-8 hidden rotate-6 text-xs font-semibold text-violet-400/80 md:block">
-          Learn · Practice · Improve · Repeat
+
         </p>
       </div>
 

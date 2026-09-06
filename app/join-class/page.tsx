@@ -255,19 +255,46 @@ export default function JoinClassPage() {
                       : ""}
                   </div>
                 </div>
-                <a
-                  href={m.url}
-                  target={m.url.startsWith("data:") ? undefined : "_blank"}
-                  rel="noreferrer"
-                  download={
-                    m.url.startsWith("data:")
-                      ? `${m.title || "notes"}.pdf`
-                      : undefined
-                  }
+                <button
+                  type="button"
+                  onClick={() => {
+                    const u = m.url || "";
+                    if (u.startsWith("data:")) {
+                      try {
+                        const a = document.createElement("a");
+                        a.href = u;
+                        a.download = `${m.title || "notes"}.pdf`;
+                        a.click();
+                        // also open in new tab for viewing
+                        const w = window.open();
+                        if (w) {
+                          w.document.write(
+                            `<iframe src="${u}" style="width:100%;height:100%;border:0"></iframe>`
+                          );
+                        }
+                      } catch {
+                        window.open(u, "_blank");
+                      }
+                      return;
+                    }
+                    if (u.includes("drive.google.com")) {
+                      window.open(u, "_blank", "noopener,noreferrer");
+                      return;
+                    }
+                    if (u.toLowerCase().includes(".pdf") || m.type === "notes") {
+                      window.open(
+                        `/api/pdf-proxy?url=${encodeURIComponent(u)}`,
+                        "_blank",
+                        "noopener,noreferrer"
+                      );
+                      return;
+                    }
+                    window.open(u, "_blank", "noopener,noreferrer");
+                  }}
                   className="shrink-0 font-bold text-indigo-600 hover:underline"
                 >
-                  {m.url.startsWith("data:") ? "Download" : "Open"}
-                </a>
+                  Open
+                </button>
               </li>
             ))}
           </ul>

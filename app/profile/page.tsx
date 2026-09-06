@@ -245,6 +245,38 @@ export default function ProfilePage() {
               Fresh start
             </button>
           )}
+          {userId && (
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  !confirm(
+                    "Delete local SmartLearn data for this account on this device? You will stay signed in with Clerk — open Clerk account menu to fully delete the login."
+                  )
+                )
+                  return;
+                try {
+                  hardResetUser(userId);
+                  const keys: string[] = [];
+                  for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.includes(userId)) keys.push(k);
+                  }
+                  keys.forEach((k) => localStorage.removeItem(k));
+                  setProgress(null);
+                  alert(
+                    "Local data cleared. Use the user menu (top) → Manage account → Delete account to remove your login permanently."
+                  );
+                  window.location.href = "/";
+                } catch {
+                  alert("Could not clear data.");
+                }
+              }}
+              className="rounded-xl border border-rose-600 bg-rose-600 px-4 py-2.5 text-sm font-bold text-white"
+            >
+              Delete account data
+            </button>
+          )}
         </div>
         {saved && (
           <span className="ml-1 mt-2 inline-block text-xs font-semibold text-emerald-600">
