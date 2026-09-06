@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { Loader2, Radio, Send, Shield } from "lucide-react";
+import { Loader2, Radio, Send, Shield, Ban } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
 import {
   getJoinedClass,
@@ -14,10 +14,12 @@ import {
 } from "@/lib/teacher-store";
 import { displayName } from "@/lib/display-name";
 import { useRouter } from "next/navigation";
+import { pushNotification } from "@/lib/notifications";
 
 type Msg = { id: string; author: string; text: string; at: number };
 
 type LiveInfo = {
+  id?: string;
   title: string;
   subject: string;
   meetUrl?: string;
@@ -39,7 +41,10 @@ export default function LiveClassPage() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [sending, setSending] = useState(false);
+  const [kicked, setKicked] = useState(false);
+  const [kickReason, setKickReason] = useState("");
   const lastAttended = useRef<string | null>(null);
+  const kickNotified = useRef(false);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -55,9 +60,31 @@ export default function LiveClassPage() {
       }
       setClassName(room.name || "");
       setClassCode(room.code || data.joined || "");
+
+      if (data.kicked || room.kicked) {
+        setKicked(true);
+        setKickReason(
+          data.kickReason || room.kickReason || "Removed by teacher"
+        );
+        setLive(null);
+        if (!kickNotified.current) {
+          kickNotified.current = true;
+          pushNotification(userId, {
+            title: "Kicked from live class",
+            body: data.kickReason || room.kickReason || "Teacher removed you",
+            href: "/remarks",
+          });
+        }
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
+      setKicked(false);
       const sess = room.liveSession;
       if (sess?.active) {
         setLive({
+          id: sess.id,
           title: sess.title,
           subject: sess.subject,
           meetUrl: sess.meetUrl,
@@ -102,7 +129,7 @@ export default function LiveClassPage() {
     if (!userId) return;
     if (getRole(userId) === "teacher") return;
     void load();
-    const id = setInterval(() => void load(), 12_000);
+    const id = setInterval(() => void load(), 4_000);
     return () => clearInterval(id);
   }, [userId, load]);
 
@@ -116,7 +143,7 @@ export default function LiveClassPage() {
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
-    if (!msg.trim() || !classCode) return;
+    if (!msg.trim() || !classCode || kicked) return;
     setSending(true);
     try {
       await apiPostMessage(
@@ -153,6 +180,39 @@ export default function LiveClassPage() {
     );
   }
 
+  if (kicked) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16 text-center">
+        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 shadow-sm">
+          <Ban className="mx-auto h-12 w-12 text-rose-600" />
+          <h1 className="mt-4 text-2xl font-extrabold text-rose-900">
+            Removed from live class
+          </h1>
+          <p className="mt-2 text-sm text-rose-800">
+            {kickReason || "Your teacher kicked you from this session."}
+          </p>
+          <p className="mt-2 text-xs text-rose-700/80">
+            You cannot rejoin this live session. Check Remarks for details.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            <Link
+              href="/remarks"
+              className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white"
+            >
+              Open Remarks
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-bold text-rose-800"
+            >
+              Dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-8">
       <div className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
@@ -177,10 +237,6 @@ export default function LiveClassPage() {
           </button>
         )}
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">
-        You can leave anytime and still use NCERT PDFs, quizzes, and the rest of
-        SmartLearn while class continues.
-      </p>
 
       {loading && (
         <div className="mt-10 flex justify-center text-slate-400">
@@ -224,13 +280,15 @@ export default function LiveClassPage() {
                 LIVE · {live.title} · {live.subject}
               </span>
               <span className="inline-flex items-center gap-1">
-                <Shield className="h-3.5 w-3.5" /> Focus session
+                <Shield className="h-3.5 w-3.5" /> In session
               </span>
             </div>
-            <MeetFrame meetUrl={live.meetUrl || ""} title={`${live.title} · Meet`} />
+            <MeetFrame
+              meetUrl={live.meetUrl || ""}
+              title={`${live.title} · Meet`}
+            />
           </div>
 
-          {/* In-room chat — teacher + students */}
           <div className="flex min-h-[320px] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-3 py-2 text-xs font-bold text-slate-800">
               Class chat

@@ -499,6 +499,10 @@ export async function markAttendance(
   return updateClassroom(found.teacherId, found.classroom.code, (c) => {
     const sess = c.liveSession;
     if (!sess?.active) return c;
+    // Kicked students cannot rejoin this live session
+    if ((sess.kickedIds || []).includes(studentId)) {
+      return c;
+    }
     const existing = sess.attendees || [];
     const already = existing.find(
       (a) => a.studentId === studentId && !a.leftAt
@@ -544,29 +548,55 @@ export async function markAttendance(
 export async function kickFromLive(
   teacherId: string,
   code: string,
-  studentId: string
+  studentId: string,
+  reason?: string
 ): Promise<Classroom | null> {
-  return updateClassroom(teacherId, code, (c) => {
+  const room = await updateClassroom(teacherId, code, (c) => {
     const sess = c.liveSession;
     if (!sess?.active) return c;
     const now = Date.now();
-    const stamp = (list: AttendanceAttendee[]) =>
-      list.map((a) =>
-        a.studentId === studentId && !a.leftAt
-          ? { ...a, leftAt: now }
-          : a
+    const why = (reason || "Removed by teacher").slice(0, 200);
+    const stamp = (list: AttendanceAttendee[]) => {
+      const has = list.some((a) => a.studentId === studentId);
+      if (!has) {
+        return [
+          {
+            studentId,
+            name: "Student",
+            joinedAt: now,
+            leftAt: now,
+          },
+          ...list,
+        ].slice(0, 120);
+      }
+      return list.map((a) =>
+        a.studentId === studentId && !a.leftAt ? { ...a, leftAt: now } : a
       );
+    };
+    const kickedIds = Array.from(
+      new Set([...(sess.kickedIds || []), studentId])
+    ).slice(0, 80);
+    const kickReasons = {
+      ...(sess.kickReasons || {}),
+      [studentId]: why,
+    };
+    const studentName =
+      (c.students || []).find((s) => s.studentId === studentId)?.name ||
+      (sess.attendees || []).find((a) => a.studentId === studentId)?.name ||
+      "Student";
     return {
       ...c,
       liveSession: {
         ...sess,
+        kickedIds,
+        kickReasons,
         attendees: stamp(sess.attendees || []),
         messages: [
           ...(sess.messages || []),
           {
             id: `m-kick-${now}`,
             author: "System",
-            text: `Student removed from live attendance (${studentId.slice(0, 8)}…)`,
+            text: `${studentName} was kicked from live class: ${why}`,
             at: now,
           },
         ].slice(-100),
@@ -578,12 +608,30 @@ export async function kickFromLive(
       ),
       alerts: pushAlert(c, {
         kind: "remark",
-        title: "Removed from live class",
-        body: "Teacher applied a penalty / kick from the session.",
-        href: "/remarks",
+        title: "Kicked from live class",
+        body: why,
+        href: "/live-class",
       }),
     };
   });
+
+  // Also push remark to student account so they see it on Remarks
+  if (room) {
+    try {
+      const teacherName = room.teacherName || "Teacher";
+      await pushTeacherRemark(
+        teacherId,
+        teacherName,
+        studentId,
+        `⚠️ KICKED from live class: ${reason || "Removed by teacher"}`,
+        code,
+        room.name
+      );
+    } catch {
+      // non-fatal
+    }
+  }
+  return room;
 }
 
 export async function leaveAttendance(

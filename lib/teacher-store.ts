@@ -316,6 +316,19 @@ export async function apiLeaveAttendance(code: string) {
   return res.json();
 }
 
+export async function apiKickLive(
+  code: string,
+  studentId: string,
+  reason?: string
+) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "kickLive", code, studentId, reason }),
+  });
+  return res.json();
+}
+
 export async function apiSendRemark(
   studentId: string,
   text: string,

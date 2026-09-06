@@ -26,7 +26,7 @@ import {
   apiGetRoom,
   apiListMyClasses,
   apiPostMessage,
-  apiLeaveAttendance,
+  apiKickLive,
   apiRenameClassroom,
   apiSendRemark,
   apiStartLive,
@@ -977,91 +977,114 @@ function TeacherInner() {
                     )}
                     <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
                       <div className="text-xs font-bold text-amber-900">
-                        Penalty / kick from live
+                        Kick from live class
                       </div>
+                      <p className="mt-1 text-[10px] text-amber-800/80">
+                        Student is blocked from this live session (Meet link
+                        hidden). Also remove them inside Google Meet if needed.
+                      </p>
                       <input
                         value={penaltyNote}
                         onChange={(e) => setPenaltyNote(e.target.value)}
                         placeholder="Reason (misconduct, noise…)"
                         className="mt-2 w-full rounded-lg border border-amber-200 px-2 py-1.5 text-xs"
                       />
-                      <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto">
-                        {(room.liveSession.attendees || [])
-                          .filter((a) => !a.leftAt)
-                          .map((a) => (
+                      <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                        {(() => {
+                          const kicked = new Set(
+                            room.liveSession.kickedIds || []
+                          );
+                          const present = (room.liveSession.attendees || [])
+                            .filter((a) => !a.leftAt && !kicked.has(a.studentId))
+                            .map((a) => ({
+                              id: a.studentId,
+                              name: a.name,
+                              tag: "in live",
+                            }));
+                          const roster = (room.students || [])
+                            .filter(
+                              (s) =>
+                                !kicked.has(s.studentId) &&
+                                !present.some((p) => p.id === s.studentId)
+                            )
+                            .map((s) => ({
+                              id: s.studentId,
+                              name: s.name,
+                              tag: "in class",
+                            }));
+                          const list = [...present, ...roster];
+                          if (!list.length) {
+                            return (
+                              <li className="text-[11px] text-amber-800/70">
+                                No students to kick (none joined / all kicked).
+                              </li>
+                            );
+                          }
+                          return list.map((s) => (
                             <li
-                              key={a.studentId + a.joinedAt}
-                              className="flex items-center justify-between gap-2 text-xs"
+                              key={s.id}
+                              className="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5 text-xs"
                             >
-                              <span className="font-semibold text-slate-800">
-                                {a.name}
+                              <span>
+                                <span className="font-semibold text-slate-800">
+                                  {s.name}
+                                </span>
+                                <span className="ml-1 text-[10px] text-slate-400">
+                                  · {s.tag}
+                                </span>
                               </span>
                               <button
                                 type="button"
-                                className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white"
+                                disabled={busy}
+                                className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white disabled:opacity-50"
                                 onClick={() => {
                                   void (async () => {
                                     const reason =
                                       penaltyNote.trim() ||
-                                      "Penalty for live-class misconduct";
+                                      "Misconduct in live class";
+                                    setBusy(true);
+                                    setError(null);
                                     try {
-                                      await apiSendRemark(
-                                        a.studentId,
-                                        `⚠️ LIVE PENALTY: ${reason}`,
+                                      const data = await apiKickLive(
                                         room.code,
-                                        room.name
+                                        s.id,
+                                        reason
                                       );
-                                      await apiLeaveAttendance(room.code).catch(
-                                        () => null
-                                      );
-                                      // mark leave for that student via classroom API
-                                      await fetch("/api/classroom", {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          action: "leaveAttend",
-                                          code: room.code,
-                                          // server uses auth user — need teacher kick
-                                          studentId: a.studentId,
-                                        }),
-                                      });
-                                      // use kick action
-                                      await fetch("/api/classroom", {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          action: "kickLive",
-                                          code: room.code,
-                                          studentId: a.studentId,
-                                          reason,
-                                        }),
-                                      });
+                                      if (!data.ok) {
+                                        throw new Error(
+                                          data.error || "Kick failed"
+                                        );
+                                      }
+                                      if (data.classroom) setRoom(data.classroom);
                                       setMatNote(
-                                        `Penalty sent to ${a.name}. Remove them in Google Meet UI too.`
+                                        `Kicked ${s.name} from live · they cannot rejoin this session`
                                       );
+                                      setPenaltyNote("");
                                       void refresh();
-                                    } catch {
-                                      setError("Could not apply penalty");
+                                    } catch (e) {
+                                      setError(
+                                        e instanceof Error
+                                          ? e.message
+                                          : "Could not kick student"
+                                      );
+                                    } finally {
+                                      setBusy(false);
                                     }
                                   })();
                                 }}
                               >
-                                Penalty + kick
+                                Kick out
                               </button>
                             </li>
-                          ))}
-                        {(room.liveSession.attendees || []).filter(
-                          (a) => !a.leftAt
-                        ).length === 0 && (
-                          <li className="text-[11px] text-amber-800/70">
-                            No students marked present yet.
-                          </li>
-                        )}
+                          ));
+                        })()}
                       </ul>
+                      {(room.liveSession.kickedIds || []).length > 0 && (
+                        <div className="mt-2 border-t border-amber-200 pt-2 text-[10px] text-rose-700">
+                          Kicked this session:{" "}
+                          {(room.liveSession.kickedIds || []).length} student(s)
+                        </div>
+                      )}
                     </div>
                     <div className="mt-3 max-h-48 space-y-2 overflow-y-auto rounded-xl bg-white p-3">
                       {(room.liveSession.messages || []).map((m) => (

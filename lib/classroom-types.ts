@@ -79,6 +79,10 @@ export type LiveSession = {
   scheduledAt?: number;
   messages: { id: string; author: string; text: string; at: number }[];
   attendees?: AttendanceAttendee[];
+  /** Students kicked from this live session (cannot rejoin until new live) */
+  kickedIds?: string[];
+  /** studentId → kick reason */
+  kickReasons?: Record<string, string>;
 };
 
 export type Classroom = {

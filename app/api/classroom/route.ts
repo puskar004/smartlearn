@@ -73,13 +73,32 @@ export async function GET(req: NextRequest) {
       for (const c of codes) {
         const found = await findClassroomByCode(c);
         if (!found) continue;
+        const sess = found.classroom.liveSession;
+        const kicked = Boolean(
+          sess?.active &&
+            userId &&
+            (sess.kickedIds || []).includes(userId)
+        );
         classrooms.push({
           code: found.classroom.code,
           name: found.classroom.name,
           teacherName: found.classroom.teacherName,
           materials: found.classroom.materials || [],
-          liveSession: found.classroom.liveSession,
+          liveSession: sess
+            ? {
+                ...sess,
+                // don't leak full kick list to other students — only flag self
+                kickedIds: undefined,
+                kickReasons: undefined,
+                meetUrl: kicked ? undefined : sess.meetUrl,
+              }
+            : null,
           alerts: found.classroom.alerts || [],
+          kicked,
+          kickReason:
+            kicked && userId
+              ? sess?.kickReasons?.[userId] || "Removed by teacher"
+              : undefined,
         });
       }
       const primary =
@@ -90,6 +109,8 @@ export async function GET(req: NextRequest) {
         codes,
         classroom: primary,
         classrooms,
+        kicked: Boolean(primary && (primary as { kicked?: boolean }).kicked),
+        kickReason: (primary as { kickReason?: string } | null)?.kickReason,
       });
     }
 
@@ -303,20 +324,20 @@ export async function POST(req: NextRequest) {
     if (action === "kickLive") {
       const code = String(body.code || "").trim().toUpperCase();
       const studentId = String(body.studentId || "");
+      const reason = body.reason ? String(body.reason).slice(0, 200) : undefined;
       if (!code || !studentId) {
         return NextResponse.json(
           { ok: false, error: "Code and student required" },
           { status: 400 }
         );
       }
-      const room = await kickFromLive(userId, code, studentId);
+      const room = await kickFromLive(userId, code, studentId, reason);
       if (!room) {
         return NextResponse.json(
-          { ok: false, error: "Class not found" },
+          { ok: false, error: "Class not found or no live session" },
           { status: 404 }
         );
       }
-      // also leave attendance stamp
       return NextResponse.json({ ok: true, classroom: room });
     }
 
