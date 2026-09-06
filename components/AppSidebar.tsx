@@ -51,6 +51,7 @@ const teacherNav = [
   { href: "/teacher/test", label: "Live Tests", icon: ClipboardList },
   { href: "/teacher?tab=materials", label: "Upload Notes/Videos", icon: Upload },
   { href: "/teacher?tab=live", label: "Live Sessions", icon: Radio },
+  { href: "/teacher?tab=attendance", label: "Attendance", icon: ClipboardList },
   { href: "/teacher?tab=code", label: "Class Code", icon: GraduationCap },
 ];
 

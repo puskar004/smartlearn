@@ -1,10 +1,13 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import type {
+  AttendanceAttendee,
+  AttendanceRecord,
+  ClassAlert,
   Classroom,
+  LiveSession,
   SmartlearnMeta,
   StudentSnapshot,
   TeacherMaterial,
-  LiveSession,
 } from "@/lib/classroom-types";
 
 function metaOf(user: { publicMetadata?: Record<string, unknown> | null }): SmartlearnMeta {
@@ -32,6 +35,21 @@ function makeCode(len = 6) {
   return s;
 }
 
+function pushAlert(
+  c: Classroom,
+  alert: Omit<ClassAlert, "id" | "at"> & { at?: number }
+): ClassAlert[] {
+  const next: ClassAlert = {
+    id: `al-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    at: alert.at || Date.now(),
+    kind: alert.kind,
+    title: alert.title,
+    body: alert.body,
+    href: alert.href,
+  };
+  return [next, ...(c.alerts || [])].slice(0, 40);
+}
+
 /** Scan teachers for a class code (works across devices). */
 export async function findClassroomByCode(
   code: string
@@ -43,7 +61,6 @@ export async function findClassroomByCode(
   let offset = 0;
   const limit = 100;
 
-  // Paginate users — fine for school-scale apps
   for (let page = 0; page < 20; page++) {
     const res = await client.users.getUserList({ limit, offset });
     for (const u of res.data) {
@@ -91,7 +108,6 @@ export async function createClassroomForTeacher(
   const existing = meta.classrooms || [];
 
   let code = makeCode(6);
-  // ensure unique globally
   for (let i = 0; i < 12; i++) {
     const hit = await findClassroomByCode(code);
     if (!hit) break;
@@ -107,6 +123,8 @@ export async function createClassroomForTeacher(
     students: [],
     materials: [],
     liveSession: null,
+    alerts: [],
+    attendanceLog: [],
   };
 
   const classrooms = [room, ...existing].slice(0, 20);
@@ -153,6 +171,81 @@ async function updateClassroom(
   return next;
 }
 
+export async function renameClassroom(
+  teacherId: string,
+  code: string,
+  name: string
+): Promise<Classroom | null> {
+  const clean = name.trim().slice(0, 80);
+  if (!clean) return null;
+  return updateClassroom(teacherId, code, (c) => ({ ...c, name: clean }));
+}
+
+export async function deleteClassroom(
+  teacherId: string,
+  code: string
+): Promise<{ ok: true; classrooms: Classroom[] } | { ok: false; error: string }> {
+  const client = await clerkClient();
+  const user = await client.users.getUser(teacherId);
+  const meta = metaOf(user);
+  const rooms = meta.classrooms || [];
+  const normalized = code.toUpperCase();
+  const room = rooms.find((c) => c.code === normalized);
+  if (!room) return { ok: false, error: "Class not found" };
+
+  const classrooms = rooms.filter((c) => c.code !== normalized);
+  const activeClassCode =
+    meta.activeClassCode === normalized
+      ? classrooms[0]?.code || null
+      : meta.activeClassCode;
+
+  await saveMeta(teacherId, {
+    ...meta,
+    role: "teacher",
+    classrooms,
+    activeClassCode,
+  });
+
+  // clear joinedClassCode for students who were in this room
+  for (const s of room.students || []) {
+    try {
+      const st = await client.users.getUser(s.studentId);
+      const sm = metaOf(st);
+      if (sm.joinedClassCode === normalized) {
+        await saveMeta(s.studentId, { ...sm, joinedClassCode: null });
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
+  return { ok: true, classrooms };
+}
+
+export async function leaveClassroomAsStudent(
+  userId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const client = await clerkClient();
+  const student = await client.users.getUser(userId);
+  const sm = metaOf(student);
+  const code = sm.joinedClassCode;
+  if (!code) {
+    await saveMeta(userId, { ...sm, joinedClassCode: null });
+    return { ok: true };
+  }
+
+  const found = await findClassroomByCode(code);
+  if (found) {
+    await updateClassroom(found.teacherId, found.classroom.code, (c) => ({
+      ...c,
+      students: (c.students || []).filter((s) => s.studentId !== userId),
+    }));
+  }
+
+  await saveMeta(userId, { ...sm, joinedClassCode: null });
+  return { ok: true };
+}
+
 export async function joinClassroomAsStudent(
   code: string,
   snapshot: StudentSnapshot
@@ -182,7 +275,6 @@ export async function joinClassroomAsStudent(
 
   if (!updated) return { ok: false, error: "Could not update classroom" };
 
-  // mark student joined code on their metadata
   try {
     const client = await clerkClient();
     const student = await client.users.getUser(snapshot.studentId);
@@ -217,7 +309,17 @@ export async function addMaterialToClass(
       id: `mat-${Date.now()}`,
       createdAt: Date.now(),
     };
-    return { ...c, materials: [m, ...(c.materials || [])].slice(0, 100) };
+    const alerts = pushAlert(c, {
+      kind: "material",
+      title: "New material uploaded",
+      body: `${m.title} · ${m.subject}`,
+      href: "/join-class",
+    });
+    return {
+      ...c,
+      materials: [m, ...(c.materials || [])].slice(0, 100),
+      alerts,
+    };
   });
 }
 
@@ -233,28 +335,108 @@ export async function startLive(
   return updateClassroom(teacherId, code, (c) => {
     const now = Date.now();
     const start = scheduledAt && scheduledAt > now ? scheduledAt : now;
+    const isScheduled = !!(scheduledAt && scheduledAt > now);
     const live: LiveSession = {
       id: `live-${now}`,
       title,
       subject,
       startedAt: start,
       endsAt: start + minutes * 60_000,
-      active: !scheduledAt || scheduledAt <= now,
+      active: !isScheduled,
       joinCode: makeCode(4),
       meetUrl: meetUrl?.trim() || undefined,
-      scheduledAt: scheduledAt && scheduledAt > now ? scheduledAt : undefined,
+      scheduledAt: isScheduled ? scheduledAt : undefined,
       messages: c.liveSession?.messages || [],
+      attendees: [],
     };
-    return { ...c, liveSession: live };
+    const alerts = pushAlert(c, {
+      kind: isScheduled ? "schedule" : "live",
+      title: isScheduled ? "Live class scheduled" : "Live class started",
+      body: `${title} · ${subject}${isScheduled ? ` · ${new Date(start).toLocaleString()}` : ""}`,
+      href: "/live-class",
+    });
+    let attendanceLog = c.attendanceLog || [];
+    if (!isScheduled) {
+      const rec: AttendanceRecord = {
+        id: `att-${live.id}`,
+        sessionId: live.id,
+        sessionTitle: title,
+        subject,
+        startedAt: start,
+        attendees: [],
+      };
+      attendanceLog = [rec, ...attendanceLog].slice(0, 80);
+    }
+    return { ...c, liveSession: live, alerts, attendanceLog };
   });
 }
 
 export async function endLive(teacherId: string, code: string) {
   return updateClassroom(teacherId, code, (c) => {
     if (!c.liveSession) return c;
+    const sess = c.liveSession;
+    const attendanceLog = (c.attendanceLog || []).map((r) => {
+      if (r.sessionId === sess.id && !r.endedAt) {
+        return {
+          ...r,
+          endedAt: Date.now(),
+          attendees: sess.attendees?.length
+            ? sess.attendees
+            : r.attendees,
+        };
+      }
+      return r;
+    });
     return {
       ...c,
-      liveSession: { ...c.liveSession, active: false },
+      liveSession: { ...sess, active: false },
+      attendanceLog,
+    };
+  });
+}
+
+export async function markAttendance(
+  code: string,
+  studentId: string,
+  name: string
+): Promise<Classroom | null> {
+  const found = await findClassroomByCode(code);
+  if (!found) return null;
+  return updateClassroom(found.teacherId, found.classroom.code, (c) => {
+    const sess = c.liveSession;
+    if (!sess?.active) return c;
+    const attendee: AttendanceAttendee = {
+      studentId,
+      name: name || "Student",
+      joinedAt: Date.now(),
+    };
+    const existing = sess.attendees || [];
+    if (existing.some((a) => a.studentId === studentId)) return c;
+    const attendees = [attendee, ...existing].slice(0, 120);
+    const attendanceLog = (c.attendanceLog || []).map((r) => {
+      if (r.sessionId !== sess.id) return r;
+      if (r.attendees.some((a) => a.studentId === studentId)) return r;
+      return { ...r, attendees: [attendee, ...r.attendees].slice(0, 120) };
+    });
+    // if no log row yet (edge), create one
+    const hasLog = attendanceLog.some((r) => r.sessionId === sess.id);
+    const nextLog = hasLog
+      ? attendanceLog
+      : [
+          {
+            id: `att-${sess.id}`,
+            sessionId: sess.id,
+            sessionTitle: sess.title,
+            subject: sess.subject,
+            startedAt: sess.startedAt,
+            attendees,
+          } as AttendanceRecord,
+          ...attendanceLog,
+        ].slice(0, 80);
+    return {
+      ...c,
+      liveSession: { ...sess, attendees },
+      attendanceLog: nextLog,
     };
   });
 }

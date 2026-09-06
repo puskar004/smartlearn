@@ -14,6 +14,9 @@ export type {
   StudentSnapshot,
   TeacherMaterial,
   LiveSession,
+  ClassAlert,
+  AttendanceRecord,
+  AttendanceAttendee,
 } from "@/lib/classroom-types";
 
 const ROLE_KEY = "sl_role_v1_";
@@ -171,6 +174,42 @@ export async function apiPostMessage(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "message", code, author, text }),
+  });
+  return res.json();
+}
+
+export async function apiRenameClassroom(code: string, name: string) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "rename", code, name }),
+  });
+  return res.json();
+}
+
+export async function apiDeleteClassroom(code: string) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete", code }),
+  });
+  return res.json();
+}
+
+export async function apiLeaveClassroom() {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "leave" }),
+  });
+  return res.json();
+}
+
+export async function apiMarkAttendance(code: string, name?: string) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "attend", code, name }),
   });
   return res.json();
 }

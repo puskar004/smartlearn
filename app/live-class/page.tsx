@@ -1,12 +1,17 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { Loader2, Radio, Send, Shield } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
 import { setSessionLock } from "@/components/SessionLock";
-import { getJoinedClass, getRole, apiPostMessage } from "@/lib/teacher-store";
+import {
+  getJoinedClass,
+  getRole,
+  apiPostMessage,
+  apiMarkAttendance,
+} from "@/lib/teacher-store";
 import { displayName } from "@/lib/display-name";
 
 type Msg = { id: string; author: string; text: string; at: number };
@@ -32,6 +37,7 @@ export default function LiveClassPage() {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [sending, setSending] = useState(false);
+  const lastAttended = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -60,6 +66,13 @@ export default function LiveClassPage() {
           scheduledAt: sess.scheduledAt,
         });
         setError(null);
+        if (sess.id && lastAttended.current !== sess.id) {
+          lastAttended.current = sess.id;
+          void apiMarkAttendance(
+            room.code || data.joined || "",
+            displayName(user) || user?.fullName || "Student"
+          );
+        }
       } else if (sess?.scheduledAt && sess.scheduledAt > Date.now()) {
         setLive({
           title: sess.title,
@@ -81,7 +94,7 @@ export default function LiveClassPage() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, user]);
 
   useEffect(() => {
     if (!userId) return;

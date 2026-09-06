@@ -6,10 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, useUser } from "@clerk/nextjs";
 import {
   BookOpen,
+  ClipboardList,
   Copy,
   GraduationCap,
   Loader2,
+  Pencil,
   Radio,
+  Trash2,
   Upload,
   Users,
   Video,
@@ -18,10 +21,12 @@ import MeetFrame from "@/components/MeetFrame";
 import {
   apiAddMaterial,
   apiCreateClassroom,
+  apiDeleteClassroom,
   apiEndLive,
   apiGetRoom,
   apiListMyClasses,
   apiPostMessage,
+  apiRenameClassroom,
   apiStartLive,
   getRole,
   setRole,
@@ -30,13 +35,14 @@ import {
 } from "@/lib/teacher-store";
 import { cn } from "@/lib/utils";
 
+type TeacherTab = "students" | "materials" | "live" | "code" | "attendance";
+
 function TeacherInner() {
   const { userId, isSignedIn } = useAuth();
   const { user } = useUser();
   const router = useRouter();
   const sp = useSearchParams();
-  const tab =
-    (sp.get("tab") as "students" | "materials" | "live" | "code") || "students";
+  const tab = (sp.get("tab") as TeacherTab) || "students";
 
   const [classes, setClasses] = useState<Classroom[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
@@ -44,6 +50,7 @@ function TeacherInner() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [className, setClassName] = useState("Class 12 Science A");
+  const [renameTo, setRenameTo] = useState("");
   const [selected, setSelected] = useState<StudentSnapshot | null>(null);
   const [matTitle, setMatTitle] = useState("");
   const [matUrl, setMatUrl] = useState("");
@@ -93,6 +100,10 @@ function TeacherInner() {
     return () => clearInterval(id);
   }, [userId, refresh]);
 
+  useEffect(() => {
+    if (room?.name) setRenameTo(room.name);
+  }, [room?.code, room?.name]);
+
   if (!isSignedIn || !userId) {
     return (
       <div className="px-6 py-16 text-center text-sm text-slate-500">
@@ -108,9 +119,61 @@ function TeacherInner() {
       setActiveCode(c.code);
       setClasses((prev) => [c, ...prev.filter((x) => x.code !== c.code)]);
       setRoom(c);
+      setRenameTo(c.name);
       router.replace("/teacher?tab=code");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rename = async () => {
+    if (!activeCode || !renameTo.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await apiRenameClassroom(activeCode, renameTo.trim());
+      if (!data.ok) throw new Error(data.error || "Rename failed");
+      if (data.classroom) {
+        setRoom(data.classroom);
+        setClasses((prev) =>
+          prev.map((c) =>
+            c.code === data.classroom.code ? data.classroom : c
+          )
+        );
+      }
+      setMatNote("Class renamed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rename failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeClass = async () => {
+    if (!activeCode || !room) return;
+    if (
+      !window.confirm(
+        `Delete class “${room.name}” (${room.code})? Students will be unlinked.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await apiDeleteClassroom(activeCode);
+      if (!data.ok) throw new Error(data.error || "Delete failed");
+      const list = (data.classrooms || []) as Classroom[];
+      setClasses(list);
+      const next = list[0]?.code || null;
+      setActiveCode(next);
+      setRoom(next ? (await apiGetRoom(next)) : null);
+      setRenameTo(list[0]?.name || "");
+      setMatNote("Class deleted.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setBusy(false);
     }
@@ -248,7 +311,7 @@ function TeacherInner() {
     }
   };
 
-  const setTab = (t: string) => router.replace(`/teacher?tab=${t}`);
+  const setTab = (t: TeacherTab) => router.replace(`/teacher?tab=${t}`);
 
   const field =
     "rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
@@ -278,7 +341,9 @@ function TeacherInner() {
               ? "Live session"
               : tab === "code"
                 ? "Class code"
-                : "Teacher"}
+                : tab === "attendance"
+                  ? "Attendance"
+                  : "Teacher"}
         </h1>
       )}
 
@@ -371,6 +436,7 @@ function TeacherInner() {
                   ["students", "Students"],
                   ["materials", "Upload"],
                   ["live", "Live"],
+                  ["attendance", "Attendance"],
                   ["code", "Class code"],
                 ] as const
               ).map(([id, label]) => (
@@ -391,26 +457,57 @@ function TeacherInner() {
             </div>
 
             {tab === "code" && (
-              <div className="rounded-3xl border border-indigo-100 bg-white p-8 text-center shadow-sm">
-                <p className="text-sm font-semibold text-slate-500">
-                  Private class code for{" "}
-                  <strong className="text-slate-900">{room.name}</strong>
-                </p>
-                <p className="mt-4 font-mono text-5xl font-black tracking-[0.35em] text-indigo-700">
-                  {room.code}
-                </p>
-                <p className="mt-3 text-xs text-slate-500">
-                  Students open <strong>Join Teacher</strong> and type this code
-                  (any device). Then they appear under Students.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void copyCode()}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white"
-                >
-                  <Copy className="h-4 w-4" />
-                  {copied ? "Copied!" : "Copy code"}
-                </button>
+              <div className="space-y-4">
+                <div className="rounded-3xl border border-indigo-100 bg-white p-8 text-center shadow-sm">
+                  <p className="text-sm font-semibold text-slate-500">
+                    Private class code for{" "}
+                    <strong className="text-slate-900">{room.name}</strong>
+                  </p>
+                  <p className="mt-4 font-mono text-5xl font-black tracking-[0.35em] text-indigo-700">
+                    {room.code}
+                  </p>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Students open <strong>Join Teacher</strong> and type this
+                    code (any device). Then they appear under Students.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void copyCode()}
+                    className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white"
+                  >
+                    <Copy className="h-4 w-4" />
+                    {copied ? "Copied!" : "Copy code"}
+                  </button>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <Pencil className="h-4 w-4 text-indigo-600" /> Manage class
+                  </h3>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <input
+                      value={renameTo}
+                      onChange={(e) => setRenameTo(e.target.value)}
+                      placeholder="Class name"
+                      className={`${field} min-w-[180px] flex-1`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void rename()}
+                      disabled={busy || !renameTo.trim()}
+                      className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void removeClass()}
+                      disabled={busy}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 disabled:opacity-60"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete class
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -573,6 +670,99 @@ function TeacherInner() {
                       >
                         {m.url.startsWith("data:") ? "Download PDF" : "Open"}
                       </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {tab === "attendance" && (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <ClipboardList className="h-4 w-4 text-indigo-600" />{" "}
+                    Session attendance
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Students are marked present when they open Live Class during
+                    an active session.
+                  </p>
+                </div>
+                {room.liveSession?.active && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
+                    <div className="text-sm font-bold text-rose-800">
+                      LIVE now · {room.liveSession.title} ·{" "}
+                      {room.liveSession.subject}
+                    </div>
+                    <ul className="mt-3 space-y-1.5">
+                      {(room.liveSession.attendees || []).length === 0 && (
+                        <li className="text-xs text-rose-600/80">
+                          No one joined yet.
+                        </li>
+                      )}
+                      {(room.liveSession.attendees || []).map((a) => (
+                        <li
+                          key={a.studentId}
+                          className="flex justify-between rounded-lg bg-white/80 px-3 py-2 text-xs"
+                        >
+                          <span className="font-semibold text-slate-800">
+                            {a.name}
+                          </span>
+                          <span className="text-slate-400">
+                            {new Date(a.joinedAt).toLocaleTimeString()}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <ul className="space-y-3">
+                  {(room.attendanceLog || []).length === 0 &&
+                    !room.liveSession?.active && (
+                      <li className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-500">
+                        No sessions yet. Start a live class to track who joins.
+                      </li>
+                    )}
+                  {(room.attendanceLog || []).map((rec) => (
+                    <li
+                      key={rec.id}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-bold text-slate-900">
+                            {rec.sessionTitle}
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            {rec.subject} ·{" "}
+                            {new Date(rec.startedAt).toLocaleString()}
+                            {rec.endedAt
+                              ? ` → ${new Date(rec.endedAt).toLocaleTimeString()}`
+                              : " · open"}
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700">
+                          {rec.attendees?.length || 0} present
+                        </span>
+                      </div>
+                      <ul className="mt-2 space-y-1">
+                        {(rec.attendees || []).map((a) => (
+                          <li
+                            key={a.studentId + a.joinedAt}
+                            className="flex justify-between text-xs text-slate-600"
+                          >
+                            <span>{a.name}</span>
+                            <span className="text-slate-400">
+                              {new Date(a.joinedAt).toLocaleTimeString()}
+                            </span>
+                          </li>
+                        ))}
+                        {(rec.attendees || []).length === 0 && (
+                          <li className="text-[11px] text-slate-400">
+                            Nobody marked present
+                          </li>
+                        )}
+                      </ul>
                     </li>
                   ))}
                 </ul>

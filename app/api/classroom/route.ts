@@ -3,13 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   addMaterialToClass,
   createClassroomForTeacher,
+  deleteClassroom,
   endLive,
   findClassroomByCode,
   getStudentJoinedCode,
   joinClassroomAsStudent,
+  leaveClassroomAsStudent,
   listTeacherClassrooms,
+  markAttendance,
   postMessage,
   pushStudentToClass,
+  renameClassroom,
   setUserRole,
   startLive,
 } from "@/lib/classroom-server";
@@ -34,7 +38,6 @@ export async function GET(req: NextRequest) {
           error: "Invalid class code",
         });
       }
-      // don't leak full student list on public lookup — only name/code
       return NextResponse.json({
         ok: true,
         classroom: {
@@ -64,6 +67,7 @@ export async function GET(req: NextRequest) {
               teacherName: found.classroom.teacherName,
               materials: found.classroom.materials || [],
               liveSession: found.classroom.liveSession,
+              alerts: found.classroom.alerts || [],
             }
           : null,
       });
@@ -73,7 +77,6 @@ export async function GET(req: NextRequest) {
       const rooms = await listTeacherClassrooms(userId);
       const room = rooms.find((r) => r.code === code.toUpperCase());
       if (!room) {
-        // allow teacher who owns it only
         const found = await findClassroomByCode(code);
         if (!found || found.teacherId !== userId) {
           return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -117,6 +120,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, classroom: room });
     }
 
+    if (action === "rename") {
+      const code = String(body.code || "");
+      const name = String(body.name || "").trim();
+      if (!code || !name) {
+        return NextResponse.json(
+          { ok: false, error: "Code and name required" },
+          { status: 400 }
+        );
+      }
+      const room = await renameClassroom(userId, code, name);
+      if (!room) {
+        return NextResponse.json(
+          { ok: false, error: "Class not found or empty name" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ ok: true, classroom: room });
+    }
+
+    if (action === "delete") {
+      const code = String(body.code || "");
+      if (!code) {
+        return NextResponse.json(
+          { ok: false, error: "Code required" },
+          { status: 400 }
+        );
+      }
+      const res = await deleteClassroom(userId, code);
+      return NextResponse.json(res, { status: res.ok ? 200 : 404 });
+    }
+
+    if (action === "leave") {
+      const res = await leaveClassroomAsStudent(userId);
+      return NextResponse.json(res);
+    }
+
     if (action === "join") {
       const code = String(body.code || "").trim().toUpperCase();
       const snapshot = body.snapshot as StudentSnapshot | undefined;
@@ -126,7 +165,6 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      // force student id from auth
       const res = await joinClassroomAsStudent(code, {
         ...snapshot,
         studentId: userId,
@@ -190,8 +228,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, classroom: room });
     }
 
+    if (action === "attend") {
+      const code = String(body.code || "").trim().toUpperCase();
+      if (!code) {
+        return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
+      }
+      const name =
+        String(body.name || "") ||
+        user?.fullName ||
+        user?.firstName ||
+        "Student";
+      const room = await markAttendance(code, userId, name);
+      if (!room) {
+        return NextResponse.json({ ok: false, error: "Class not found" }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, classroom: room });
+    }
+
     if (action === "message") {
-      // teacher posts as owner; students post via finding class
       const code = String(body.code || "").trim().toUpperCase();
       const text = String(body.text || "").trim();
       if (!text) {

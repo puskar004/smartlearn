@@ -6,9 +6,11 @@ import { useAuth, useUser } from "@clerk/nextjs";
 import { CheckCircle2, Link2, Loader2, School } from "lucide-react";
 import {
   apiJoinClassroom,
+  apiLeaveClassroom,
   getJoinedClass,
   getRole,
   setJoinedClass,
+  type TeacherMaterial,
 } from "@/lib/teacher-store";
 import {
   accuracy,
@@ -23,6 +25,7 @@ export default function JoinClassPage() {
   const [joined, setJoined] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [className, setClassName] = useState<string | null>(null);
+  const [materials, setMaterials] = useState<TeacherMaterial[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -30,15 +33,17 @@ export default function JoinClassPage() {
     if (getRole(userId) === "teacher") return;
     const j = getJoinedClass(userId);
     setJoined(j);
-    if (j) {
-      void fetch(`/api/classroom?action=joined`)
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.classroom?.name) setClassName(d.classroom.name);
-          if (d.joined) setJoined(d.joined);
-        })
-        .catch(() => null);
-    }
+    void fetch(`/api/classroom?action=joined`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.classroom?.name) setClassName(d.classroom.name);
+        if (d.joined) {
+          setJoined(d.joined);
+          setJoinedClass(userId, d.joined);
+        }
+        setMaterials((d.classroom?.materials || []) as TeacherMaterial[]);
+      })
+      .catch(() => null);
   }, [userId]);
 
   if (!isSignedIn || !userId) {
@@ -99,6 +104,7 @@ export default function JoinClassPage() {
       setJoinedClass(userId, trimmed);
       setJoined(trimmed);
       setClassName(res.classroom?.name || "Class");
+      setMaterials((res.classroom?.materials || []) as TeacherMaterial[]);
       setMsg(null);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Join failed. Try again.");
@@ -107,11 +113,20 @@ export default function JoinClassPage() {
     }
   };
 
-  const leave = () => {
-    setJoinedClass(userId, null);
-    setJoined(null);
-    setClassName(null);
-    setMsg("Left classroom.");
+  const leave = async () => {
+    setLoading(true);
+    try {
+      await apiLeaveClassroom();
+      setJoinedClass(userId, null);
+      setJoined(null);
+      setClassName(null);
+      setMaterials([]);
+      setMsg("Left classroom.");
+    } catch {
+      setMsg("Could not leave class. Try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -128,24 +143,76 @@ export default function JoinClassPage() {
       </p>
 
       {joined ? (
-        <div className="mt-8 rounded-3xl border border-emerald-200 bg-emerald-50/80 p-6 text-center">
-          <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
-          <p className="mt-3 text-lg font-bold text-emerald-900">
-            Connected to {className || "class"}
-          </p>
-          <p className="mt-1 font-mono text-2xl font-black tracking-widest text-emerald-800">
-            {joined}
-          </p>
-          <p className="mt-2 text-xs text-emerald-700">
-            Your progress syncs to your teacher automatically.
-          </p>
-          <button
-            type="button"
-            onClick={leave}
-            className="mt-4 rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-bold text-emerald-800"
-          >
-            Leave class
-          </button>
+        <div className="mt-8 space-y-4">
+          <div className="rounded-3xl border border-emerald-200 bg-emerald-50/80 p-6 text-center">
+            <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
+            <p className="mt-3 text-lg font-bold text-emerald-900">
+              Connected to {className || "class"}
+            </p>
+            <p className="mt-1 font-mono text-2xl font-black tracking-widest text-emerald-800">
+              {joined}
+            </p>
+            <p className="mt-2 text-xs text-emerald-700">
+              Your progress syncs to your teacher automatically.
+            </p>
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              <Link
+                href="/live-class"
+                className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white"
+              >
+                Live class
+              </Link>
+              <button
+                type="button"
+                onClick={() => void leave()}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-bold text-emerald-800 disabled:opacity-60"
+              >
+                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Leave class
+              </button>
+            </div>
+            {msg && (
+              <p className="mt-2 text-xs font-medium text-emerald-800">{msg}</p>
+            )}
+          </div>
+          {materials.length > 0 && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-bold text-slate-900">
+                Teacher materials
+              </h2>
+              <ul className="mt-3 space-y-2">
+                {materials.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2 text-xs"
+                  >
+                    <div>
+                      <div className="font-semibold text-slate-800">
+                        {m.title}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {m.subject} · {m.type}
+                      </div>
+                    </div>
+                    <a
+                      href={m.url}
+                      target={m.url.startsWith("data:") ? undefined : "_blank"}
+                      rel="noreferrer"
+                      download={
+                        m.url.startsWith("data:")
+                          ? `${m.title || "notes"}.pdf`
+                          : undefined
+                      }
+                      className="shrink-0 font-bold text-indigo-600 hover:underline"
+                    >
+                      {m.url.startsWith("data:") ? "Download" : "Open"}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

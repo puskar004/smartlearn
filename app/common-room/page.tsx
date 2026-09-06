@@ -37,6 +37,30 @@ function keepFresh(list: Msg[]) {
   return list.filter((m) => (m.at || 0) >= cut);
 }
 
+function buildThreads(list: Msg[]): { root: Msg; replies: Msg[] }[] {
+  const byId = new Map(list.map((m) => [m.id, m]));
+  const children = new Map<string, Msg[]>();
+  for (const m of list) {
+    if (!m.replyToId || !byId.has(m.replyToId)) continue;
+    const arr = children.get(m.replyToId) || [];
+    arr.push(m);
+    children.set(m.replyToId, arr);
+  }
+  const collect = (id: string, acc: Msg[] = []): Msg[] => {
+    const kids = (children.get(id) || []).slice().sort((a, b) => a.at - b.at);
+    for (const k of kids) {
+      acc.push(k);
+      collect(k.id, acc);
+    }
+    return acc;
+  };
+  const roots = list
+    .filter((m) => !m.replyToId || !byId.has(m.replyToId))
+    .slice()
+    .sort((a, b) => b.at - a.at);
+  return roots.map((root) => ({ root, replies: collect(root.id) }));
+}
+
 /** Compress image so Photo button always works under size limits */
 function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -75,6 +99,71 @@ function compressImage(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+function PostBody({
+  m,
+  onReply,
+  onLightbox,
+  compact,
+}: {
+  m: Msg;
+  onReply: (m: Msg) => void;
+  onLightbox: (src: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+        <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+          <MessageSquare className="h-3 w-3 text-sky-500" />
+          {m.author}
+        </span>
+        <span>{new Date(m.at).toLocaleString()}</span>
+      </div>
+      {m.text && m.text !== "📷 Photo" && (
+        <p
+          className={`mt-2 leading-relaxed text-slate-800 ${compact ? "text-xs" : "text-sm"}`}
+        >
+          {m.text}
+        </p>
+      )}
+      {m.imageDataUrl && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onLightbox(m.imageDataUrl!);
+          }}
+          className="group relative mt-3 block max-w-full cursor-zoom-in overflow-hidden rounded-xl border border-slate-100"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={m.imageDataUrl}
+            alt="shared"
+            className={`pointer-events-none w-auto object-contain transition group-hover:opacity-95 ${compact ? "max-h-40" : "max-h-64"}`}
+          />
+          <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
+            <ZoomIn className="h-3 w-3" /> Enlarge
+          </span>
+        </button>
+      )}
+      <div className="mt-2">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onReply(m);
+          }}
+          className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-800 hover:bg-sky-100"
+        >
+          <Reply className="h-3.5 w-3.5" /> Reply
+        </button>
+      </div>
+    </>
+  );
 }
 
 export default function CommonRoomPage() {
@@ -382,70 +471,45 @@ export default function CommonRoomPage() {
       {loading && msgs.length === 0 ? (
         <p className="mt-8 text-center text-sm text-slate-400">Loading room…</p>
       ) : (
-        <ul className="mt-8 space-y-3">
+        <ul className="mt-8 space-y-4">
           {msgs.length === 0 && (
             <li className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
               No posts yet — ask the first NCERT doubt.
             </li>
           )}
-          {msgs.map((m) => (
+          {buildThreads(msgs).map(({ root, replies }) => (
             <li
-              key={m.id}
+              key={root.id}
               className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
             >
-              {m.replyToAuthor && (
-                <div className="mb-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                  <Reply className="mr-1 inline h-3 w-3" />
-                  Reply to <strong>{m.replyToAuthor}</strong>
-                  {m.replyToText ? `: ${m.replyToText}` : ""}
-                </div>
+              <PostBody
+                m={root}
+                onReply={startReply}
+                onLightbox={setLightbox}
+              />
+              {replies.length > 0 && (
+                <ul className="mt-3 space-y-2 border-l-2 border-sky-100 pl-3 sm:pl-4">
+                  {replies.map((r) => (
+                    <li
+                      key={r.id}
+                      className="rounded-xl border border-slate-100 bg-slate-50/80 p-3"
+                    >
+                      {r.replyToAuthor && r.replyToId !== root.id && (
+                        <div className="mb-1.5 text-[10px] font-semibold text-slate-400">
+                          <Reply className="mr-1 inline h-2.5 w-2.5" />
+                          to {r.replyToAuthor}
+                        </div>
+                      )}
+                      <PostBody
+                        m={r}
+                        onReply={startReply}
+                        onLightbox={setLightbox}
+                        compact
+                      />
+                    </li>
+                  ))}
+                </ul>
               )}
-              <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-                <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
-                  <MessageSquare className="h-3 w-3 text-sky-500" />
-                  {m.author}
-                </span>
-                <span>{new Date(m.at).toLocaleString()}</span>
-              </div>
-              {m.text && m.text !== "📷 Photo" && (
-                <p className="mt-2 text-sm leading-relaxed text-slate-800">
-                  {m.text}
-                </p>
-              )}
-              {m.imageDataUrl && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setLightbox(m.imageDataUrl!);
-                  }}
-                  className="group relative mt-3 block max-w-full cursor-zoom-in overflow-hidden rounded-xl border border-slate-100"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={m.imageDataUrl}
-                    alt="shared"
-                    className="pointer-events-none max-h-64 w-auto object-contain transition group-hover:opacity-95"
-                  />
-                  <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
-                    <ZoomIn className="h-3 w-3" /> Enlarge
-                  </span>
-                </button>
-              )}
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    startReply(m);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-800 hover:bg-sky-100"
-                >
-                  <Reply className="h-3.5 w-3.5" /> Reply
-                </button>
-              </div>
             </li>
           ))}
         </ul>
