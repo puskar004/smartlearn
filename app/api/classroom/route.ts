@@ -102,30 +102,69 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "materials" && code) {
+      const c = code.toUpperCase();
+      // 1) Direct by class code (fast, works even if join map incomplete)
+      let materials: unknown[] = [];
+      try {
+        const { getMaterialsByCode } = await import(
+          "@/lib/materials-bank-store"
+        );
+        materials = await getMaterialsByCode(c);
+      } catch {
+        // ignore
+      }
+
       const studentRooms = await listStudentClassrooms(userId);
-      const hit = studentRooms.find((r) => r.code === code.toUpperCase());
+      const hit = studentRooms.find((r) => r.code === c);
       if (hit) {
+        const map = new Map<string, unknown>();
+        for (const m of [
+          ...(materials as { id?: string; url?: string }[]),
+          ...(hit.materials || []),
+        ]) {
+          const key =
+            (m as { id?: string }).id ||
+            (m as { url?: string }).url ||
+            Math.random().toString();
+          map.set(key, m);
+        }
         return NextResponse.json({
           ok: true,
-          materials: hit.materials || [],
+          materials: Array.from(map.values()),
           code: hit.code,
           name: hit.name,
         });
       }
+
       const mine = await listTeacherClassrooms(userId);
-      const own = mine.find((r) => r.code === code.toUpperCase());
+      const own = mine.find((r) => r.code === c);
       if (own) {
+        const map = new Map<string, unknown>();
+        for (const m of [
+          ...(materials as { id?: string; url?: string }[]),
+          ...(own.materials || []),
+        ]) {
+          const key =
+            (m as { id?: string }).id ||
+            (m as { url?: string }).url ||
+            Math.random().toString();
+          map.set(key, m);
+        }
         return NextResponse.json({
           ok: true,
-          materials: own.materials || [],
+          materials: Array.from(map.values()),
           code: own.code,
           name: own.name,
         });
       }
+
+      // Even if not joined as "student room", return code-bank materials
+      // when student has this code in local join list (API still auth'd)
       return NextResponse.json({
         ok: true,
-        materials: [],
-        code: code.toUpperCase(),
+        materials,
+        code: c,
+        name: `Class ${c}`,
       });
     }
 

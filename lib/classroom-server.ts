@@ -89,13 +89,33 @@ function lightMaterialBank(
 async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
+  const existing = metaOf(user);
+  // NEVER wipe materialBank if caller omitted it
+  const mergedBank = {
+    ...(existing.materialBank || {}),
+    ...(smartlearn.materialBank || {}),
+  };
   const cleaned: SmartlearnMeta = {
+    ...existing,
     ...smartlearn,
-    classrooms: (smartlearn.classrooms || [])
+    classrooms: (smartlearn.classrooms ?? existing.classrooms ?? [])
       .slice(0, 20)
       .map(lightClassroom),
-    materialBank: lightMaterialBank(smartlearn.materialBank),
-    teacherRemarks: (smartlearn.teacherRemarks || []).slice(0, 20),
+    materialBank: lightMaterialBank(mergedBank),
+    teacherRemarks: (smartlearn.teacherRemarks ?? existing.teacherRemarks ?? []).slice(
+      0,
+      20
+    ),
+    joinedClassMap: {
+      ...(existing.joinedClassMap || {}),
+      ...(smartlearn.joinedClassMap || {}),
+    },
+    joinedClassCodes:
+      smartlearn.joinedClassCodes ?? existing.joinedClassCodes,
+    joinedClassCode:
+      smartlearn.joinedClassCode !== undefined
+        ? smartlearn.joinedClassCode
+        : existing.joinedClassCode,
   };
   await client.users.updateUserMetadata(userId, {
     publicMetadata: {
@@ -615,10 +635,15 @@ export async function addMaterialToClass(
     createdAt: Date.now(),
   };
 
-  // 1) File store first (works even if Clerk 422)
+  // 1) Class-code file/remote bank first (students read this)
   try {
     const { addMaterialToBank } = await import("@/lib/materials-bank-store");
-    await addMaterialToBank(teacherId, normalized, m);
+    await addMaterialToBank(
+      teacherId,
+      normalized,
+      m,
+      material.teacherName || "Teacher"
+    );
   } catch (e) {
     console.error("materials-bank-store", e);
   }
