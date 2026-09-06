@@ -144,7 +144,12 @@ export default function StudentTestPage() {
     if (!proctorReady || !isFs || !test || result) return;
     if (timerStarted.current) return;
     timerStarted.current = true;
-    setLeft(Math.max(60, test.durationMin * 60));
+    // Full teacher duration starts only when proctor + fullscreen ready
+    const secs = Math.max(60, (test.durationMin || 30) * 60);
+    const endsAt = Date.now() + secs * 1000;
+    setTest((t) => (t ? { ...t, endsAt } : t));
+    setLeft(secs);
+    void enterFullscreen();
   }, [proctorReady, isFs, test, result]);
 
   const enterFullscreen = async () => {
