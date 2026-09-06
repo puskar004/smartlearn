@@ -24,7 +24,7 @@ export default function RemarksPage() {
       }
     };
     void load();
-    const id = setInterval(() => void load(), 15_000);
+    const id = setInterval(() => void load(), 30_000);
     return () => clearInterval(id);
   }, [userId]);
 

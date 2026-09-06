@@ -104,7 +104,7 @@ function TeacherInner() {
       setRole(userId, "teacher");
     }
     void refresh();
-    const id = setInterval(() => void refresh(), 15_000);
+    const id = setInterval(() => void refresh(), 25_000);
     return () => clearInterval(id);
   }, [userId, refresh]);
 

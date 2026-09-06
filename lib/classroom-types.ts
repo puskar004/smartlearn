@@ -107,6 +107,8 @@ export type SmartlearnMeta = {
   joinedClassCode?: string | null;
   /** student can join multiple teacher codes */
   joinedClassCodes?: string[];
+  /** code → teacherId for fast lookup (avoids scanning all users) */
+  joinedClassMap?: Record<string, string>;
   /** teacher remarks delivered to student */
   teacherRemarks?: TeacherRemark[];
   /** maps code -> teacherId for fast join (also mirrored on each teacher) */

@@ -7,12 +7,12 @@ import {
   endLive,
   findClassroomByCode,
   getStudentJoinedCode,
-  getStudentJoinedCodes,
   getStudentRemarks,
   joinClassroomAsStudent,
   kickFromLive,
   leaveAttendance,
   leaveClassroomAsStudent,
+  listStudentClassrooms,
   listTeacherClassrooms,
   markAttendance,
   postMessage,
@@ -59,46 +59,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "joined") {
-      const codes = await getStudentJoinedCodes(userId);
+      const classrooms = await listStudentClassrooms(userId);
       const joined = await getStudentJoinedCode(userId);
-      if (!codes.length) {
+      const codes = classrooms.map((c) => c.code);
+      if (!classrooms.length) {
         return NextResponse.json({
           ok: true,
           joined: null,
           codes: [],
           classrooms: [],
-        });
-      }
-      const classrooms = [];
-      for (const c of codes) {
-        const found = await findClassroomByCode(c);
-        if (!found) continue;
-        const sess = found.classroom.liveSession;
-        const kicked = Boolean(
-          sess?.active &&
-            userId &&
-            (sess.kickedIds || []).includes(userId)
-        );
-        classrooms.push({
-          code: found.classroom.code,
-          name: found.classroom.name,
-          teacherName: found.classroom.teacherName,
-          materials: found.classroom.materials || [],
-          liveSession: sess
-            ? {
-                ...sess,
-                // don't leak full kick list to other students — only flag self
-                kickedIds: undefined,
-                kickReasons: undefined,
-                meetUrl: kicked ? undefined : sess.meetUrl,
-              }
-            : null,
-          alerts: found.classroom.alerts || [],
-          kicked,
-          kickReason:
-            kicked && userId
-              ? sess?.kickReasons?.[userId] || "Removed by teacher"
-              : undefined,
         });
       }
       const primary =
@@ -109,8 +78,8 @@ export async function GET(req: NextRequest) {
         codes,
         classroom: primary,
         classrooms,
-        kicked: Boolean(primary && (primary as { kicked?: boolean }).kicked),
-        kickReason: (primary as { kickReason?: string } | null)?.kickReason,
+        kicked: Boolean(primary?.kicked),
+        kickReason: primary?.kickReason,
       });
     }
 

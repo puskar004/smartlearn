@@ -198,6 +198,20 @@ export async function getClassroomForTeacher(
   return rooms.find((c) => c.code === code.toUpperCase()) || null;
 }
 
+/** Fast path: load room by known teacher id (no user-list scan) */
+export async function getClassroomByTeacher(
+  teacherId: string,
+  code: string
+): Promise<{ teacherId: string; classroom: Classroom } | null> {
+  try {
+    const room = await getClassroomForTeacher(teacherId, code);
+    if (!room) return null;
+    return { teacherId, classroom: { ...room, teacherId } };
+  } catch {
+    return null;
+  }
+}
+
 async function updateClassroom(
   teacherId: string,
   code: string,
@@ -295,16 +309,23 @@ export async function leaveClassroomAsStudent(
     .trim()
     .toUpperCase();
 
+  const map = { ...(sm.joinedClassMap || {}) };
+
   if (!target) {
     await saveMeta(userId, {
       ...sm,
       joinedClassCode: null,
       joinedClassCodes: [],
+      joinedClassMap: {},
     });
     return { ok: true, codes: [] };
   }
 
-  const found = await findClassroomByCode(target);
+  const teacherIdHint = map[target];
+  let found = teacherIdHint
+    ? await getClassroomByTeacher(teacherIdHint, target)
+    : null;
+  if (!found) found = await findClassroomByCode(target);
   if (found) {
     await updateClassroom(found.teacherId, found.classroom.code, (c) => ({
       ...c,
@@ -313,10 +334,12 @@ export async function leaveClassroomAsStudent(
   }
 
   const next = current.filter((c) => c !== target);
+  delete map[target];
   await saveMeta(userId, {
     ...sm,
     joinedClassCode: next[0] || null,
     joinedClassCodes: next,
+    joinedClassMap: map,
   });
   return { ok: true, codes: next };
 }
@@ -356,17 +379,96 @@ export async function joinClassroomAsStudent(
     const sm = metaOf(student);
     const codes = codesOf(sm);
     if (!codes.includes(updated.code)) codes.unshift(updated.code);
+    const map = { ...(sm.joinedClassMap || {}) };
+    map[updated.code] = found.teacherId;
     await saveMeta(snapshot.studentId, {
       ...sm,
       role: sm.role === "teacher" ? "teacher" : "student",
       joinedClassCode: updated.code,
       joinedClassCodes: codes.slice(0, 12),
+      joinedClassMap: map,
     });
   } catch {
     // non-fatal
   }
 
   return { ok: true, classroom: updated };
+}
+
+/** Load all classrooms a student joined — uses teacherId map when possible */
+export async function listStudentClassrooms(userId: string): Promise<
+  {
+    code: string;
+    name: string;
+    teacherName: string;
+    materials: TeacherMaterial[];
+    liveSession: Classroom["liveSession"];
+    alerts: ClassAlert[];
+    kicked?: boolean;
+    kickReason?: string;
+  }[]
+> {
+  const meta = await getTeacherMeta(userId);
+  const codes = codesOf(meta);
+  const map = meta.joinedClassMap || {};
+  const out: {
+    code: string;
+    name: string;
+    teacherName: string;
+    materials: TeacherMaterial[];
+    liveSession: Classroom["liveSession"];
+    alerts: ClassAlert[];
+    kicked?: boolean;
+    kickReason?: string;
+  }[] = [];
+
+  for (const code of codes) {
+    let found: { teacherId: string; classroom: Classroom } | null = null;
+    const tid = map[code];
+    if (tid) found = await getClassroomByTeacher(tid, code);
+    if (!found) found = await findClassroomByCode(code);
+    if (!found) continue;
+
+    // backfill map if missing
+    if (!tid) {
+      try {
+        await saveMeta(userId, {
+          ...meta,
+          joinedClassMap: { ...map, [code]: found.teacherId },
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    const sess = found.classroom.liveSession;
+    const kicked = Boolean(
+      sess?.active && (sess.kickedIds || []).includes(userId)
+    );
+    out.push({
+      code: found.classroom.code,
+      name: found.classroom.name,
+      teacherName: found.classroom.teacherName,
+      materials: (found.classroom.materials || []).filter(
+        (m) => m.url && !String(m.url).startsWith("data:")
+      ),
+      liveSession: sess
+        ? {
+            ...sess,
+            kickedIds: undefined,
+            kickReasons: undefined,
+            meetUrl: kicked ? undefined : sess.meetUrl,
+          }
+        : null,
+      alerts: found.classroom.alerts || [],
+      kicked,
+      kickReason:
+        kicked && userId
+          ? sess?.kickReasons?.[userId] || "Removed by teacher"
+          : undefined,
+    });
+  }
+  return out;
 }
 
 export async function pushStudentToClass(
