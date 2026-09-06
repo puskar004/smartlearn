@@ -13,21 +13,24 @@ type MomentPayload = {
 type Props = {
   active: boolean;
   testCode: string;
-  /** Called when screen share ends or required devices missing → exit test */
+  /** Only after proctor was ready — share stopped / cam ended */
   onProctorFail: (reason: string) => void;
+  /** Setup failed — do NOT auto-submit; let student retry */
+  onSetupError?: (reason: string) => void;
   onReady?: () => void;
   onMoment?: (m: MomentPayload) => void;
 };
 
 /**
- * Proctoring: require camera (shutter on) + mic + current-tab screen share.
- * If share stops → onProctorFail (exit test).
- * Every 60s: snapshot + short voice → teacher.
+ * Camera + mic + screen share for tests.
+ * - Setup errors → onSetupError (retry, no auto-submit)
+ * - After ready: if user stops share → onProctorFail (exit)
  */
 export default function TestProctor({
   active,
   testCode,
   onProctorFail,
+  onSetupError,
   onReady,
   onMoment,
 }: Props) {
@@ -36,17 +39,33 @@ export default function TestProctor({
   const screenRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewRef = useRef<HTMLVideoElement | null>(null);
+  const readyRef = useRef(false);
+  const cancelledRef = useRef(false);
+
+  const failRef = useRef(onProctorFail);
+  const setupErrRef = useRef(onSetupError);
+  const readyCbRef = useRef(onReady);
+  const momentRef = useRef(onMoment);
+  failRef.current = onProctorFail;
+  setupErrRef.current = onSetupError;
+  readyCbRef.current = onReady;
+  momentRef.current = onMoment;
+
   const [status, setStatus] = useState("Starting proctor…");
   const [camOk, setCamOk] = useState(false);
-  const failRef = useRef(onProctorFail);
-  failRef.current = onProctorFail;
+  const [micOk, setMicOk] = useState(false);
+  const [screenOk, setScreenOk] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!active || !testCode) return;
-    let cancelled = false;
-    let timer: number | undefined;
+    cancelledRef.current = false;
+    readyRef.current = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let firstTick: ReturnType<typeof setTimeout> | undefined;
 
-    const cleanup = () => {
+    const stopAll = () => {
       micRef.current?.getTracks().forEach((t) => t.stop());
       camRef.current?.getTracks().forEach((t) => t.stop());
       screenRef.current?.getTracks().forEach((t) => t.stop());
@@ -54,142 +73,173 @@ export default function TestProctor({
       camRef.current = null;
       screenRef.current = null;
       videoRef.current = null;
+      camVideoRef.current = null;
+      if (previewRef.current) previewRef.current.srcObject = null;
+    };
+
+    const failSetup = (msg: string) => {
+      if (cancelledRef.current) return;
+      setStatus(msg);
+      stopAll();
+      setupErrRef.current?.(msg);
+    };
+
+    const failLive = (msg: string) => {
+      // only after successful ready — avoids auto-submit during permission dialogs
+      if (cancelledRef.current || !readyRef.current) return;
+      readyRef.current = false;
+      failRef.current(msg);
     };
 
     const setup = async () => {
-      // 1) Camera — must be live (shutter on)
-      setStatus("Allow camera (shutter must stay ON)…");
+      setCamOk(false);
+      setMicOk(false);
+      setScreenOk(false);
+
+      // 1) Camera + mic together (one permission prompt often)
+      setStatus("Allow camera + microphone…");
       try {
-        const cam = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-          },
-          audio: false,
+        const av = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: true,
         });
-        if (cancelled) {
-          cam.getTracks().forEach((t) => t.stop());
+        if (cancelledRef.current) {
+          av.getTracks().forEach((t) => t.stop());
           return;
         }
-        const vTrack = cam.getVideoTracks()[0];
-        if (!vTrack || vTrack.readyState !== "live" || !vTrack.enabled) {
-          cam.getTracks().forEach((t) => t.stop());
-          failRef.current("Camera shutter is off or camera not live.");
+
+        const vTrack = av.getVideoTracks()[0];
+        const aTrack = av.getAudioTracks()[0];
+        if (!vTrack || vTrack.readyState === "ended") {
+          failSetup("Camera not available. Check system settings and retry.");
           return;
         }
-        camRef.current = cam;
+        // Do NOT use vTrack.muted — browsers often report muted=true for local tracks
+        if (!vTrack.enabled) vTrack.enabled = true;
+
+        camRef.current = new MediaStream([vTrack]);
+        if (aTrack) {
+          if (!aTrack.enabled) aTrack.enabled = true;
+          micRef.current = new MediaStream([aTrack]);
+          setMicOk(true);
+        } else {
+          // try mic alone
+          try {
+            micRef.current = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: false,
+            });
+            setMicOk(true);
+          } catch {
+            failSetup("Microphone required. Allow mic and press Retry.");
+            return;
+          }
+        }
+
         const cv = document.createElement("video");
         cv.muted = true;
         cv.playsInline = true;
-        cv.srcObject = cam;
-        await cv.play();
+        cv.setAttribute("playsinline", "true");
+        cv.srcObject = camRef.current;
+        await cv.play().catch(() => undefined);
         camVideoRef.current = cv;
-        // wait a frame to ensure light is on
-        await new Promise((r) => setTimeout(r, 400));
-        if (vTrack.muted || vTrack.readyState !== "live") {
-          failRef.current("Camera shutter appears OFF. Turn camera on and retry.");
-          cleanup();
+
+        if (previewRef.current) {
+          previewRef.current.srcObject = camRef.current;
+          void previewRef.current.play().catch(() => undefined);
+        }
+
+        // Wait until we actually get frames (proves shutter/light works)
+        const gotFrame = await waitForVideoFrame(cv, 4000);
+        if (!gotFrame) {
+          failSetup(
+            "Camera opened but no video frames. Close other apps using the camera, then Retry."
+          );
           return;
         }
+
         setCamOk(true);
         vTrack.onended = () => {
-          failRef.current("Camera stopped — test exited.");
+          failLive("Camera was turned off — test exited.");
         };
-      } catch {
-        failRef.current("Camera permission required. Allow camera and restart test.");
+      } catch (e) {
+        const name = e instanceof Error ? e.name : "";
+        if (name === "NotAllowedError") {
+          failSetup("Camera/mic blocked. Allow access in browser, then Retry.");
+        } else if (name === "NotFoundError") {
+          failSetup("No camera found. Plug in a camera and Retry.");
+        } else if (name === "NotReadableError") {
+          failSetup(
+            "Camera is busy in another app. Close Zoom/Meet/etc., then Retry."
+          );
+        } else {
+          failSetup("Could not open camera/mic. Allow permissions and Retry.");
+        }
         return;
       }
 
-      // 2) Mic
-      setStatus("Allow microphone…");
+      // 2) Screen share
+      setStatus("Share screen → pick This tab / Chrome Tab (this SmartLearn page)");
       try {
-        micRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
-      } catch {
-        failRef.current("Microphone permission required.");
-        cleanup();
-        return;
-      }
-
-      // 3) Screen — prefer THIS tab only
-      setStatus(
-        "Share screen: choose “Chrome Tab” / “This tab” → SmartLearn test tab"
-      );
-      try {
-        const displayOpts = {
-          video: {
-            displaySurface: "browser" as const,
-            frameRate: 5,
-          },
-          audio: false,
-          // Chromium
-          preferCurrentTab: true,
-          selfBrowserSurface: "include" as const,
-          surfaceSwitching: "exclude" as const,
-          systemAudio: "exclude" as const,
-        };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const screen = await (navigator.mediaDevices as any).getDisplayMedia(
-          displayOpts
-        );
-        if (cancelled) {
-          screen.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+        const screen: MediaStream = await (
+          navigator.mediaDevices as any
+        ).getDisplayMedia({
+          video: true,
+          audio: false,
+          preferCurrentTab: true,
+          selfBrowserSurface: "include",
+        });
+        if (cancelledRef.current) {
+          screen.getTracks().forEach((t) => t.stop());
           return;
         }
-        const sTrack = screen.getVideoTracks()[0] as MediaStreamTrack & {
-          getSettings?: () => { displaySurface?: string };
-        };
-        const surface = sTrack.getSettings?.()?.displaySurface;
-        // If they shared a window/monitor instead of browser tab, still allow but warn
-        if (surface && surface !== "browser") {
-          // soft note — Chrome may not report surface on all builds
+        const sTrack = screen.getVideoTracks()[0];
+        if (!sTrack) {
+          failSetup("Screen share failed. Retry and choose a tab.");
+          return;
         }
         screenRef.current = screen;
         const v = document.createElement("video");
         v.muted = true;
         v.playsInline = true;
         v.srcObject = screen;
-        await v.play();
+        await v.play().catch(() => undefined);
         videoRef.current = v;
+        setScreenOk(true);
 
-        // CRITICAL: if user stops sharing → exit test
         sTrack.onended = () => {
-          failRef.current(
-            "Screen sharing stopped — you are exited from the test."
-          );
+          failLive("Screen sharing stopped — you exited the test.");
         };
       } catch {
-        failRef.current(
-          "Screen share required. Pick “This tab / Chrome Tab” for the test page."
+        failSetup(
+          "Screen share required. Click Retry, then choose This tab / Chrome Tab."
         );
-        cleanup();
         return;
       }
 
-      if (cancelled) return;
-      setStatus("Proctoring active · every 1 min");
-      onReady?.();
+      if (cancelledRef.current) return;
+
+      readyRef.current = true;
+      setStatus("Proctoring active · snapshot every 1 min");
+      readyCbRef.current?.();
 
       const tick = async () => {
-        if (cancelled) return;
+        if (cancelledRef.current || !readyRef.current) return;
 
-        // verify camera still live
         const camTrack = camRef.current?.getVideoTracks()[0];
-        if (
-          !camTrack ||
-          camTrack.readyState !== "live" ||
-          !camTrack.enabled ||
-          camTrack.muted
-        ) {
-          failRef.current("Camera shutter turned OFF — test exited.");
+        // Only fail if track truly ended — not muted flag
+        if (!camTrack || camTrack.readyState === "ended") {
+          failLive("Camera disconnected — test exited.");
           return;
         }
+        if (!camTrack.enabled) {
+          camTrack.enabled = true;
+        }
+
         const screenTrack = screenRef.current?.getVideoTracks()[0];
-        if (!screenTrack || screenTrack.readyState !== "live") {
-          failRef.current("Screen share ended — test exited.");
+        if (!screenTrack || screenTrack.readyState === "ended") {
+          failLive("Screen share ended — test exited.");
           return;
         }
 
@@ -206,51 +256,63 @@ export default function TestProctor({
             const ctx = canvas.getContext("2d");
             if (ctx) {
               ctx.drawImage(v, 0, 0, w, h);
-              // also stamp small camera PIP
               const camV = camVideoRef.current;
               if (camV && camV.videoWidth > 0) {
                 const pw = 96;
-                const ph = Math.round((camV.videoHeight / camV.videoWidth) * pw);
+                const ph = Math.round(
+                  (camV.videoHeight / camV.videoWidth) * pw
+                );
                 ctx.drawImage(camV, w - pw - 8, h - ph - 8, pw, ph);
               }
               moment.imageDataUrl = canvas.toDataURL("image/jpeg", 0.45);
             }
           } else {
-            moment.note = "No screen frame";
+            moment.note = "Screen frame pending";
           }
         } catch {
-          moment.note = "Snapshot failed";
+          moment.note = "Snapshot skipped";
         }
 
         try {
           const mic = micRef.current;
-          if (mic) {
-            const rec = new MediaRecorder(mic);
+          if (mic && typeof MediaRecorder !== "undefined") {
+            const mime = MediaRecorder.isTypeSupported("audio/webm")
+              ? "audio/webm"
+              : undefined;
+            const rec = mime
+              ? new MediaRecorder(mic, { mimeType: mime })
+              : new MediaRecorder(mic);
             const chunks: BlobPart[] = [];
             await new Promise<void>((resolve) => {
               rec.ondataavailable = (e) => {
                 if (e.data.size) chunks.push(e.data);
               };
               rec.onstop = () => resolve();
-              rec.start();
-              setTimeout(() => {
-                try {
-                  rec.stop();
-                } catch {
-                  resolve();
-                }
-              }, 2500);
+              rec.onerror = () => resolve();
+              try {
+                rec.start();
+                setTimeout(() => {
+                  try {
+                    if (rec.state === "recording") rec.stop();
+                    else resolve();
+                  } catch {
+                    resolve();
+                  }
+                }, 2000);
+              } catch {
+                resolve();
+              }
             });
-            const blob = new Blob(chunks, { type: "audio/webm" });
-            if (blob.size > 0 && blob.size < 180_000) {
+            const blob = new Blob(chunks, { type: mime || "audio/webm" });
+            if (blob.size > 200 && blob.size < 180_000) {
               moment.audioDataUrl = await blobToDataUrl(blob);
             }
           }
         } catch {
-          // ignore
+          // audio optional on tick
         }
 
-        onMoment?.(moment);
+        momentRef.current?.(moment);
         try {
           await fetch("/api/tests", {
             method: "POST",
@@ -271,36 +333,99 @@ export default function TestProctor({
         }
       };
 
-      window.setTimeout(() => void tick(), 4000);
-      timer = window.setInterval(() => void tick(), 60_000) as unknown as number;
+      firstTick = setTimeout(() => void tick(), 8000);
+      timer = setInterval(() => void tick(), 60_000);
     };
 
     void setup();
 
     return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-      cleanup();
+      cancelledRef.current = true;
+      readyRef.current = false;
+      if (timer) clearInterval(timer);
+      if (firstTick) clearTimeout(firstTick);
+      // stop tracks WITHOUT calling failLive (cleanup ≠ user stop)
+      stopAll();
     };
-  }, [active, testCode, onReady, onMoment]);
+    // only re-run when active/test/retry — NOT when parent callbacks change
+  }, [active, testCode, retryKey]);
 
   if (!active) return null;
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
-      <span className="inline-flex items-center gap-1">
-        <Camera className={camOk ? "h-3.5 w-3.5 text-emerald-600" : "h-3.5 w-3.5"} />
-        Cam {camOk ? "ON" : "…"}
-      </span>
-      <span className="inline-flex items-center gap-1">
-        <Mic className="h-3.5 w-3.5" /> Mic
-      </span>
-      <span className="inline-flex items-center gap-1">
-        <Monitor className="h-3.5 w-3.5" /> This tab share
-      </span>
-      <span className="text-amber-800/80">{status}</span>
+    <div className="mb-4 space-y-2">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
+        <span className="inline-flex items-center gap-1">
+          <Camera
+            className={
+              camOk ? "h-3.5 w-3.5 text-emerald-600" : "h-3.5 w-3.5 text-slate-400"
+            }
+          />
+          Cam {camOk ? "ON" : "…"}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Mic
+            className={
+              micOk ? "h-3.5 w-3.5 text-emerald-600" : "h-3.5 w-3.5 text-slate-400"
+            }
+          />
+          Mic {micOk ? "ON" : "…"}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Monitor
+            className={
+              screenOk
+                ? "h-3.5 w-3.5 text-emerald-600"
+                : "h-3.5 w-3.5 text-slate-400"
+            }
+          />
+          Share {screenOk ? "ON" : "…"}
+        </span>
+        <span className="min-w-0 flex-1 text-amber-800/90">{status}</span>
+        {!readyRef.current && (
+          <button
+            type="button"
+            onClick={() => setRetryKey((k) => k + 1)}
+            className="rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-500"
+          >
+            Retry permissions
+          </button>
+        )}
+      </div>
+      {/* Live preview proves camera is on */}
+      <div className="flex items-center gap-3">
+        <video
+          ref={previewRef}
+          muted
+          playsInline
+          autoPlay
+          className="h-16 w-16 rounded-full border-2 border-emerald-400 object-cover bg-slate-900"
+        />
+        <p className="text-[10px] text-slate-500">
+          Your camera preview (must stay on). Share <strong>this tab</strong> when
+          asked — not another window.
+        </p>
+      </div>
     </div>
   );
+}
+
+function waitForVideoFrame(video: HTMLVideoElement, timeoutMs: number) {
+  return new Promise<boolean>((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start > timeoutMs) {
+        resolve(false);
+        return;
+      }
+      requestAnimationFrame(check);
+    };
+    check();
+  });
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

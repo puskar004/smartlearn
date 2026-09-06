@@ -55,6 +55,7 @@ export default function StudentTestPage() {
   const [error, setError] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
   const [proctorReady, setProctorReady] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     score: number;
     total: number;
@@ -101,6 +102,7 @@ export default function StudentTestPage() {
     }
     setSessionLock(false);
     setProctorReady(false);
+    setSetupError(null);
   }, [inTest]);
 
   const goTo = (i: number) => {
@@ -231,7 +233,15 @@ export default function StudentTestPage() {
           active={inTest}
           testCode={test!.code}
           onProctorFail={onProctorFail}
-          onReady={() => setProctorReady(true)}
+          onSetupError={(msg) => {
+            setProctorReady(false);
+            setSetupError(msg);
+          }}
+          onReady={() => {
+            setProctorReady(true);
+            setSetupError(null);
+            setError(null);
+          }}
         />
       )}
 
@@ -299,8 +309,13 @@ export default function StudentTestPage() {
         <div className="mt-2">
           {!proctorReady && (
             <p className="mb-3 rounded-xl bg-slate-900 px-3 py-2 text-xs text-amber-200">
-              Waiting for camera + mic + <strong>This tab</strong> share…
-              Choose <em>Chrome Tab / This tab</em> → this SmartLearn page.
+              {setupError || (
+                <>
+                  Allow <strong>camera + mic</strong>, then share{" "}
+                  <strong>This tab / Chrome Tab</strong> → this SmartLearn page.
+                  Setup mistakes will <em>not</em> auto-submit — use Retry.
+                </>
+              )}
             </p>
           )}
 
