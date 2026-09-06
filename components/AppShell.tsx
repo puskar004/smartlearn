@@ -12,6 +12,7 @@ import TaskChecklist from "@/components/TaskChecklist";
 import StudentSync from "@/components/StudentSync";
 import RoleGate from "@/components/RoleGate";
 import ExtremeLock from "@/components/ExtremeLock";
+import FullscreenGate from "@/components/FullscreenGate";
 import SessionLockChrome, { isSessionLocked } from "@/components/SessionLock";
 import GradeGate from "@/components/GradeGate";
 import { getRole } from "@/lib/teacher-store";
@@ -55,6 +56,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isTeacher = role === "teacher";
+  // Student workspace always fullscreen (teachers free to multi-tab)
+  const studentFs = !marketing && !isTeacher;
 
   return (
     <div
@@ -65,6 +68,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     >
       <UserBootstrap />
       {!isTeacher && <GradeGate />}
+      {studentFs && <FullscreenGate />}
       {/* Tab-switch warning: students only (FocusLock skips /teacher) */}
       {!isTeacher && <FocusLock />}
       {!isTeacher && <ExtremeLock />}

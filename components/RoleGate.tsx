@@ -25,6 +25,7 @@ const STUDENT_ONLY = [
   "/support",
   "/test",
   "/live-class",
+  "/news",
   "/profile",
 ];
 

@@ -72,21 +72,26 @@ export default function FullscreenGate() {
           <Maximize2 className="h-8 w-8" />
         </div>
         <h1 className="mt-5 text-2xl font-extrabold text-white">
-          SmartLearn Focus Mode
+          Student Fullscreen Lock
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-slate-400">
-          For distraction-free study, SmartLearn only works in{" "}
-          <strong className="text-indigo-300">fullscreen</strong>. Exit
-          fullscreen and this lock returns instantly.
+          Student section runs only in{" "}
+          <strong className="text-indigo-300">fullscreen</strong>. Nothing else
+          is usable until you enter — and if you exit, this screen returns
+          immediately.
         </p>
         <ul className="mt-4 space-y-2 text-left text-xs text-slate-500">
           <li className="flex gap-2">
             <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            Tab switch still alerts parents when signed in
+            Hides browser chrome for focus study
           </li>
           <li className="flex gap-2">
             <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            Press Esc to leave fullscreen (site locks again)
+            Tab switch still triggers student warning + parent alert
+          </li>
+          <li className="flex gap-2">
+            <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+            Teachers are not locked (multi-tab free)
           </li>
         </ul>
         <button
@@ -94,7 +99,7 @@ export default function FullscreenGate() {
           onClick={() => void enter()}
           className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-500"
         >
-          Enter Fullscreen &amp; Start Studying
+          Enter Fullscreen — continue
         </button>
         {error && (
           <p className="mt-3 text-xs font-medium text-rose-400">{error}</p>
