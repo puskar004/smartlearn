@@ -56,8 +56,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isTeacher = role === "teacher";
-  // Student workspace always fullscreen (teachers free to multi-tab)
-  const studentFs = !marketing && !isTeacher;
+  // Fullscreen + tab-switch only during live test (not whole site)
+  const onTest = path === "/test" || path.startsWith("/test/");
 
   return (
     <div
@@ -68,9 +68,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     >
       <UserBootstrap />
       {!isTeacher && <GradeGate />}
-      {studentFs && <FullscreenGate />}
-      {/* Tab-switch warning: students only (FocusLock skips /teacher) */}
-      {!isTeacher && <FocusLock />}
+      {!isTeacher && onTest && <FullscreenGate />}
+      {!isTeacher && onTest && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
       <SessionLockChrome />
 
@@ -83,7 +82,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <RoleGate>
           <div className="min-h-screen">
             {!isTeacher && <StudentSync />}
-            {/* Hide chrome while student in locked live/test */}
+            {/* Hide chrome only during locked live TEST (not live class) */}
             {!(locked && !isTeacher) && <AppSidebar />}
             <div
               className={cn(

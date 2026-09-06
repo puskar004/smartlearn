@@ -9,6 +9,7 @@ import type {
   StudentSnapshot,
   TeacherMaterial,
 } from "@/lib/classroom-types";
+// TeacherRemark used via inline object shape in pushTeacherRemark
 
 function metaOf(user: { publicMetadata?: Record<string, unknown> | null }): SmartlearnMeta {
   const m = (user.publicMetadata || {}) as Record<string, unknown>;
@@ -206,13 +207,20 @@ export async function deleteClassroom(
     activeClassCode,
   });
 
-  // clear joinedClassCode for students who were in this room
   for (const s of room.students || []) {
     try {
       const st = await client.users.getUser(s.studentId);
       const sm = metaOf(st);
-      if (sm.joinedClassCode === normalized) {
-        await saveMeta(s.studentId, { ...sm, joinedClassCode: null });
+      const next = codesOf(sm).filter((c) => c !== normalized);
+      if (
+        sm.joinedClassCode === normalized ||
+        (sm.joinedClassCodes || []).includes(normalized)
+      ) {
+        await saveMeta(s.studentId, {
+          ...sm,
+          joinedClassCode: next[0] || null,
+          joinedClassCodes: next,
+        });
       }
     } catch {
       // non-fatal
@@ -222,19 +230,37 @@ export async function deleteClassroom(
   return { ok: true, classrooms };
 }
 
+function codesOf(sm: SmartlearnMeta): string[] {
+  const set = new Set<string>();
+  for (const c of sm.joinedClassCodes || []) {
+    if (c) set.add(c.toUpperCase());
+  }
+  if (sm.joinedClassCode) set.add(sm.joinedClassCode.toUpperCase());
+  return [...set];
+}
+
 export async function leaveClassroomAsStudent(
-  userId: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  userId: string,
+  code?: string
+): Promise<{ ok: true; codes: string[] } | { ok: false; error: string }> {
   const client = await clerkClient();
   const student = await client.users.getUser(userId);
   const sm = metaOf(student);
-  const code = sm.joinedClassCode;
-  if (!code) {
-    await saveMeta(userId, { ...sm, joinedClassCode: null });
-    return { ok: true };
+  const current = codesOf(sm);
+  const target = (code || sm.joinedClassCode || current[0] || "")
+    .trim()
+    .toUpperCase();
+
+  if (!target) {
+    await saveMeta(userId, {
+      ...sm,
+      joinedClassCode: null,
+      joinedClassCodes: [],
+    });
+    return { ok: true, codes: [] };
   }
 
-  const found = await findClassroomByCode(code);
+  const found = await findClassroomByCode(target);
   if (found) {
     await updateClassroom(found.teacherId, found.classroom.code, (c) => ({
       ...c,
@@ -242,8 +268,13 @@ export async function leaveClassroomAsStudent(
     }));
   }
 
-  await saveMeta(userId, { ...sm, joinedClassCode: null });
-  return { ok: true };
+  const next = current.filter((c) => c !== target);
+  await saveMeta(userId, {
+    ...sm,
+    joinedClassCode: next[0] || null,
+    joinedClassCodes: next,
+  });
+  return { ok: true, codes: next };
 }
 
 export async function joinClassroomAsStudent(
@@ -279,10 +310,13 @@ export async function joinClassroomAsStudent(
     const client = await clerkClient();
     const student = await client.users.getUser(snapshot.studentId);
     const sm = metaOf(student);
+    const codes = codesOf(sm);
+    if (!codes.includes(updated.code)) codes.unshift(updated.code);
     await saveMeta(snapshot.studentId, {
       ...sm,
       role: sm.role === "teacher" ? "teacher" : "student",
       joinedClassCode: updated.code,
+      joinedClassCodes: codes.slice(0, 12),
     });
   } catch {
     // non-fatal
@@ -311,8 +345,8 @@ export async function addMaterialToClass(
     };
     const alerts = pushAlert(c, {
       kind: "material",
-      title: "New material uploaded",
-      body: `${m.title} · ${m.subject}`,
+      title: `New ${m.subject} notes`,
+      body: `${m.title} · ${m.subject} · ${m.type}`,
       href: "/join-class",
     });
     return {
@@ -375,21 +409,25 @@ export async function endLive(teacherId: string, code: string) {
   return updateClassroom(teacherId, code, (c) => {
     if (!c.liveSession) return c;
     const sess = c.liveSession;
+    const now = Date.now();
+    const stampLeft = (list: AttendanceAttendee[]) =>
+      list.map((a) => (a.leftAt ? a : { ...a, leftAt: now }));
+    const attendees = stampLeft(sess.attendees || []);
     const attendanceLog = (c.attendanceLog || []).map((r) => {
       if (r.sessionId === sess.id && !r.endedAt) {
         return {
           ...r,
-          endedAt: Date.now(),
-          attendees: sess.attendees?.length
-            ? sess.attendees
-            : r.attendees,
+          endedAt: now,
+          attendees: stampLeft(
+            attendees.length ? attendees : r.attendees || []
+          ),
         };
       }
       return r;
     });
     return {
       ...c,
-      liveSession: { ...sess, active: false },
+      liveSession: { ...sess, active: false, attendees },
       attendanceLog,
     };
   });
@@ -405,20 +443,26 @@ export async function markAttendance(
   return updateClassroom(found.teacherId, found.classroom.code, (c) => {
     const sess = c.liveSession;
     if (!sess?.active) return c;
+    const existing = sess.attendees || [];
+    const already = existing.find(
+      (a) => a.studentId === studentId && !a.leftAt
+    );
+    if (already) return c;
     const attendee: AttendanceAttendee = {
       studentId,
       name: name || "Student",
       joinedAt: Date.now(),
     };
-    const existing = sess.attendees || [];
-    if (existing.some((a) => a.studentId === studentId)) return c;
+    // allow re-join after leave as new segment
     const attendees = [attendee, ...existing].slice(0, 120);
     const attendanceLog = (c.attendanceLog || []).map((r) => {
       if (r.sessionId !== sess.id) return r;
-      if (r.attendees.some((a) => a.studentId === studentId)) return r;
+      const open = r.attendees.find(
+        (a) => a.studentId === studentId && !a.leftAt
+      );
+      if (open) return r;
       return { ...r, attendees: [attendee, ...r.attendees].slice(0, 120) };
     });
-    // if no log row yet (edge), create one
     const hasLog = attendanceLog.some((r) => r.sessionId === sess.id);
     const nextLog = hasLog
       ? attendanceLog
@@ -439,6 +483,79 @@ export async function markAttendance(
       attendanceLog: nextLog,
     };
   });
+}
+
+export async function leaveAttendance(
+  code: string,
+  studentId: string
+): Promise<Classroom | null> {
+  const found = await findClassroomByCode(code);
+  if (!found) return null;
+  const now = Date.now();
+  return updateClassroom(found.teacherId, found.classroom.code, (c) => {
+    const sess = c.liveSession;
+    if (!sess) return c;
+    const stamp = (list: AttendanceAttendee[]) =>
+      list.map((a) =>
+        a.studentId === studentId && !a.leftAt ? { ...a, leftAt: now } : a
+      );
+    const attendees = stamp(sess.attendees || []);
+    const attendanceLog = (c.attendanceLog || []).map((r) => {
+      if (r.sessionId !== sess.id) return r;
+      return { ...r, attendees: stamp(r.attendees || []) };
+    });
+    return {
+      ...c,
+      liveSession: { ...sess, attendees },
+      attendanceLog,
+    };
+  });
+}
+
+export async function pushTeacherRemark(
+  teacherId: string,
+  teacherName: string,
+  studentId: string,
+  text: string,
+  classCode?: string,
+  className?: string
+) {
+  const clean = text.trim().slice(0, 800);
+  if (!clean) throw new Error("Empty feedback");
+  const client = await clerkClient();
+  const student = await client.users.getUser(studentId);
+  const sm = metaOf(student);
+  const remark = {
+    id: `rm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    text: clean,
+    from: teacherName || "Teacher",
+    teacherId,
+    classCode,
+    className,
+    at: Date.now(),
+    read: false,
+  };
+  const teacherRemarks = [remark, ...(sm.teacherRemarks || [])].slice(0, 40);
+  await saveMeta(studentId, { ...sm, teacherRemarks });
+
+  // also class alert for StudentSync
+  if (classCode) {
+    await updateClassroom(teacherId, classCode, (c) => ({
+      ...c,
+      alerts: pushAlert(c, {
+        kind: "remark",
+        title: "New teacher remark",
+        body: clean.slice(0, 120),
+        href: "/remarks",
+      }),
+    }));
+  }
+  return remark;
+}
+
+export async function getStudentRemarks(userId: string) {
+  const meta = await getTeacherMeta(userId);
+  return meta.teacherRemarks || [];
 }
 
 export async function postMessage(
@@ -466,5 +583,10 @@ export async function getStudentJoinedCode(
   userId: string
 ): Promise<string | null> {
   const meta = await getTeacherMeta(userId);
-  return meta.joinedClassCode || null;
+  return meta.joinedClassCode || codesOf(meta)[0] || null;
+}
+
+export async function getStudentJoinedCodes(userId: string): Promise<string[]> {
+  const meta = await getTeacherMeta(userId);
+  return codesOf(meta);
 }

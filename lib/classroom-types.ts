@@ -30,17 +30,29 @@ export type TeacherMaterial = {
 
 export type ClassAlert = {
   id: string;
-  kind: "material" | "live" | "schedule";
+  kind: "material" | "live" | "schedule" | "remark";
   title: string;
   body: string;
   href?: string;
   at: number;
 };
 
+export type TeacherRemark = {
+  id: string;
+  text: string;
+  from: string;
+  teacherId: string;
+  classCode?: string;
+  className?: string;
+  at: number;
+  read?: boolean;
+};
+
 export type AttendanceAttendee = {
   studentId: string;
   name: string;
   joinedAt: number;
+  leftAt?: number;
 };
 
 export type AttendanceRecord = {
@@ -87,7 +99,12 @@ export type Classroom = {
 export type SmartlearnMeta = {
   role?: "student" | "teacher";
   classrooms?: Classroom[];
+  /** primary / last joined (compat) */
   joinedClassCode?: string | null;
+  /** student can join multiple teacher codes */
+  joinedClassCodes?: string[];
+  /** teacher remarks delivered to student */
+  teacherRemarks?: TeacherRemark[];
   /** maps code -> teacherId for fast join (also mirrored on each teacher) */
   activeClassCode?: string | null;
 };

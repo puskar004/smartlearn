@@ -204,7 +204,7 @@ export default function ProfilePage() {
             checked={focusOn}
             onChange={(e) => setFocusOn(e.target.checked)}
           />
-          Focus Lock (tab switch → parent WhatsApp)
+          Focus Lock during Live Test only (tab switch warning)
         </label>
 
         <label className="mt-2 flex items-center gap-2 text-sm">

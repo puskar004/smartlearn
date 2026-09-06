@@ -6,6 +6,7 @@ import {
   findTestByCode,
   genTestCode,
   listTeacherTests,
+  readMediaChunk,
   readVideoChunk,
   saveTest,
   saveVideoChunk,
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const mine = req.nextUrl.searchParams.get("mine");
   const video = req.nextUrl.searchParams.get("video");
+  const media = req.nextUrl.searchParams.get("media");
   const { userId } = await auth();
 
   if (video) {
@@ -28,6 +30,19 @@ export async function GET(req: NextRequest) {
     return new NextResponse(new Uint8Array(buf), {
       headers: {
         "Content-Type": "video/webm",
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  }
+
+  if (media) {
+    if (!userId)
+      return NextResponse.json({ error: "Sign in" }, { status: 401 });
+    const hit = await readMediaChunk(media);
+    if (!hit) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return new NextResponse(new Uint8Array(hit.buf), {
+      headers: {
+        "Content-Type": hit.contentType,
         "Cache-Control": "private, max-age=3600",
       },
     });

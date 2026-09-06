@@ -7,12 +7,16 @@ import {
   endLive,
   findClassroomByCode,
   getStudentJoinedCode,
+  getStudentJoinedCodes,
+  getStudentRemarks,
   joinClassroomAsStudent,
+  leaveAttendance,
   leaveClassroomAsStudent,
   listTeacherClassrooms,
   markAttendance,
   postMessage,
   pushStudentToClass,
+  pushTeacherRemark,
   renameClassroom,
   setUserRole,
   startLive,
@@ -54,23 +58,43 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "joined") {
+      const codes = await getStudentJoinedCodes(userId);
       const joined = await getStudentJoinedCode(userId);
-      if (!joined) return NextResponse.json({ ok: true, joined: null });
-      const found = await findClassroomByCode(joined);
+      if (!codes.length) {
+        return NextResponse.json({
+          ok: true,
+          joined: null,
+          codes: [],
+          classrooms: [],
+        });
+      }
+      const classrooms = [];
+      for (const c of codes) {
+        const found = await findClassroomByCode(c);
+        if (!found) continue;
+        classrooms.push({
+          code: found.classroom.code,
+          name: found.classroom.name,
+          teacherName: found.classroom.teacherName,
+          materials: found.classroom.materials || [],
+          liveSession: found.classroom.liveSession,
+          alerts: found.classroom.alerts || [],
+        });
+      }
+      const primary =
+        classrooms.find((x) => x.code === joined) || classrooms[0] || null;
       return NextResponse.json({
         ok: true,
-        joined,
-        classroom: found
-          ? {
-              code: found.classroom.code,
-              name: found.classroom.name,
-              teacherName: found.classroom.teacherName,
-              materials: found.classroom.materials || [],
-              liveSession: found.classroom.liveSession,
-              alerts: found.classroom.alerts || [],
-            }
-          : null,
+        joined: primary?.code || joined,
+        codes,
+        classroom: primary,
+        classrooms,
       });
+    }
+
+    if (action === "remarks") {
+      const remarks = await getStudentRemarks(userId);
+      return NextResponse.json({ ok: true, remarks });
     }
 
     if (action === "room" && code) {
@@ -152,8 +176,29 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "leave") {
-      const res = await leaveClassroomAsStudent(userId);
+      const code = body.code ? String(body.code) : undefined;
+      const res = await leaveClassroomAsStudent(userId, code);
       return NextResponse.json(res);
+    }
+
+    if (action === "remark") {
+      const studentId = String(body.studentId || "");
+      const text = String(body.text || "");
+      if (!studentId || !text.trim()) {
+        return NextResponse.json(
+          { ok: false, error: "Student and feedback required" },
+          { status: 400 }
+        );
+      }
+      const remark = await pushTeacherRemark(
+        userId,
+        user?.fullName || user?.firstName || "Teacher",
+        studentId,
+        text,
+        body.classCode ? String(body.classCode) : undefined,
+        body.className ? String(body.className) : undefined
+      );
+      return NextResponse.json({ ok: true, remark });
     }
 
     if (action === "join") {
@@ -242,6 +287,15 @@ export async function POST(req: NextRequest) {
       if (!room) {
         return NextResponse.json({ ok: false, error: "Class not found" }, { status: 404 });
       }
+      return NextResponse.json({ ok: true, classroom: room });
+    }
+
+    if (action === "leaveAttend") {
+      const code = String(body.code || "").trim().toUpperCase();
+      if (!code) {
+        return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
+      }
+      const room = await leaveAttendance(code, userId);
       return NextResponse.json({ ok: true, classroom: room });
     }
 

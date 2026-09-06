@@ -21,6 +21,7 @@ export type {
 
 const ROLE_KEY = "sl_role_v1_";
 const JOIN_KEY = "sl_joined_class_v1_";
+const JOINS_KEY = "sl_joined_classes_v1_";
 
 export function getRole(userId: string): "student" | "teacher" {
   if (typeof window === "undefined") return "student";
@@ -43,19 +44,74 @@ export function setRole(userId: string, role: "student" | "teacher") {
   }).catch(() => null);
 }
 
+export function getJoinedClasses(userId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(JOINS_KEY + userId);
+    if (raw) {
+      const arr = JSON.parse(raw) as string[];
+      if (Array.isArray(arr)) return arr.map((c) => c.toUpperCase());
+    }
+  } catch {
+    // ignore
+  }
+  const one = localStorage.getItem(JOIN_KEY + userId);
+  return one ? [one.toUpperCase()] : [];
+}
+
 export function getJoinedClass(userId: string): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(JOIN_KEY + userId);
+  return getJoinedClasses(userId)[0] || null;
 }
 
 export function setJoinedClass(userId: string, code: string | null) {
-  if (code) localStorage.setItem(JOIN_KEY + userId, code.toUpperCase());
-  else localStorage.removeItem(JOIN_KEY + userId);
+  const cur = getJoinedClasses(userId);
+  let next: string[];
+  if (code) {
+    const c = code.toUpperCase();
+    next = [c, ...cur.filter((x) => x !== c)].slice(0, 12);
+  } else {
+    next = [];
+  }
+  if (next.length) {
+    localStorage.setItem(JOIN_KEY + userId, next[0]);
+    localStorage.setItem(JOINS_KEY + userId, JSON.stringify(next));
+  } else {
+    localStorage.removeItem(JOIN_KEY + userId);
+    localStorage.removeItem(JOINS_KEY + userId);
+  }
   try {
     window.dispatchEvent(new Event("sl-role-changed"));
   } catch {
     // ignore
   }
+}
+
+export function setJoinedClasses(userId: string, codes: string[]) {
+  const next = [...new Set(codes.map((c) => c.toUpperCase()).filter(Boolean))].slice(
+    0,
+    12
+  );
+  if (next.length) {
+    localStorage.setItem(JOIN_KEY + userId, next[0]);
+    localStorage.setItem(JOINS_KEY + userId, JSON.stringify(next));
+  } else {
+    localStorage.removeItem(JOIN_KEY + userId);
+    localStorage.removeItem(JOINS_KEY + userId);
+  }
+  try {
+    window.dispatchEvent(new Event("sl-role-changed"));
+  } catch {
+    // ignore
+  }
+}
+
+export function removeJoinedClass(userId: string, code: string) {
+  const c = code.toUpperCase();
+  setJoinedClasses(
+    userId,
+    getJoinedClasses(userId).filter((x) => x !== c)
+  );
 }
 
 /** @deprecated use API create */
@@ -196,11 +252,11 @@ export async function apiDeleteClassroom(code: string) {
   return res.json();
 }
 
-export async function apiLeaveClassroom() {
+export async function apiLeaveClassroom(code?: string) {
   const res = await fetch("/api/classroom", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "leave" }),
+    body: JSON.stringify({ action: "leave", code }),
   });
   return res.json();
 }
@@ -211,6 +267,40 @@ export async function apiMarkAttendance(code: string, name?: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "attend", code, name }),
   });
+  return res.json();
+}
+
+export async function apiLeaveAttendance(code: string) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "leaveAttend", code }),
+  });
+  return res.json();
+}
+
+export async function apiSendRemark(
+  studentId: string,
+  text: string,
+  classCode?: string,
+  className?: string
+) {
+  const res = await fetch("/api/classroom", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "remark",
+      studentId,
+      text,
+      classCode,
+      className,
+    }),
+  });
+  return res.json();
+}
+
+export async function apiGetRemarks() {
+  const res = await fetch("/api/classroom?action=remarks");
   return res.json();
 }
 

@@ -27,6 +27,7 @@ import {
   apiListMyClasses,
   apiPostMessage,
   apiRenameClassroom,
+  apiSendRemark,
   apiStartLive,
   getRole,
   setRole,
@@ -702,14 +703,17 @@ function TeacherInner() {
                       )}
                       {(room.liveSession.attendees || []).map((a) => (
                         <li
-                          key={a.studentId}
-                          className="flex justify-between rounded-lg bg-white/80 px-3 py-2 text-xs"
+                          key={a.studentId + a.joinedAt}
+                          className="flex flex-wrap justify-between gap-1 rounded-lg bg-white/80 px-3 py-2 text-xs"
                         >
                           <span className="font-semibold text-slate-800">
                             {a.name}
                           </span>
                           <span className="text-slate-400">
-                            {new Date(a.joinedAt).toLocaleTimeString()}
+                            in {new Date(a.joinedAt).toLocaleTimeString()}
+                            {a.leftAt
+                              ? ` · out ${new Date(a.leftAt).toLocaleTimeString()}`
+                              : " · still in"}
                           </span>
                         </li>
                       ))}
@@ -749,11 +753,14 @@ function TeacherInner() {
                         {(rec.attendees || []).map((a) => (
                           <li
                             key={a.studentId + a.joinedAt}
-                            className="flex justify-between text-xs text-slate-600"
+                            className="flex flex-wrap justify-between gap-1 text-xs text-slate-600"
                           >
                             <span>{a.name}</span>
                             <span className="text-slate-400">
-                              {new Date(a.joinedAt).toLocaleTimeString()}
+                              in {new Date(a.joinedAt).toLocaleTimeString()}
+                              {a.leftAt
+                                ? ` · out ${new Date(a.leftAt).toLocaleTimeString()}`
+                                : ""}
                             </span>
                           </li>
                         ))}
@@ -976,30 +983,34 @@ function TeacherInner() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (!feedback.trim()) return;
-                        try {
-                          const key = `sl_teacher_fb_${selected.studentId}`;
-                          const prev = JSON.parse(
-                            localStorage.getItem(key) || "[]"
-                          ) as { text: string; at: number; from: string }[];
-                          prev.unshift({
-                            text: feedback.trim(),
-                            at: Date.now(),
-                            from: user?.fullName || "Teacher",
-                          });
-                          localStorage.setItem(
-                            key,
-                            JSON.stringify(prev.slice(0, 20))
-                          );
-                          setFeedback("");
-                          setMatNote(`Feedback saved for ${selected.name}`);
-                        } catch {
-                          setError("Could not save feedback");
-                        }
+                        if (!feedback.trim() || !selected) return;
+                        void (async () => {
+                          try {
+                            const data = await apiSendRemark(
+                              selected.studentId,
+                              feedback.trim(),
+                              room?.code,
+                              room?.name
+                            );
+                            if (!data.ok) {
+                              throw new Error(data.error || "Send failed");
+                            }
+                            setFeedback("");
+                            setMatNote(
+                              `Remark sent to ${selected.name} (student Remarks tab + notification)`
+                            );
+                          } catch (e) {
+                            setError(
+                              e instanceof Error
+                                ? e.message
+                                : "Could not send feedback"
+                            );
+                          }
+                        })();
                       }}
                       className="mt-2 w-full rounded-lg bg-indigo-600 py-1.5 text-[11px] font-bold text-white"
                     >
-                      Save feedback note
+                      Send remark to student
                     </button>
                   </div>
                 </div>

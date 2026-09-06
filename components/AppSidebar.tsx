@@ -12,8 +12,8 @@ import {
   Home,
   LineChart,
   Settings,
-  Shield,
   Sparkles,
+  MessageCircle,
   ClipboardList,
   Target,
   GraduationCap,
@@ -41,7 +41,7 @@ const studentNav = [
   { href: "/mistakes", label: "Progress", icon: LineChart },
   { href: "/news", label: "Exam News", icon: Newspaper },
   { href: "/join-class", label: "Join Teacher", icon: Link2 },
-  { href: "/parent", label: "Parent Portal", icon: Shield },
+  { href: "/remarks", label: "Remarks", icon: MessageCircle },
   { href: "/common-room", label: "Common Room", icon: MessageSquare },
 ];
 

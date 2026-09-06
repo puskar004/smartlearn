@@ -2,7 +2,12 @@
 
 import { useEffect } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
-import { apiSyncStudent, getJoinedClass, setJoinedClass } from "@/lib/teacher-store";
+import {
+  apiSyncStudent,
+  getJoinedClass,
+  getJoinedClasses,
+  setJoinedClasses,
+} from "@/lib/teacher-store";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
 import { pushNotification } from "@/lib/notifications";
 import type { ClassAlert } from "@/lib/classroom-types";
@@ -17,12 +22,10 @@ export default function StudentSync() {
   useEffect(() => {
     if (!isSignedIn || !userId) return;
 
-    const sync = () => {
-      const code = getJoinedClass(userId);
-      if (!code) return;
+    const snapshot = () => {
       const p = loadProgress(userId);
       const weak = weaknessMap(p).map(([n]) => n);
-      void apiSyncStudent(code, {
+      return {
         studentId: userId,
         name: user?.fullName || user?.firstName || "Student",
         email: user?.primaryEmailAddress?.emailAddress,
@@ -40,18 +43,33 @@ export default function StudentSync() {
           prompt: m.prompt,
           at: m.at,
         })),
-      });
+      };
+    };
+
+    const sync = () => {
+      const codes = getJoinedClasses(userId);
+      if (!codes.length) return;
+      const snap = snapshot();
+      for (const code of codes) {
+        void apiSyncStudent(code, snap);
+      }
     };
 
     const pullServerAlerts = async () => {
       try {
         const res = await fetch("/api/classroom?action=joined");
         const data = await res.json();
-        if (data.joined) {
-          setJoinedClass(userId, data.joined);
-        }
-        const alerts = (data.classroom?.alerts || []) as ClassAlert[];
+        const codes = (data.codes ||
+          (data.joined ? [data.joined] : [])) as string[];
+        if (codes.length) setJoinedClasses(userId, codes);
+
+        const rooms = (data.classrooms ||
+          (data.classroom ? [data.classroom] : [])) as {
+          alerts?: ClassAlert[];
+        }[];
+        const alerts = rooms.flatMap((r) => r.alerts || []) as ClassAlert[];
         if (!alerts.length) return;
+
         const seenRaw = localStorage.getItem(SEEN_ALERTS_KEY + userId);
         const seen = new Set<string>(
           seenRaw ? (JSON.parse(seenRaw) as string[]) : []
@@ -59,23 +77,31 @@ export default function StudentSync() {
         const fresh = alerts
           .filter((a) => a?.id && !seen.has(a.id))
           .filter((a) => Date.now() - (a.at || 0) < 7 * 86_400_000)
-          .slice(0, 15);
-        for (const a of fresh.reverse()) {
+          .sort((a, b) => (a.at || 0) - (b.at || 0))
+          .slice(-15);
+        for (const a of fresh) {
           pushNotification(userId, {
             title: a.title,
             body: a.body,
-            href: a.href || (a.kind === "material" ? "/join-class" : "/live-class"),
+            href:
+              a.href ||
+              (a.kind === "remark"
+                ? "/remarks"
+                : a.kind === "material"
+                  ? "/join-class"
+                  : "/live-class"),
           });
           seen.add(a.id);
         }
-        const keep = [...seen].slice(-80);
-        localStorage.setItem(SEEN_ALERTS_KEY + userId, JSON.stringify(keep));
+        localStorage.setItem(
+          SEEN_ALERTS_KEY + userId,
+          JSON.stringify([...seen].slice(-100))
+        );
       } catch {
         // ignore
       }
     };
 
-    // Class code / live alerts from teacher (same browser or storage event)
     const pullLocalAlerts = () => {
       try {
         const raw = localStorage.getItem(`sl_notify_student_${userId}`);
@@ -95,10 +121,9 @@ export default function StudentSync() {
             });
           }
         }
-        const live = localStorage.getItem(
-          `sl_live_alert_${getJoinedClass(userId) || ""}`
-        );
-        if (live) {
+        for (const code of getJoinedClasses(userId)) {
+          const live = localStorage.getItem(`sl_live_alert_${code}`);
+          if (!live) continue;
           const L = JSON.parse(live) as {
             title: string;
             meetUrl?: string;
@@ -107,13 +132,13 @@ export default function StudentSync() {
           };
           if (L?.title && Date.now() - (L.at || 0) < 3_600_000) {
             pushNotification(userId, {
-              title: L.scheduledAt ? "Live class scheduled" : "Live class started",
+              title: L.scheduledAt
+                ? "Live class scheduled"
+                : "Live class started",
               body: L.title + (L.meetUrl ? " · Meet ready" : ""),
               href: "/live-class",
             });
-            localStorage.removeItem(
-              `sl_live_alert_${getJoinedClass(userId) || ""}`
-            );
+            localStorage.removeItem(`sl_live_alert_${code}`);
           }
         }
       } catch {

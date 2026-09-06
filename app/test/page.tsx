@@ -277,6 +277,8 @@ export default function StudentTestPage() {
       setMarked(Array(len).fill(false));
       setQi(0);
       setLeft(Math.max(0, Math.floor((t.endsAt - Date.now()) / 1000)));
+      // Enter fullscreen as soon as test loads
+      window.setTimeout(() => void enterFullscreen(), 200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
       setTest(null);
@@ -387,6 +389,7 @@ export default function StudentTestPage() {
             }}
             onReady={() => {
               setProctorReady(true);
+              void enterFullscreen();
               setSetupError(null);
               setError(null);
             }}

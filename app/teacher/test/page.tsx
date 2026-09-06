@@ -25,6 +25,8 @@ type Mcq = {
 type Moment = {
   at: number;
   imageDataUrl?: string;
+  imageKey?: string;
+  audioKey?: string;
   audioDataUrl?: string;
   note?: string;
   videoKey?: string;
@@ -505,8 +507,26 @@ export default function TeacherTestPage() {
             ) : (
               <ul className="mt-4 space-y-4">
                 {momentsFor.moments
-                  .filter((m) => m.imageDataUrl || m.audioDataUrl)
-                  .map((m, i) => (
+                  .filter(
+                    (m) =>
+                      m.imageDataUrl ||
+                      m.audioDataUrl ||
+                      m.imageKey ||
+                      m.audioKey ||
+                      (m.note && m.note !== "screen-video-chunk")
+                  )
+                  .map((m, i) => {
+                    const imgSrc =
+                      m.imageDataUrl ||
+                      (m.imageKey
+                        ? `/api/tests?media=${encodeURIComponent(m.imageKey)}`
+                        : null);
+                    const audioSrc =
+                      m.audioDataUrl ||
+                      (m.audioKey
+                        ? `/api/tests?media=${encodeURIComponent(m.audioKey)}`
+                        : null);
+                    return (
                     <li
                       key={i}
                       className="rounded-xl border border-slate-100 p-2 text-xs"
@@ -514,26 +534,27 @@ export default function TeacherTestPage() {
                       <div className="text-[10px] text-slate-400">
                         {new Date(m.at).toLocaleString()}
                       </div>
-                      {m.note && (
+                      {m.note && m.note !== "screen-video-chunk" && (
                         <div className="mt-1 text-amber-700">{m.note}</div>
                       )}
-                      {m.imageDataUrl && (
+                      {imgSrc && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={m.imageDataUrl}
+                          src={imgSrc}
                           alt="moment"
                           className="mt-2 max-h-48 w-full rounded-lg object-contain bg-slate-50"
                         />
                       )}
-                      {m.audioDataUrl && (
+                      {audioSrc && (
                         <audio
                           controls
-                          src={m.audioDataUrl}
+                          src={audioSrc}
                           className="mt-2 w-full"
                         />
                       )}
                     </li>
-                  ))}
+                    );
+                  })}
               </ul>
             )}
           </div>

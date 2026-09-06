@@ -17,6 +17,10 @@ export type ProctorMoment = {
   note?: string;
   /** path key for saved screen video chunk */
   videoKey?: string;
+  /** path key for saved photo snap */
+  imageKey?: string;
+  /** path key for saved audio clip */
+  audioKey?: string;
 };
 
 export type LiveTest = {
@@ -102,11 +106,12 @@ function lightTest(t: LiveTest): LiveTest {
       total: s.total,
       at: s.at,
       videoKeys: s.videoKeys,
-      moments: (s.moments || []).slice(0, 5).map((m) => ({
+      moments: (s.moments || []).slice(0, 8).map((m) => ({
         at: m.at,
         note: m.note,
         videoKey: m.videoKey,
-        // keep tiny thumbs only in file store; drop huge base64 from clerk
+        imageKey: m.imageKey,
+        audioKey: m.audioKey,
       })),
     };
   }
@@ -268,6 +273,32 @@ export async function submitTest(
   return test.submissions[studentId];
 }
 
+async function saveMediaFile(
+  code: string,
+  studentId: string,
+  dataUrl: string,
+  kind: "jpg" | "webm" | "webm-audio"
+): Promise<string | undefined> {
+  try {
+    const dir = videoDir();
+    await fs.mkdir(dir, { recursive: true });
+    const ext =
+      kind === "jpg" ? "jpg" : kind === "webm-audio" ? "webm" : "webm";
+    const key = `${code}_${studentId}_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 5)}.${ext}`;
+    const raw = dataUrl.replace(/^data:[^;]+;base64,/, "");
+    const buf = Buffer.from(raw, "base64");
+    if (buf.length < 80) return undefined;
+    if (buf.length > 1_800_000) return undefined;
+    await fs.writeFile(path.join(dir, key), buf);
+    return key;
+  } catch (e) {
+    console.error("saveMediaFile", e);
+    return undefined;
+  }
+}
+
 export async function addTestMoment(
   code: string,
   studentId: string,
@@ -288,14 +319,38 @@ export async function addTestMoment(
     videoKeys: [],
   };
 
+  let imageKey = moment.imageKey;
+  let audioKey = moment.audioKey;
+  if (moment.imageDataUrl && !imageKey) {
+    imageKey = await saveMediaFile(
+      test.code,
+      studentId,
+      moment.imageDataUrl,
+      "jpg"
+    );
+  }
+  if (moment.audioDataUrl && !audioKey) {
+    audioKey = await saveMediaFile(
+      test.code,
+      studentId,
+      moment.audioDataUrl,
+      "webm-audio"
+    );
+  }
+
   const entry: ProctorMoment = {
     at: moment.at || Date.now(),
-    imageDataUrl: moment.imageDataUrl
-      ? String(moment.imageDataUrl).slice(0, 160_000)
-      : undefined,
-    audioDataUrl: moment.audioDataUrl
-      ? String(moment.audioDataUrl).slice(0, 160_000)
-      : undefined,
+    // Prefer file keys; keep small inline only if file save failed
+    imageKey,
+    audioKey,
+    imageDataUrl:
+      !imageKey && moment.imageDataUrl
+        ? String(moment.imageDataUrl).slice(0, 100_000)
+        : undefined,
+    audioDataUrl:
+      !audioKey && moment.audioDataUrl
+        ? String(moment.audioDataUrl).slice(0, 80_000)
+        : undefined,
     note: moment.note ? String(moment.note).slice(0, 200) : undefined,
     videoKey: moment.videoKey,
   };
@@ -344,6 +399,26 @@ export async function readVideoChunk(key: string): Promise<Buffer | null> {
   try {
     const safe = path.basename(key);
     return await fs.readFile(path.join(videoDir(), safe));
+  } catch {
+    return null;
+  }
+}
+
+export async function readMediaChunk(key: string): Promise<{
+  buf: Buffer;
+  contentType: string;
+} | null> {
+  try {
+    const safe = path.basename(key);
+    const buf = await fs.readFile(path.join(videoDir(), safe));
+    const lower = safe.toLowerCase();
+    let contentType = "application/octet-stream";
+    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+      contentType = "image/jpeg";
+    else if (lower.endsWith(".png")) contentType = "image/png";
+    else if (lower.endsWith(".webm")) contentType = "audio/webm";
+    else if (lower.endsWith(".mp3")) contentType = "audio/mpeg";
+    return { buf, contentType };
   } catch {
     return null;
   }

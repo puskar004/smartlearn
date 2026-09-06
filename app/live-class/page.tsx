@@ -5,14 +5,15 @@ import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { Loader2, Radio, Send, Shield } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
-import { setSessionLock } from "@/components/SessionLock";
 import {
   getJoinedClass,
   getRole,
   apiPostMessage,
   apiMarkAttendance,
+  apiLeaveAttendance,
 } from "@/lib/teacher-store";
 import { displayName } from "@/lib/display-name";
+import { useRouter } from "next/navigation";
 
 type Msg = { id: string; author: string; text: string; at: number };
 
@@ -30,6 +31,7 @@ type LiveInfo = {
 export default function LiveClassPage() {
   const { userId, isSignedIn } = useAuth();
   const { user } = useUser();
+  const router = useRouter();
   const [live, setLive] = useState<LiveInfo | null>(null);
   const [className, setClassName] = useState("");
   const [classCode, setClassCode] = useState("");
@@ -104,18 +106,13 @@ export default function LiveClassPage() {
     return () => clearInterval(id);
   }, [userId, load]);
 
-  useEffect(() => {
-    if (live?.active) {
-      setSessionLock(true, "live");
-      try {
-        void document.documentElement.requestFullscreen?.();
-      } catch {
-        // ignore
-      }
-      return () => setSessionLock(false);
+  const leaveLive = async () => {
+    if (classCode && userId) {
+      void apiLeaveAttendance(classCode);
     }
-    setSessionLock(false);
-  }, [live?.active]);
+    lastAttended.current = null;
+    router.push("/dashboard");
+  };
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
@@ -161,11 +158,28 @@ export default function LiveClassPage() {
       <div className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
         <Radio className="h-3.5 w-3.5" /> Live class
       </div>
-      <h1 className="mt-3 text-2xl font-extrabold text-slate-900 sm:text-3xl">
-        Attend online class
-      </h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {className || getJoinedClass(userId) || "Your class"}
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">
+            Attend online class
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {className || getJoinedClass(userId || "") || "Your class"}
+          </p>
+        </div>
+        {live?.active && (
+          <button
+            type="button"
+            onClick={() => void leaveLive()}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+          >
+            Leave live · back to study
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-[11px] text-slate-400">
+        You can leave anytime and still use NCERT PDFs, quizzes, and the rest of
+        SmartLearn while class continues.
       </p>
 
       {loading && (

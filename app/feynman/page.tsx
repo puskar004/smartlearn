@@ -15,9 +15,31 @@ const TIPS = [
   "End with one exam-style one-liner.",
 ];
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickNextTopic(
+  pool: string[],
+  done: string[],
+  current?: string
+): string {
+  const recent = new Set(done.slice(0, 12).map((t) => t.toLowerCase()));
+  if (current) recent.add(current.toLowerCase());
+  const fresh = pool.filter((t) => !recent.has(t.toLowerCase()));
+  const source = fresh.length > 0 ? fresh : pool.filter((t) => t !== current);
+  if (source.length === 0) return pool[0] || "Newton's laws of motion";
+  return source[Math.floor(Math.random() * source.length)];
+}
+
 export default function FeynmanPage() {
   const { userId, isSignedIn } = useAuth();
-  const [topic, setTopic] = useState("Ohm's law");
+  const [topic, setTopic] = useState("");
   const [explain, setExplain] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [score, setScore] = useState<number | null>(null);
@@ -25,6 +47,7 @@ export default function FeynmanPage() {
   const [history, setHistory] = useState<
     { topic: string; score: number; at: number }[]
   >([]);
+  const [chipSeed, setChipSeed] = useState(0);
 
   useEffect(() => {
     if (!userId) return;
@@ -43,18 +66,46 @@ export default function FeynmanPage() {
       for (const ch of s.chapters) {
         if (ids.size === 0 || ids.has(ch.id)) {
           topics.push(`${ch.title} (${s.name})`);
-          for (const t of ch.topics.slice(0, 2)) {
+          for (const t of ch.topics.slice(0, 3)) {
             topics.push(`${t} — ${ch.title}`);
           }
         }
       }
     }
-    return topics.slice(0, 40);
-  }, [userId]);
+    return topics.slice(0, 80);
+  }, [userId, chipSeed]);
+
+  const displayChips = useMemo(() => {
+    const done = (history || []).map((h) => h.topic);
+    const recent = new Set(done.slice(0, 15).map((t) => t.toLowerCase()));
+    const fresh = chapterTopics.filter((t) => !recent.has(t.toLowerCase()));
+    const base = fresh.length >= 8 ? fresh : chapterTopics;
+    return shuffle(base).slice(0, 12);
+  }, [chapterTopics, history, chipSeed]);
+
+  useEffect(() => {
+    if (!userId || topic) return;
+    if (chapterTopics.length === 0) {
+      setTopic("Photosynthesis");
+      return;
+    }
+    const done = (loadProgress(userId).feynmanScores || []).map((h) => h.topic);
+    setTopic(pickNextTopic(chapterTopics, done));
+  }, [userId, chapterTopics, topic]);
+
+  const nextTopic = () => {
+    const done = history.map((h) => h.topic);
+    const next = pickNextTopic(chapterTopics, done, topic);
+    setTopic(next);
+    setExplain("");
+    setFeedback(null);
+    setScore(null);
+    setChipSeed((s) => s + 1);
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!explain.trim()) return;
+    if (!explain.trim() || !topic.trim()) return;
     setLoading(true);
     setFeedback(null);
     try {
@@ -115,6 +166,7 @@ ONE EXAM LINE:
         }
         bumpTask(userId, "weekly-feynman", 1);
         setHistory(p.feynmanScores);
+        setChipSeed((s) => s + 1);
       }
     } catch (err) {
       setFeedback(err instanceof Error ? err.message : "Error");
@@ -163,7 +215,7 @@ ONE EXAM LINE:
             Quick pick from your syllabus
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {chapterTopics.slice(0, 12).map((t) => (
+            {displayChips.map((t) => (
               <button
                 key={t}
                 type="button"
@@ -184,15 +236,10 @@ ONE EXAM LINE:
             ))}
             <button
               type="button"
-              onClick={() => {
-                setTopic("");
-                setExplain("");
-                setFeedback(null);
-                setScore(null);
-              }}
+              onClick={nextTopic}
               className="rounded-full border border-dashed border-violet-300 bg-violet-50 px-2.5 py-1 text-[11px] font-bold text-violet-700"
             >
-              + New topic
+              Shuffle new topic
             </button>
           </div>
         </div>
@@ -228,11 +275,18 @@ ONE EXAM LINE:
       </form>
 
       {score != null && (
-        <div className="mt-6 flex items-end gap-3">
+        <div className="mt-6 flex flex-wrap items-end gap-3">
           <p className="text-4xl font-black text-violet-600">{score}</p>
           <p className="pb-1 text-sm font-semibold text-slate-500">
             / 100 clarity
           </p>
+          <button
+            type="button"
+            onClick={nextTopic}
+            className="mb-1 rounded-lg bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-800 hover:bg-violet-200"
+          >
+            Next topic →
+          </button>
         </div>
       )}
       {feedback && (

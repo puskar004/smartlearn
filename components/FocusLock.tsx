@@ -80,6 +80,7 @@ export default function FocusLock() {
   const armed = useRef(false);
 
   const onTeacher = path.startsWith("/teacher");
+  const onTest = path === "/test" || path.startsWith("/test/");
 
   useEffect(() => {
     const sync = () => {
@@ -98,8 +99,9 @@ export default function FocusLock() {
     if (!isSignedIn || !userId) return;
     if (getRole(userId) !== "student") return;
     if (path.startsWith("/teacher")) return;
+    // Tab-switch lock ONLY during live test
+    if (!onTest) return;
     if (!isFocusLockEnabled()) return;
-    // In-app PDF / lightbox / common-room modal is NOT a tab switch
     if (isPdfReading()) return;
     if (document.querySelector("[data-pdf-reader='1']")) return;
 
@@ -118,16 +120,14 @@ export default function FocusLock() {
 
     setBanner(
       sent
-        ? `Tab switch #${n} detected! Parent WhatsApp alert opened.`
-        : `Tab switch #${n} detected! Stay on SmartLearn. Set parent number in Profile for WhatsApp alerts.`
+        ? `Test tab switch #${n}! Parent WhatsApp alert opened.`
+        : `Test tab switch #${n}! Stay on the exam window.`
     );
 
     pushNotification(userId, {
-      title: `Tab switch #${n}`,
-      body: sent
-        ? `Parent alert sent.`
-        : `Stay focused. Parent number not set.`,
-      href: "/parent",
+      title: `Test tab switch #${n}`,
+      body: sent ? `Parent alert sent.` : `Stay focused on the test.`,
+      href: "/test",
     });
 
     try {
@@ -162,12 +162,13 @@ export default function FocusLock() {
     }
 
     window.setTimeout(() => setBanner(null), 8000);
-  }, [isSignedIn, user, userId, path]);
+  }, [isSignedIn, user, userId, path, onTest]);
 
   useEffect(() => {
     if (!isSignedIn || !userId) return;
     if (role !== "student") return;
     if (onTeacher) return;
+    if (!onTest) return;
 
     armed.current = false;
     const armTimer = window.setTimeout(() => {
@@ -207,9 +208,10 @@ export default function FocusLock() {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pagehide", onPageHide);
     };
-  }, [isSignedIn, userId, role, onTeacher, alertParent]);
+  }, [isSignedIn, userId, role, onTeacher, onTest, alertParent]);
 
-  if (!isSignedIn || role !== "student" || onTeacher || !banner) return null;
+  if (!isSignedIn || role !== "student" || onTeacher || !onTest || !banner)
+    return null;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">

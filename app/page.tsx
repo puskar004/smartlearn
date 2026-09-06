@@ -149,10 +149,10 @@ export default function HomePage() {
               tone="bg-sky-50 text-sky-700"
             />
             <Feat
-              href="/parent"
+              href="/common-room"
               icon={<ShieldCheck className="h-5 w-5" />}
-              title="Parent Portal"
-              desc="Focus alerts on WhatsApp"
+              title="Common Room"
+              desc="Doubt wall with classmates"
               tone="bg-emerald-50 text-emerald-700"
             />
           </div>
