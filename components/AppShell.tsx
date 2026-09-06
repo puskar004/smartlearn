@@ -54,8 +54,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isTeacher = role === "teacher";
-  // Students: focus lock only outside teacher routes; teachers never locked
-  const studentFocus = !isTeacher && !locked;
 
   return (
     <div
@@ -65,7 +63,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
     >
       <UserBootstrap />
-      {studentFocus && <FocusLock />}
+      {/* Tab-switch warning: students only (FocusLock skips /teacher) */}
+      {!isTeacher && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
       <SessionLockChrome />
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth, useUser } from "@clerk/nextjs";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Shield } from "lucide-react";
 import {
@@ -15,7 +16,7 @@ import { displayName } from "@/lib/display-name";
 const PARENT_KEY = "sl_parent_phone";
 const FOCUS_KEY = "sl_focus_lock_enabled";
 const SWITCH_COUNT_KEY = "sl_tab_switch_count_";
-const COOLDOWN_MS = 20_000;
+const COOLDOWN_MS = 3_000;
 
 function parentKey(userId?: string | null) {
   return userId ? `${PARENT_KEY}_${userId}` : PARENT_KEY;
@@ -58,13 +59,18 @@ function isPdfReading() {
   return document.documentElement.dataset.pdfOpen === "1";
 }
 
+/** Student-only tab-switch guardian (never on teacher routes). */
 export default function FocusLock() {
   const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
+  const path = usePathname() || "";
   const [banner, setBanner] = useState<string | null>(null);
+  const [count, setCount] = useState(0);
   const [role, setRole] = useState<"student" | "teacher">("student");
   const lastAlert = useRef(0);
   const armed = useRef(false);
+
+  const onTeacher = path.startsWith("/teacher");
 
   useEffect(() => {
     const sync = () => {
@@ -82,6 +88,7 @@ export default function FocusLock() {
   const alertParent = useCallback(() => {
     if (!isSignedIn || !userId) return;
     if (getRole(userId) !== "student") return;
+    if (path.startsWith("/teacher")) return;
     if (!isFocusLockEnabled()) return;
     if (isPdfReading()) return;
 
@@ -89,27 +96,34 @@ export default function FocusLock() {
     if (now - lastAlert.current < COOLDOWN_MS) return;
     lastAlert.current = now;
 
-    const count = getTabSwitchCount(userId) + 1;
-    localStorage.setItem(SWITCH_COUNT_KEY + userId, String(count));
+    const n = getTabSwitchCount(userId) + 1;
+    localStorage.setItem(SWITCH_COUNT_KEY + userId, String(n));
+    setCount(n);
 
     const name = displayName(user);
-    const msg = buildParentTabSwitchMessage(name, count);
+    const msg = buildParentTabSwitchMessage(name, n);
     const phone = getParentPhone(userId);
     const sent = phone ? openParentWhatsApp(phone, msg) : false;
 
     setBanner(
       sent
-        ? `Tab switch #${count} — parent WhatsApp opened with alert message.`
-        : `Tab switch #${count} — set parent WhatsApp in Profile to auto-alert.`
+        ? `Tab switch #${n} detected! Parent WhatsApp alert opened.`
+        : `Tab switch #${n} detected! Stay on SmartLearn. Set parent number in Profile for WhatsApp alerts.`
     );
 
     pushNotification(userId, {
-      title: `Tab switch #${count}`,
+      title: `Tab switch #${n}`,
       body: sent
-        ? `Parent alert sent. Message: “${msg.slice(0, 120)}…”`
-        : `No parent number set. Would have sent: “${msg.slice(0, 100)}…”`,
+        ? `Parent alert sent.`
+        : `Stay focused. Parent number not set.`,
       href: "/parent",
     });
+
+    try {
+      void document.documentElement.requestFullscreen?.();
+    } catch {
+      // ignore
+    }
 
     try {
       const Ctx =
@@ -121,28 +135,29 @@ export default function FocusLock() {
       const g = ctx.createGain();
       o.connect(g);
       g.connect(ctx.destination);
-      o.frequency.value = 880;
-      g.gain.value = 0.06;
+      o.frequency.value = 920;
+      g.gain.value = 0.08;
       o.start();
       setTimeout(() => {
         o.stop();
         void ctx.close();
-      }, 350);
+      }, 400);
     } catch {
       // ignore
     }
 
-    window.setTimeout(() => setBanner(null), 7000);
-  }, [isSignedIn, user, userId]);
+    window.setTimeout(() => setBanner(null), 8000);
+  }, [isSignedIn, user, userId, path]);
 
   useEffect(() => {
     if (!isSignedIn || !userId) return;
     if (role !== "student") return;
+    if (onTeacher) return;
 
     armed.current = false;
     const armTimer = window.setTimeout(() => {
       armed.current = true;
-    }, 2000);
+    }, 1500);
 
     const onVis = () => {
       if (!armed.current) return;
@@ -152,25 +167,49 @@ export default function FocusLock() {
       }
     };
 
+    const onBlur = () => {
+      if (!armed.current) return;
+      if (isPdfReading()) return;
+      // blur often fires with tab switch
+      if (document.visibilityState === "hidden") alertParent();
+    };
+
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.clearTimeout(armTimer);
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("blur", onBlur);
     };
-  }, [isSignedIn, userId, role, alertParent]);
+  }, [isSignedIn, userId, role, onTeacher, alertParent]);
 
-  if (!isSignedIn || role !== "student" || !banner) return null;
+  if (!isSignedIn || role !== "student" || onTeacher || !banner) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-[90] w-[min(92vw,420px)] -translate-x-1/2 rounded-2xl border border-amber-500/40 bg-slate-950/95 px-4 py-3 shadow-2xl backdrop-blur">
-      <div className="flex items-start gap-3 text-sm text-amber-100">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-        <div>
-          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-300">
-            <Shield className="h-3.5 w-3.5" /> Focus Guardian (Student)
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-slate-300">{banner}</p>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-amber-400/50 bg-slate-900 p-6 text-center shadow-2xl">
+        <AlertTriangle className="mx-auto h-10 w-10 text-amber-400" />
+        <div className="mt-3 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-300">
+          <Shield className="h-3.5 w-3.5" /> Focus Guardian · Student only
         </div>
+        <p className="mt-3 text-sm font-semibold text-white">{banner}</p>
+        <p className="mt-2 text-xs text-slate-400">
+          Tab switches this session: <strong className="text-amber-300">{count}</strong>
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setBanner(null);
+            try {
+              void document.documentElement.requestFullscreen?.();
+            } catch {
+              // ignore
+            }
+          }}
+          className="mt-5 w-full rounded-xl bg-amber-500 py-3 text-sm font-bold text-slate-950 hover:bg-amber-400"
+        >
+          Back to study (fullscreen)
+        </button>
       </div>
     </div>
   );

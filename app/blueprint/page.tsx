@@ -29,51 +29,24 @@ type PlanDay = {
   items: { subject: string; subjectId: string; chapter: Chapter; focus: string }[];
 };
 
-const SUBJECT_TABS: {
-  id: string;
-  label: string;
-  match: (name: string, id: string) => boolean;
-  icon: string;
-}[] = [
-  {
-    id: "physics",
-    label: "Physics",
-    match: (n, id) => id === "physics" || n.includes("Physics"),
-    icon: "⚛️",
-  },
-  {
-    id: "chemistry",
-    label: "Chemistry",
-    match: (n, id) => id === "chemistry" || n.includes("Chemistry"),
-    icon: "🧪",
-  },
-  {
-    id: "maths",
-    label: "Mathematics",
-    match: (n, id) => id === "maths" || n.includes("Math"),
-    icon: "∑",
-  },
-  {
-    id: "biology",
-    label: "Biology",
-    match: (n, id) => id === "biology" || n.includes("Biology"),
-    icon: "🌿",
-  },
-  {
-    id: "english",
-    label: "English",
-    match: (n, id) => id === "english" || n.includes("English"),
-    icon: "📘",
-  },
-  {
-    id: "other",
-    label: "Other",
-    match: (n, id) =>
-      !["physics", "chemistry", "maths", "biology", "english"].includes(id) &&
-      !/physics|chemistry|math|biology|english/i.test(n),
-    icon: "▦",
-  },
-];
+const SUBJECT_ICONS: Record<string, string> = {
+  physics: "⚛️",
+  chemistry: "🧪",
+  maths: "∑",
+  mathematics: "∑",
+  biology: "🌿",
+  english: "📘",
+  hindi: "📗",
+  "social science": "🌍",
+  sst: "🌍",
+  "computer science": "💻",
+  cs: "💻",
+  "information technology": "🖥️",
+  it: "🖥️",
+  accountancy: "📒",
+  "business studies": "💼",
+  economics: "📈",
+};
 
 function buildPlan(
   chapterIds: string[],
@@ -143,12 +116,27 @@ export default function BlueprintPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [doneChapters, setDoneChapters] = useState<string[]>([]);
   const [doneDays, setDoneDays] = useState<string[]>([]);
-  const [subjectTab, setSubjectTab] = useState("physics");
+  const [subjectTab, setSubjectTab] = useState("");
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlanDay[]>([]);
   const [view, setView] = useState<"builder" | "plan">("builder");
 
   const pack = CURRICULUM.find((g) => g.grade === grade)!;
+
+  /** One tab per real subject — never merge into “Other” */
+  const subjectTabs = useMemo(
+    () =>
+      pack.subjects.map((s) => ({
+        id: s.id,
+        label: s.name,
+        icon:
+          SUBJECT_ICONS[s.id] ||
+          SUBJECT_ICONS[s.name.toLowerCase()] ||
+          s.icon ||
+          "📚",
+      })),
+    [pack]
+  );
 
   useEffect(() => {
     if (!userId) return;
@@ -168,16 +156,15 @@ export default function BlueprintPage() {
       );
       setPlan(built);
     }
-    // default subject tab to first available
-    const first = SUBJECT_TABS.find((t) =>
-      prog.grade
-        ? CURRICULUM.find((g) => g.grade === prog.grade)!.subjects.some((s) =>
-            t.match(s.name, s.id)
-          )
-        : true
-    );
-    if (first) setSubjectTab(first.id);
+    const packG = CURRICULUM.find((g) => g.grade === prog.grade)!;
+    setSubjectTab(packG.subjects[0]?.id || "");
   }, [userId]);
+
+  useEffect(() => {
+    if (!subjectTab && pack.subjects[0]) {
+      setSubjectTab(pack.subjects[0].id);
+    }
+  }, [pack, subjectTab]);
 
   const daysLeft = useMemo(() => {
     if (!examDate) return null;
@@ -185,8 +172,7 @@ export default function BlueprintPage() {
   }, [examDate]);
 
   const subjectsForTab = useMemo(() => {
-    const tab = SUBJECT_TABS.find((t) => t.id === subjectTab) || SUBJECT_TABS[0];
-    return pack.subjects.filter((s) => tab.match(s.name, s.id));
+    return pack.subjects.filter((s) => s.id === subjectTab);
   }, [pack, subjectTab]);
 
   const totalInTab = subjectsForTab.reduce(
@@ -450,7 +436,8 @@ export default function BlueprintPage() {
                 setGrade(g);
                 setSelected([]);
                 setPlan([]);
-                setSubjectTab("physics");
+                const nextPack = CURRICULUM.find((x) => x.grade === g)!;
+                setSubjectTab(nextPack.subjects[0]?.id || "");
                 if (userId) {
                   const prog = loadProgress(userId);
                   saveProgress({ ...prog, grade: g, planChapterIds: [] });
@@ -550,25 +537,21 @@ export default function BlueprintPage() {
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {SUBJECT_TABS.map((t) => {
-                const has = pack.subjects.some((s) => t.match(s.name, s.id));
-                if (!has) return null;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setSubjectTab(t.id)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition",
-                      subjectTab === t.id
-                        ? "bg-violet-600 text-white shadow-md shadow-violet-600/25"
-                        : "bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-800"
-                    )}
-                  >
-                    <span>{t.icon}</span> {t.label}
-                  </button>
-                );
-              })}
+              {subjectTabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSubjectTab(t.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition",
+                    subjectTab === t.id
+                      ? "bg-violet-600 text-white shadow-md shadow-violet-600/25"
+                      : "bg-slate-50 text-slate-600 hover:bg-violet-50 hover:text-violet-800"
+                  )}
+                >
+                  <span>{t.icon}</span> {t.label}
+                </button>
+              ))}
             </div>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">

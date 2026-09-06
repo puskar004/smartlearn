@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import {
@@ -43,6 +43,7 @@ export default function StudentTestPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
+  const [proctorReady, setProctorReady] = useState(false);
   const [result, setResult] = useState<{
     score: number;
     total: number;
@@ -53,15 +54,64 @@ export default function StudentTestPage() {
   useEffect(() => {
     if (inTest) {
       setSessionLock(true, "test");
+      try {
+        void document.documentElement.requestFullscreen?.();
+      } catch {
+        // ignore
+      }
       return () => setSessionLock(false);
     }
     setSessionLock(false);
+    setProctorReady(false);
   }, [inTest]);
+
+  const submit = useCallback(
+    async (auto = false, reason?: string) => {
+      if (!test || submitting || result) return;
+      setSubmitting(true);
+      setError(reason || null);
+      try {
+        const res = await fetch("/api/tests", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "submit",
+            code: test.code,
+            answers: answers.map((a) => (a < 0 ? -1 : a)),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Submit failed");
+        setResult({ score: data.result.score, total: data.result.total });
+        if (auto && !reason) setError("Time over — answers auto-submitted.");
+        if (reason) setError(reason);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed");
+        // still exit UI on proctor fail
+        if (reason) {
+          setResult({ score: 0, total: test.questions.length });
+        }
+      } finally {
+        setSubmitting(false);
+        setSessionLock(false);
+      }
+    },
+    [test, submitting, result, answers]
+  );
+
+  const onProctorFail = useCallback(
+    (reason: string) => {
+      void submit(true, reason);
+    },
+    [submit]
+  );
 
   const join = async (e?: FormEvent) => {
     e?.preventDefault();
     if (!consent) {
-      setError("Allow proctoring (screen + mic every 1 min) to start the test.");
+      setError(
+        "Allow camera (ON) + mic + THIS TAB screen share to start the test."
+      );
       return;
     }
     setError(null);
@@ -94,33 +144,7 @@ export default function StudentTestPage() {
       if (s <= 0) void submit(true);
     }, 1000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [test, result]);
-
-  const submit = async (auto = false) => {
-    if (!test || submitting || result) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/tests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "submit",
-          code: test.code,
-          answers: answers.map((a) => (a < 0 ? -1 : a)),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Submit failed");
-      setResult({ score: data.result.score, total: data.result.total });
-      if (auto) setError("Time over — answers auto-submitted.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  }, [test, result, submit]);
 
   if (!isSignedIn) {
     return (
@@ -149,7 +173,14 @@ export default function StudentTestPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-3 py-6 sm:px-6 sm:py-10">
-      <TestProctor active={inTest} testCode={test?.code || ""} />
+      {inTest && (
+        <TestProctor
+          active={inTest}
+          testCode={test!.code}
+          onProctorFail={onProctorFail}
+          onReady={() => setProctorReady(true)}
+        />
+      )}
 
       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
         <ClipboardList className="h-3.5 w-3.5" /> Live Class Test · proctored
@@ -158,8 +189,9 @@ export default function StudentTestPage() {
         Join teacher test
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Hi {displayName(user)}. During the test: screen lock + every 1 min
-        screenshot &amp; short voice clip go to your teacher.
+        Hi {displayName(user)}. Required: <strong>camera ON</strong>, mic, and
+        share <strong>this SmartLearn tab</strong> (not another window). If you
+        stop sharing → test exits.
       </p>
 
       {!test && (
@@ -182,9 +214,9 @@ export default function StudentTestPage() {
               className="mt-0.5"
             />
             <span>
-              I allow SmartLearn to capture <strong>screen snapshots</strong> and{" "}
-              <strong>short microphone clips</strong> every 1 minute for my
-              teacher during this test only.
+              I will keep <strong>camera shutter ON</strong>, allow mic, and
+              share <strong>only this test tab</strong>. Stopping share or turning
+              camera off ends my test automatically.
             </span>
           </label>
           <button
@@ -203,11 +235,20 @@ export default function StudentTestPage() {
       )}
 
       {error && (
-        <p className="mt-3 text-xs font-semibold text-rose-600">{error}</p>
+        <p className="mt-3 whitespace-pre-wrap text-xs font-semibold text-rose-600">
+          {error}
+        </p>
       )}
 
       {test && !result && (
         <div className="mt-6">
+          {!proctorReady && (
+            <p className="mb-3 rounded-xl bg-slate-900 px-3 py-2 text-xs text-amber-200">
+              Waiting for camera + mic + <strong>This tab</strong> share… In the
+              browser picker choose <em>Chrome Tab / This tab</em> → this
+              SmartLearn page (not another app window).
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3">
             <div>
               <div className="text-sm font-bold text-indigo-900">
@@ -226,7 +267,9 @@ export default function StudentTestPage() {
             </div>
           </div>
 
-          <ol className="mt-6 space-y-5">
+          <ol
+            className={`mt-6 space-y-5 ${!proctorReady ? "pointer-events-none opacity-40" : ""}`}
+          >
             {test.questions.map((q, qi) => (
               <li
                 key={q.id}
@@ -250,6 +293,7 @@ export default function StudentTestPage() {
                         className="mt-1"
                         name={`q-${qi}`}
                         checked={answers[qi] === oi}
+                        disabled={!proctorReady}
                         onChange={() =>
                           setAnswers((a) => {
                             const n = [...a];
@@ -273,7 +317,7 @@ export default function StudentTestPage() {
 
           <button
             type="button"
-            disabled={submitting}
+            disabled={submitting || !proctorReady}
             onClick={() => void submit(false)}
             className="mt-6 w-full rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
           >
@@ -286,11 +330,14 @@ export default function StudentTestPage() {
         <div className="mt-8 rounded-3xl border border-emerald-200 bg-emerald-50 p-8 text-center">
           <Trophy className="mx-auto h-10 w-10 text-amber-500" />
           <p className="mt-3 text-sm font-semibold text-emerald-800">
-            Submitted
+            Test ended
           </p>
           <p className="mt-2 text-4xl font-black text-slate-900">
             {result.score}/{result.total}
           </p>
+          {error && (
+            <p className="mt-2 text-xs font-semibold text-rose-600">{error}</p>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -298,10 +345,11 @@ export default function StudentTestPage() {
               setResult(null);
               setCode("");
               setConsent(false);
+              setError(null);
             }}
             className="mt-4 text-xs font-bold text-indigo-700 underline"
           >
-            Join another test
+            Back
           </button>
         </div>
       )}
