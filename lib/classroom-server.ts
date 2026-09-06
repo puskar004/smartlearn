@@ -426,15 +426,36 @@ export async function listStudentClassrooms(userId: string): Promise<
     let found: { teacherId: string; classroom: Classroom } | null = null;
     const tid = map[code];
     if (tid) found = await getClassroomByTeacher(tid, code);
-    if (!found) found = await findClassroomByCode(code);
-    if (!found) continue;
+    if (!found) {
+      try {
+        found = await findClassroomByCode(code);
+      } catch {
+        found = null;
+      }
+    }
 
-    // backfill map if missing
+    // Always show joined code even if teacher lookup is slow/fails
+    if (!found) {
+      out.push({
+        code,
+        name: `Class ${code}`,
+        teacherName: "Teacher",
+        materials: [],
+        liveSession: null,
+        alerts: [],
+      });
+      continue;
+    }
+
     if (!tid) {
       try {
+        const fresh = await getTeacherMeta(userId);
         await saveMeta(userId, {
-          ...meta,
-          joinedClassMap: { ...map, [code]: found.teacherId },
+          ...fresh,
+          joinedClassMap: {
+            ...(fresh.joinedClassMap || {}),
+            [code]: found.teacherId,
+          },
         });
       } catch {
         // ignore
@@ -445,13 +466,15 @@ export async function listStudentClassrooms(userId: string): Promise<
     const kicked = Boolean(
       sess?.active && (sess.kickedIds || []).includes(userId)
     );
+    // Keep all materials with a url (http, /api, or data)
+    const materials = (found.classroom.materials || []).filter(
+      (m) => m && m.url && String(m.url).trim().length > 0
+    );
     out.push({
       code: found.classroom.code,
-      name: found.classroom.name,
-      teacherName: found.classroom.teacherName,
-      materials: (found.classroom.materials || []).filter(
-        (m) => m.url && !String(m.url).startsWith("data:")
-      ),
+      name: found.classroom.name || `Class ${code}`,
+      teacherName: found.classroom.teacherName || "Teacher",
+      materials,
       liveSession: sess
         ? {
             ...sess,
