@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import {
@@ -56,6 +63,7 @@ export default function StudentTestPage() {
   const [consent, setConsent] = useState(false);
   const [proctorReady, setProctorReady] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [isFs, setIsFs] = useState(false);
   const [result, setResult] = useState<{
     score: number;
     total: number;
@@ -63,6 +71,16 @@ export default function StudentTestPage() {
 
   const inTest = Boolean(test && !result);
   const n = test?.questions.length || 0;
+  /** Can answer only when proctor ready AND fullscreen */
+  const canAttempt = proctorReady && isFs;
+
+  const markedList = useMemo(() => {
+    const list: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (marked[i]) list.push(i);
+    }
+    return list;
+  }, [n, marked]);
 
   const statusOf = useCallback(
     (i: number): QStatus => {
@@ -100,23 +118,58 @@ export default function StudentTestPage() {
     setSetupError(null);
   }, [inTest]);
 
-  // Start exam clock only after proctor is ready (permissions don't burn timer)
+  // Track fullscreen — required to attempt
   useEffect(() => {
-    if (!proctorReady || !test || result) return;
-    const secs = Math.max(60, test.durationMin * 60);
-    setLeft(secs);
-    // try fullscreen after permissions so dialogs aren't blocked
-    const t = window.setTimeout(() => {
-      try {
-        if (!document.fullscreenElement) {
-          void document.documentElement.requestFullscreen?.();
-        }
-      } catch {
-        // ignore — some browsers block FS with screen share
+    const syncFs = () => {
+      setIsFs(Boolean(document.fullscreenElement));
+    };
+    syncFs();
+    document.addEventListener("fullscreenchange", syncFs);
+    document.addEventListener("webkitfullscreenchange", syncFs as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFs);
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        syncFs as EventListener
+      );
+    };
+  }, []);
+
+  // Start exam clock only after proctor ready + fullscreen (once)
+  const timerStarted = useRef(false);
+  useEffect(() => {
+    if (!inTest) timerStarted.current = false;
+  }, [inTest]);
+  useEffect(() => {
+    if (!proctorReady || !isFs || !test || result) return;
+    if (timerStarted.current) return;
+    timerStarted.current = true;
+    setLeft(Math.max(60, test.durationMin * 60));
+  }, [proctorReady, isFs, test, result]);
+
+  const enterFullscreen = async () => {
+    try {
+      const el = document.documentElement;
+      const req =
+        el.requestFullscreen?.bind(el) ||
+        (
+          el as HTMLElement & {
+            webkitRequestFullscreen?: () => Promise<void> | void;
+          }
+        ).webkitRequestFullscreen?.bind(el);
+      if (!req) {
+        setError("Fullscreen not supported. Use Chrome/Edge on desktop.");
+        return;
       }
-    }, 500);
-    return () => window.clearTimeout(t);
-  }, [proctorReady, test, result]);
+      await Promise.resolve(req());
+      setIsFs(true);
+      setError(null);
+    } catch {
+      setError(
+        "Allow fullscreen when the browser asks. Test can only run in fullscreen."
+      );
+    }
+  };
 
   const goTo = (i: number) => {
     if (!test) return;
@@ -179,7 +232,7 @@ export default function StudentTestPage() {
   );
 
   const requestSubmit = useCallback(() => {
-    if (!test || !proctorReady || submitting) return;
+    if (!test || !canAttempt || submitting) return;
     const incomplete =
       counts.not_answered + counts.not_visited + counts.marked;
     if (incomplete > 0) {
@@ -189,7 +242,7 @@ export default function StudentTestPage() {
       if (!ok) return;
     }
     void submit(false);
-  }, [test, proctorReady, submitting, counts, submit]);
+  }, [test, canAttempt, submitting, counts, submit]);
 
   const onProctorFail = useCallback(
     (reason: string) => {
@@ -355,10 +408,31 @@ export default function StudentTestPage() {
                 <>
                   Allow <strong>camera + mic</strong>, then share{" "}
                   <strong>This tab / Chrome Tab</strong> → this SmartLearn page.
-                  Setup mistakes will <em>not</em> auto-submit — use Retry.
+                  Then enter <strong>fullscreen</strong> to attempt.
                 </>
               )}
             </p>
+          )}
+
+          {/* Fullscreen gate — must be FS to attempt */}
+          {proctorReady && !isFs && (
+            <div className="mb-3 flex flex-col items-center gap-3 rounded-2xl border-2 border-rose-400 bg-rose-50 px-4 py-6 text-center">
+              <Shield className="h-8 w-8 text-rose-600" />
+              <p className="text-sm font-bold text-rose-900">
+                Fullscreen required to attempt the test
+              </p>
+              <p className="max-w-md text-xs text-rose-800/80">
+                Questions stay locked until you enter fullscreen. If you exit
+                fullscreen mid-test, answering pauses until you return.
+              </p>
+              <button
+                type="button"
+                onClick={() => void enterFullscreen()}
+                className="rounded-xl bg-rose-600 px-6 py-3 text-sm font-black text-white shadow-lg hover:bg-rose-500"
+              >
+                Enter fullscreen &amp; start answering
+              </button>
+            </div>
           )}
 
           {/* Top bar */}
@@ -367,12 +441,13 @@ export default function StudentTestPage() {
               <div className="text-sm font-bold">{test.title}</div>
               <div className="text-[11px] text-sky-200">
                 {test.teacherName} · {test.code} · Q {qi + 1}/{n}
+                {isFs ? " · FULLSCREEN" : " · FS OFF"}
               </div>
             </div>
             <div className="flex items-center gap-3">
               <div className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 font-mono text-sm font-black shadow">
                 <Timer className="h-4 w-4" />
-                {mm}:{ss}
+                {canAttempt ? `${mm}:${ss}` : "--:--"}
               </div>
               <span className="hidden items-center gap-1 text-[10px] font-bold uppercase text-amber-200 sm:inline-flex">
                 <Shield className="h-3 w-3" /> Proctored
@@ -382,8 +457,8 @@ export default function StudentTestPage() {
 
           <div
             className={cn(
-              "grid gap-0 border border-t-0 border-slate-200 bg-slate-50 lg:grid-cols-[1fr_280px]",
-              !proctorReady && "pointer-events-none opacity-50"
+              "grid gap-0 border border-t-0 border-slate-200 bg-slate-50 lg:grid-cols-[1fr_300px]",
+              !canAttempt && "pointer-events-none opacity-40"
             )}
           >
             {/* Question panel */}
@@ -405,7 +480,7 @@ export default function StudentTestPage() {
                     <button
                       key={oi}
                       type="button"
-                      disabled={!proctorReady}
+                      disabled={!canAttempt}
                       onClick={() => {
                         setAnswers((a) => {
                           const n2 = [...a];
@@ -445,7 +520,7 @@ export default function StudentTestPage() {
               <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                 <button
                   type="button"
-                  disabled={!proctorReady}
+                  disabled={!canAttempt}
                   onClick={() => {
                     setAnswers((a) => {
                       const n2 = [...a];
@@ -459,11 +534,11 @@ export default function StudentTestPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={!proctorReady}
+                  disabled={!canAttempt}
                   onClick={() => {
                     setMarked((m) => {
                       const n2 = [...m];
-                      n2[qi] = !n2[qi];
+                      n2[qi] = true;
                       return n2;
                     });
                     setVisited((v) => {
@@ -479,7 +554,7 @@ export default function StudentTestPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={!proctorReady || qi <= 0}
+                  disabled={!canAttempt || qi <= 0}
                   onClick={() => goTo(qi - 1)}
                   className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 disabled:opacity-40"
                 >
@@ -488,7 +563,7 @@ export default function StudentTestPage() {
                 {qi < n - 1 ? (
                   <button
                     type="button"
-                    disabled={!proctorReady}
+                    disabled={!canAttempt}
                     onClick={() => {
                       setVisited((v) => {
                         const n2 = [...v];
@@ -504,7 +579,7 @@ export default function StudentTestPage() {
                 ) : (
                   <button
                     type="button"
-                    disabled={!proctorReady || submitting}
+                    disabled={!canAttempt || submitting}
                     onClick={() => requestSubmit()}
                     className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
                   >
@@ -513,11 +588,10 @@ export default function StudentTestPage() {
                 )}
               </div>
 
-              {/* Always-visible submit on last Q + sticky bar */}
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  disabled={!proctorReady || submitting}
+                  disabled={!canAttempt || submitting}
                   onClick={() => requestSubmit()}
                   className="w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-black text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 disabled:opacity-50"
                 >
@@ -536,7 +610,7 @@ export default function StudentTestPage() {
                 Question palette
               </div>
 
-              <div className="mt-3 grid grid-cols-5 gap-2 sm:grid-cols-5">
+              <div className="mt-3 grid grid-cols-5 gap-2">
                 {test.questions.map((_, i) => {
                   const st = statusOf(i);
                   const current = i === qi;
@@ -544,7 +618,7 @@ export default function StudentTestPage() {
                     <button
                       key={i}
                       type="button"
-                      disabled={!proctorReady}
+                      disabled={!canAttempt}
                       onClick={() => goTo(i)}
                       className={cn(
                         "flex h-9 w-full items-center justify-center rounded-lg text-xs font-black shadow-sm transition",
@@ -557,6 +631,42 @@ export default function StudentTestPage() {
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Marked for review — separate list for later access */}
+              <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-violet-800">
+                  <Bookmark className="h-3.5 w-3.5" />
+                  Marked for review ({markedList.length})
+                </div>
+                {markedList.length === 0 ? (
+                  <p className="mt-2 text-[10px] text-violet-600/80">
+                    No questions marked. Use “Mark for review” to save for later.
+                  </p>
+                ) : (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {markedList.map((i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        disabled={!canAttempt}
+                        onClick={() => goTo(i)}
+                        className={cn(
+                          "flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-black text-white shadow",
+                          answers[i] >= 0
+                            ? "bg-violet-600 ring-2 ring-emerald-300"
+                            : "bg-violet-500",
+                          qi === i && "ring-2 ring-offset-1 ring-slate-900"
+                        )}
+                      >
+                        Q{i + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-2 text-[10px] text-violet-700">
+                  Tap a number to jump back anytime.
+                </p>
               </div>
 
               {/* Legend */}
@@ -591,11 +701,15 @@ export default function StudentTestPage() {
                     {counts.answered + counts.answered_marked}
                   </strong>
                 </div>
+                <div className="mt-1 flex justify-between text-violet-700">
+                  <span>For review</span>
+                  <strong>{markedList.length}</strong>
+                </div>
               </div>
 
               <button
                 type="button"
-                disabled={submitting || !proctorReady}
+                disabled={submitting || !canAttempt}
                 onClick={() => requestSubmit()}
                 className="mt-4 w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-black text-white shadow hover:bg-emerald-500 disabled:opacity-60"
               >
@@ -604,16 +718,25 @@ export default function StudentTestPage() {
             </aside>
           </div>
 
-          {/* Mobile sticky submit */}
           <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-white/95 p-3 backdrop-blur lg:hidden">
-            <button
-              type="button"
-              disabled={submitting || !proctorReady}
-              onClick={() => requestSubmit()}
-              className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white disabled:opacity-50"
-            >
-              {submitting ? "Submitting…" : "Submit test"}
-            </button>
+            {!isFs ? (
+              <button
+                type="button"
+                onClick={() => void enterFullscreen()}
+                className="w-full rounded-xl bg-rose-600 py-3 text-sm font-black text-white"
+              >
+                Enter fullscreen to continue
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={submitting || !canAttempt}
+                onClick={() => requestSubmit()}
+                className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white disabled:opacity-50"
+              >
+                {submitting ? "Submitting…" : "Submit test"}
+              </button>
+            )}
           </div>
         </div>
       )}
