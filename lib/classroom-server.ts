@@ -222,11 +222,30 @@ export async function listTeacherClassrooms(
 ): Promise<Classroom[]> {
   const meta = await getTeacherMeta(teacherId);
   const rooms = meta.classrooms || [];
-  // Merge materialBank into each room so teacher UI + students stay in sync
-  return rooms.map((r) => ({
-    ...r,
-    materials: materialsForRoom(meta, r.code, r),
-  }));
+  let fileBank: Record<string, TeacherMaterial[]> = {};
+  try {
+    const { getMaterialsForTeacher } = await import(
+      "@/lib/materials-bank-store"
+    );
+    fileBank = await getMaterialsForTeacher(teacherId);
+  } catch {
+    // ignore
+  }
+  return rooms.map((r) => {
+    const merged = materialsForRoom(meta, r.code, r);
+    const extra = fileBank[r.code] || [];
+    const map = new Map<string, TeacherMaterial>();
+    for (const m of [...extra, ...merged]) {
+      if (!m?.url) continue;
+      map.set(m.id || m.url, m);
+    }
+    return {
+      ...r,
+      materials: Array.from(map.values()).sort(
+        (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+      ),
+    };
+  });
 }
 
 export async function getClassroomForTeacher(
@@ -505,11 +524,27 @@ export async function listStudentClassrooms(userId: string): Promise<
     const kicked = Boolean(
       sess?.active && (sess.kickedIds || []).includes(userId)
     );
-    // Pull materials from teacher materialBank + classroom
+    // Pull materials: file bank + clerk bank + classroom
     let materials: TeacherMaterial[] = [];
     try {
       const tMeta = await getTeacherMeta(found.teacherId);
       materials = materialsForRoom(tMeta, code, found.classroom);
+      try {
+        const { getMaterialsFromBank } = await import(
+          "@/lib/materials-bank-store"
+        );
+        const fileMats = await getMaterialsFromBank(found.teacherId, code);
+        const map = new Map<string, TeacherMaterial>();
+        for (const m of [...fileMats, ...materials]) {
+          if (!m?.url) continue;
+          map.set(m.id || m.url, m);
+        }
+        materials = Array.from(map.values()).sort(
+          (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+        );
+      } catch {
+        // ignore file bank
+      }
     } catch {
       materials = (found.classroom.materials || []).filter(
         (m) => m && m.url && String(m.url).trim().length > 0
@@ -551,143 +586,125 @@ export async function addMaterialToClass(
   code: string,
   material: Omit<TeacherMaterial, "id" | "createdAt">
 ) {
-  const url = String(material.url || "").trim();
-  if (!url || url.startsWith("data:")) {
+  let url = String(material.url || "").trim();
+  // Never put huge data-URLs into Clerk
+  if (url.startsWith("data:") && url.length > 120_000) {
     throw new Error(
-      "Invalid file URL. Use Publish after selecting PDF, or paste a Drive https link."
+      "PDF too large to embed. Use a smaller file or a Google Drive link."
     );
+  }
+  if (!url) {
+    throw new Error("Missing file URL.");
   }
   if (
     !url.startsWith("http://") &&
     !url.startsWith("https://") &&
-    !url.startsWith("/api/")
+    !url.startsWith("/api/") &&
+    !url.startsWith("data:")
   ) {
-    throw new Error("Material link must be https:// or uploaded file URL.");
+    throw new Error("Material link must be https://, /api/…, or uploaded file.");
   }
 
   const normalized = code.trim().toUpperCase();
   const m: TeacherMaterial = {
     ...material,
-    url: url.slice(0, 500),
+    url: url.startsWith("data:") ? url : url.slice(0, 500),
     title: String(material.title || "Notes").slice(0, 120),
     subject: String(material.subject || "General").slice(0, 60),
     id: `mat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     createdAt: Date.now(),
   };
 
+  // 1) File store first (works even if Clerk 422)
+  try {
+    const { addMaterialToBank } = await import("@/lib/materials-bank-store");
+    await addMaterialToBank(teacherId, normalized, m);
+  } catch (e) {
+    console.error("materials-bank-store", e);
+  }
+
+  // 2) Tiny Clerk write: materialBank only for THIS code (no classrooms rewrite)
   const client = await clerkClient();
   const user = await client.users.getUser(teacherId);
   const meta = metaOf(user);
   const bank = { ...(meta.materialBank || {}) };
-  // Keep bank lean: short urls preferred; allow small data: urls
-  bank[normalized] = [m, ...(bank[normalized] || [])]
-    .filter((x) => x?.url)
-    .slice(0, 20);
-
-  const rooms = meta.classrooms || [];
-  const idx = rooms.findIndex((c) => c.code === normalized);
-  let nextRoom: Classroom | null =
-    idx >= 0 ? { ...rooms[idx] } : null;
-
-  if (nextRoom) {
-    nextRoom = {
-      ...nextRoom,
-      materials: [m, ...(nextRoom.materials || [])]
-        .filter((x) => x?.url && !String(x.url).startsWith("data:"))
-        .slice(0, 15),
-      alerts: pushAlert(nextRoom, {
-        kind: "material",
-        title: `New ${m.subject} notes`,
-        body: `${m.title} · ${m.subject}`,
-        href: "/join-class",
-      }),
-    };
-  } else {
-    nextRoom = {
-      code: normalized,
-      name: normalized,
-      teacherId,
-      teacherName: material.teacherName || "Teacher",
-      createdAt: Date.now(),
-      students: [],
-      materials: m.url.startsWith("data:") ? [] : [m],
-      liveSession: null,
-      alerts: [],
-      attendanceLog: [],
-    };
+  const prev = bank[normalized] || [];
+  bank[normalized] = [m, ...prev]
+    .filter((x) => x?.url && !String(x.url).startsWith("data:"))
+    .slice(0, 15);
+  // If only data url available, still keep one short entry pointing to /api key if possible
+  if (!bank[normalized].length && m.url) {
+    bank[normalized] = [
+      {
+        ...m,
+        url: m.url.startsWith("data:")
+          ? m.url.slice(0, 100) // won't open — prefer file store
+          : m.url,
+      },
+    ];
+    // Prefer not storing data in clerk at all
+    if (m.url.startsWith("data:")) {
+      bank[normalized] = [
+        {
+          ...m,
+          url: m.url, // small data only if short
+        },
+      ].filter((x) => x.url.length < 100_000);
+    }
   }
 
-  // Minimal metadata write: materialBank is source of truth (avoid 422 on fat classrooms)
-  const classrooms = [...rooms];
-  if (idx >= 0) classrooms[idx] = nextRoom;
-  else classrooms.unshift(nextRoom);
-
-  const slimRooms = classrooms.slice(0, 20).map((c) => {
-    if (c.code !== normalized) {
-      // don't re-expand other rooms — keep as stored, strip heavy fields lightly
-      return {
-        ...c,
-        students: (c.students || []).slice(0, 50).map((s) => ({
-          ...s,
-          recentMistakes: (s.recentMistakes || []).slice(0, 2),
-        })),
-        materials: (c.materials || [])
-          .filter((x) => x.url && !x.url.startsWith("data:"))
-          .slice(0, 10),
-        alerts: (c.alerts || []).slice(0, 8),
-        attendanceLog: (c.attendanceLog || []).slice(0, 10),
-      };
-    }
-    return {
-      ...c,
-      students: (c.students || []).slice(0, 50).map((s) => ({
-        ...s,
-        recentMistakes: (s.recentMistakes || []).slice(0, 2),
-      })),
-      materials: (c.materials || [])
-        .filter((x) => x.url && !x.url.startsWith("data:"))
-        .slice(0, 15),
-      alerts: (c.alerts || []).slice(0, 8),
-      attendanceLog: (c.attendanceLog || []).slice(0, 10),
-    };
-  });
-
   try {
+    // Deep-merge safe: replace smartlearn but keep classrooms reference from meta WITHOUT reserializing students
+    const slimBank = lightMaterialBank(bank);
     await client.users.updateUserMetadata(teacherId, {
       publicMetadata: {
         ...user.publicMetadata,
         smartlearn: {
-          ...meta,
-          role: "teacher",
-          materialBank: lightMaterialBank(bank),
-          classrooms: slimRooms,
+          role: meta.role || "teacher",
+          activeClassCode: meta.activeClassCode || normalized,
+          materialBank: slimBank,
+          // keep classrooms as already stored — do not re-send fat payload
+          classrooms: meta.classrooms || [],
+          teacherRemarks: meta.teacherRemarks || [],
         },
       },
     });
   } catch (e) {
-    // Last resort: only materialBank (students still see notes)
-    console.error("addMaterial full save failed, bank-only", e);
-    await client.users.updateUserMetadata(teacherId, {
-      publicMetadata: {
-        ...user.publicMetadata,
-        smartlearn: {
-          ...meta,
-          role: "teacher",
-          materialBank: lightMaterialBank(bank),
-        },
-      },
-    });
+    console.error("clerk materialBank save", e);
+    // File bank already has it — continue
   }
 
-  // Return room with materials including bank (so teacher UI shows data: too)
+  // Build response room for teacher UI
+  const rooms = meta.classrooms || [];
+  const existing = rooms.find((c) => c.code === normalized);
+  const fileMats = await (async () => {
+    try {
+      const { getMaterialsFromBank } = await import("@/lib/materials-bank-store");
+      return await getMaterialsFromBank(teacherId, normalized);
+    } catch {
+      return [] as TeacherMaterial[];
+    }
+  })();
+  const materials = [
+    m,
+    ...fileMats.filter((x) => x.id !== m.id),
+    ...((existing?.materials || []) as TeacherMaterial[]),
+  ]
+    .filter((x, i, arr) => arr.findIndex((y) => y.id === x.id || y.url === x.url) === i)
+    .slice(0, 40);
+
   return {
-    ...nextRoom,
-    materials: materialsForRoom(
-      { ...meta, materialBank: bank },
-      normalized,
-      nextRoom
-    ),
-  };
+    code: normalized,
+    name: existing?.name || normalized,
+    teacherId,
+    teacherName: existing?.teacherName || material.teacherName || "Teacher",
+    createdAt: existing?.createdAt || Date.now(),
+    students: existing?.students || [],
+    materials,
+    liveSession: existing?.liveSession || null,
+    alerts: existing?.alerts || [],
+    attendanceLog: existing?.attendanceLog || [],
+  } as Classroom;
 }
 
 /** Materials for a class: bank first, then classroom.materials */
