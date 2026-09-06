@@ -59,18 +59,29 @@ function lightMaterialBank(
   const out: Record<string, TeacherMaterial[]> = {};
   for (const [code, list] of Object.entries(bank || {})) {
     out[code] = (list || [])
-      .filter((m) => m?.url && !String(m.url).startsWith("data:"))
-      .map((m) => ({
-        ...m,
-        url: String(m.url).slice(0, 500),
-        title: String(m.title || "").slice(0, 120),
-        subject: String(m.subject || "General").slice(0, 60),
-        teacherName: String(m.teacherName || "").slice(0, 80),
-        type: m.type || "notes",
-        id: m.id || `mat-${Date.now()}`,
-        createdAt: m.createdAt || Date.now(),
-      }))
-      .slice(0, 30);
+      .filter((m) => m?.url)
+      .map((m) => {
+        const url = String(m.url);
+        // Allow small data URLs (inline PDF); cap huge ones
+        const safeUrl =
+          url.startsWith("data:") && url.length > 280_000
+            ? ""
+            : url.startsWith("data:")
+              ? url
+              : url.slice(0, 500);
+        return {
+          ...m,
+          url: safeUrl,
+          title: String(m.title || "").slice(0, 120),
+          subject: String(m.subject || "General").slice(0, 60),
+          teacherName: String(m.teacherName || "").slice(0, 80),
+          type: m.type || "notes",
+          id: m.id || `mat-${Date.now()}`,
+          createdAt: m.createdAt || Date.now(),
+        };
+      })
+      .filter((m) => m.url)
+      .slice(0, 20);
   }
   return out;
 }
@@ -564,33 +575,34 @@ export async function addMaterialToClass(
     createdAt: Date.now(),
   };
 
-  // 1) Always write materialBank first (source of truth for students)
   const client = await clerkClient();
   const user = await client.users.getUser(teacherId);
   const meta = metaOf(user);
   const bank = { ...(meta.materialBank || {}) };
-  bank[normalized] = [m, ...(bank[normalized] || [])].slice(0, 30);
+  // Keep bank lean: short urls preferred; allow small data: urls
+  bank[normalized] = [m, ...(bank[normalized] || [])]
+    .filter((x) => x?.url)
+    .slice(0, 20);
 
-  // 2) Also mirror onto classroom for teacher UI
   const rooms = meta.classrooms || [];
   const idx = rooms.findIndex((c) => c.code === normalized);
-  let nextRoom: Classroom | null = null;
-  const classrooms = [...rooms];
-  if (idx >= 0) {
-    const c = rooms[idx];
+  let nextRoom: Classroom | null =
+    idx >= 0 ? { ...rooms[idx] } : null;
+
+  if (nextRoom) {
     nextRoom = {
-      ...c,
-      materials: [m, ...(c.materials || [])].slice(0, 40),
-      alerts: pushAlert(c, {
+      ...nextRoom,
+      materials: [m, ...(nextRoom.materials || [])]
+        .filter((x) => x?.url && !String(x.url).startsWith("data:"))
+        .slice(0, 15),
+      alerts: pushAlert(nextRoom, {
         kind: "material",
         title: `New ${m.subject} notes`,
         body: `${m.title} · ${m.subject}`,
         href: "/join-class",
       }),
     };
-    classrooms[idx] = nextRoom;
   } else {
-    // class code missing in list — still keep bank entry
     nextRoom = {
       code: normalized,
       name: normalized,
@@ -598,22 +610,84 @@ export async function addMaterialToClass(
       teacherName: material.teacherName || "Teacher",
       createdAt: Date.now(),
       students: [],
-      materials: [m],
+      materials: m.url.startsWith("data:") ? [] : [m],
       liveSession: null,
       alerts: [],
       attendanceLog: [],
     };
-    classrooms.unshift(nextRoom);
   }
 
-  await saveMeta(teacherId, {
-    ...meta,
-    role: "teacher",
-    classrooms: classrooms.slice(0, 20),
-    materialBank: bank,
+  // Minimal metadata write: materialBank is source of truth (avoid 422 on fat classrooms)
+  const classrooms = [...rooms];
+  if (idx >= 0) classrooms[idx] = nextRoom;
+  else classrooms.unshift(nextRoom);
+
+  const slimRooms = classrooms.slice(0, 20).map((c) => {
+    if (c.code !== normalized) {
+      // don't re-expand other rooms — keep as stored, strip heavy fields lightly
+      return {
+        ...c,
+        students: (c.students || []).slice(0, 50).map((s) => ({
+          ...s,
+          recentMistakes: (s.recentMistakes || []).slice(0, 2),
+        })),
+        materials: (c.materials || [])
+          .filter((x) => x.url && !x.url.startsWith("data:"))
+          .slice(0, 10),
+        alerts: (c.alerts || []).slice(0, 8),
+        attendanceLog: (c.attendanceLog || []).slice(0, 10),
+      };
+    }
+    return {
+      ...c,
+      students: (c.students || []).slice(0, 50).map((s) => ({
+        ...s,
+        recentMistakes: (s.recentMistakes || []).slice(0, 2),
+      })),
+      materials: (c.materials || [])
+        .filter((x) => x.url && !x.url.startsWith("data:"))
+        .slice(0, 15),
+      alerts: (c.alerts || []).slice(0, 8),
+      attendanceLog: (c.attendanceLog || []).slice(0, 10),
+    };
   });
 
-  return nextRoom;
+  try {
+    await client.users.updateUserMetadata(teacherId, {
+      publicMetadata: {
+        ...user.publicMetadata,
+        smartlearn: {
+          ...meta,
+          role: "teacher",
+          materialBank: lightMaterialBank(bank),
+          classrooms: slimRooms,
+        },
+      },
+    });
+  } catch (e) {
+    // Last resort: only materialBank (students still see notes)
+    console.error("addMaterial full save failed, bank-only", e);
+    await client.users.updateUserMetadata(teacherId, {
+      publicMetadata: {
+        ...user.publicMetadata,
+        smartlearn: {
+          ...meta,
+          role: "teacher",
+          materialBank: lightMaterialBank(bank),
+        },
+      },
+    });
+  }
+
+  // Return room with materials including bank (so teacher UI shows data: too)
+  return {
+    ...nextRoom,
+    materials: materialsForRoom(
+      { ...meta, materialBank: bank },
+      normalized,
+      nextRoom
+    ),
+  };
 }
 
 /** Materials for a class: bank first, then classroom.materials */

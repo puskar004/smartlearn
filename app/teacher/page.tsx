@@ -308,11 +308,7 @@ function TeacherInner() {
       setMatFile(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
-      setError(
-        /unprocessable|422|entity|metadata|too large|clerk/i.test(msg)
-          ? "Upload blocked (server limit). Use a Google Drive link: Share → Anyone with the link → paste below."
-          : msg
-      );
+      setError(msg);
     } finally {
       setBusy(false);
     }

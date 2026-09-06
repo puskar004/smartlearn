@@ -4,6 +4,9 @@ import { uploadBufferRemote } from "@/lib/remote-upload";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
+/** In-memory fallback for current serverless instance */
+const mem = new Map<string, { buf: Buffer; contentType: string }>();
+
 function dataDir() {
   return process.env.VERCEL
     ? "/tmp/smartlearn-materials"
@@ -23,7 +26,7 @@ export async function saveMaterialFile(
   if (buf.length > MAX_BYTES) {
     throw new Error(`PDF max ${MAX_BYTES / (1024 * 1024)}MB`);
   }
-  if (buf.length < 50) throw new Error("Empty or invalid file");
+  if (buf.length < 20) throw new Error("Empty or invalid file");
 
   const safeCode = code.replace(/[^A-Z0-9]/gi, "").slice(0, 12) || "CLASS";
   const key = `${safeCode}_${teacherId.slice(0, 10)}_${Date.now()}.${(ext || "pdf").replace(/[^a-z0-9]/gi, "")}`;
@@ -36,8 +39,10 @@ export async function saveMaterialFile(
           ? "image/jpeg"
           : "application/octet-stream";
 
+  // 1) Prefer public durable host
   const remote = await uploadBufferRemote(buf, key, mime);
   if (remote) {
+    mem.set(key, { buf, contentType: mime });
     try {
       await fs.mkdir(dataDir(), { recursive: true });
       await fs.writeFile(path.join(dataDir(), key), buf);
@@ -47,28 +52,43 @@ export async function saveMaterialFile(
     return { key, url: remote, durable: true };
   }
 
-  // Dev local only
-  if (!process.env.VERCEL) {
+  // 2) Local disk + API URL (works in dev; on Vercel may be same-instance only)
+  try {
     await fs.mkdir(dataDir(), { recursive: true });
     await fs.writeFile(path.join(dataDir(), key), buf);
+  } catch {
+    // ignore
+  }
+  mem.set(key, { buf, contentType: mime });
+
+  // 3) Small files: embed as data URL so students always get the file via Clerk bank
+  if (buf.length <= 220_000) {
+    const b64 = buf.toString("base64");
     return {
       key,
-      url: `/api/classroom/material?key=${encodeURIComponent(key)}`,
-      durable: false,
+      url: `data:${mime};base64,${b64}`,
+      durable: true,
     };
   }
 
-  throw new Error(
-    "Could not store PDF online. Paste a Google Drive link (Share → Anyone with the link) instead."
-  );
+  // 4) Serve via our API (student must hit warm instance — better than nothing)
+  return {
+    key,
+    url: `/api/classroom/material?key=${encodeURIComponent(key)}`,
+    durable: false,
+  };
 }
 
 export async function readMaterialFile(
   key: string
 ): Promise<{ buf: Buffer; contentType: string } | null> {
+  const safe = path.basename(key);
+  if (!safe || safe.includes("..")) return null;
+
+  const hit = mem.get(safe);
+  if (hit) return hit;
+
   try {
-    const safe = path.basename(key);
-    if (!safe || safe.includes("..")) return null;
     const buf = await fs.readFile(path.join(dataDir(), safe));
     const lower = safe.toLowerCase();
     let contentType = "application/octet-stream";
@@ -76,6 +96,7 @@ export async function readMaterialFile(
     else if (lower.endsWith(".png")) contentType = "image/png";
     else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
       contentType = "image/jpeg";
+    mem.set(safe, { buf, contentType });
     return { buf, contentType };
   } catch {
     return null;

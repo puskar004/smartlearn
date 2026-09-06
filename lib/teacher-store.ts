@@ -217,10 +217,7 @@ export async function apiUploadMaterialFile(opts: {
     };
   }
   if (!res.ok && !data.error) {
-    data.error =
-      res.status === 422
-        ? "Unprocessable — try a Drive link instead of file upload."
-        : `Upload failed (${res.status})`;
+    data.error = `Upload failed (${res.status}). ${text.slice(0, 80)}`;
   }
   return data;
 }
