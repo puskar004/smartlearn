@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  addTestMoment,
   findTestByCode,
   genTestCode,
   listTeacherTests,
@@ -77,6 +78,30 @@ export async function POST(req: NextRequest) {
     t.active = false;
     await saveTest(t);
     return NextResponse.json({ ok: true, test: t });
+  }
+
+  if (action === "moment") {
+    const code = String(body.code || "");
+    const moment = body.moment || {};
+    const name =
+      user?.fullName ||
+      user?.firstName ||
+      user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ||
+      "Student";
+    try {
+      const moments = await addTestMoment(code, userId, name, {
+        at: Number(moment.at) || Date.now(),
+        imageDataUrl: moment.imageDataUrl,
+        audioDataUrl: moment.audioDataUrl,
+        note: moment.note,
+      });
+      return NextResponse.json({ ok: true, count: moments.length });
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "Moment failed" },
+        { status: 400 }
+      );
+    }
   }
 
   // create

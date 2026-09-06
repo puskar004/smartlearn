@@ -100,3 +100,30 @@ main input[type="file"] {
     transform: translateY(-8px);
   }
 }
+
+/* Responsive orientation: phone / tablet / desktop */
+.sl-responsive-shell {
+  min-height: 100dvh;
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+  .sl-responsive-shell main {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .sl-responsive-shell header {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+}
+
+html.sl-session-lock,
+html.sl-session-lock body {
+  overscroll-behavior: none;
+}
+
+html.sl-session-lock aside {
+  display: none !important;
+}

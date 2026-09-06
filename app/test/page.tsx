@@ -7,10 +7,14 @@ import {
   ClipboardList,
   Loader2,
   LogIn,
+  Shield,
   Timer,
   Trophy,
 } from "lucide-react";
 import { displayName } from "@/lib/display-name";
+import { setSessionLock } from "@/components/SessionLock";
+import TestProctor from "@/components/TestProctor";
+import { getRole } from "@/lib/teacher-store";
 
 type Q = {
   id: string;
@@ -38,13 +42,28 @@ export default function StudentTestPage() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
   const [result, setResult] = useState<{
     score: number;
     total: number;
   } | null>(null);
 
+  const inTest = Boolean(test && !result);
+
+  useEffect(() => {
+    if (inTest) {
+      setSessionLock(true, "test");
+      return () => setSessionLock(false);
+    }
+    setSessionLock(false);
+  }, [inTest]);
+
   const join = async (e?: FormEvent) => {
     e?.preventDefault();
+    if (!consent) {
+      setError("Allow proctoring (screen + mic every 1 min) to start the test.");
+      return;
+    }
     setError(null);
     setResult(null);
     setLoading(true);
@@ -109,7 +128,18 @@ export default function StudentTestPage() {
         <Link href="/login" className="font-bold text-indigo-600 underline">
           Sign in
         </Link>{" "}
-        as student to join a live test with teacher code.
+        as student to join a live test.
+      </div>
+    );
+  }
+
+  if (userId && getRole(userId) === "teacher") {
+    return (
+      <div className="p-10 text-center text-sm text-slate-500">
+        Teachers manage tests at{" "}
+        <Link href="/teacher/test" className="font-bold text-indigo-600">
+          Live Tests
+        </Link>
       </div>
     );
   }
@@ -118,41 +148,56 @@ export default function StudentTestPage() {
   const ss = String(left % 60).padStart(2, "0");
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+    <div className="mx-auto max-w-2xl px-3 py-6 sm:px-6 sm:py-10">
+      <TestProctor active={inTest} testCode={test?.code || ""} />
+
       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-        <ClipboardList className="h-3.5 w-3.5" /> Live Class Test
+        <ClipboardList className="h-3.5 w-3.5" /> Live Class Test · proctored
       </div>
-      <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
+      <h1 className="mt-3 text-2xl font-extrabold text-slate-900 sm:text-3xl">
         Join teacher test
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Enter the code your teacher shared. MCQs appear here · timer · auto
-        submit. Hi {displayName(user)}.
+        Hi {displayName(user)}. During the test: screen lock + every 1 min
+        screenshot &amp; short voice clip go to your teacher.
       </p>
 
       {!test && (
         <form
           onSubmit={(e) => void join(e)}
-          className="mt-8 flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          className="mt-8 space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <input
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="TEST CODE e.g. T7K2P9"
-            className="min-w-[12rem] flex-1 rounded-xl border border-slate-200 px-4 py-3 font-mono text-sm font-bold tracking-widest outline-none focus:border-indigo-400"
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 font-mono text-sm font-bold tracking-widest text-slate-900 placeholder:text-slate-400 outline-none focus:border-indigo-400"
             required
           />
+          <label className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I allow SmartLearn to capture <strong>screen snapshots</strong> and{" "}
+              <strong>short microphone clips</strong> every 1 minute for my
+              teacher during this test only.
+            </span>
+          </label>
           <button
             type="submit"
             disabled={loading}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-60"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <LogIn className="h-4 w-4" />
             )}
-            Join test
+            Start locked test
           </button>
         </form>
       )}
@@ -170,6 +215,9 @@ export default function StudentTestPage() {
               </div>
               <div className="text-[11px] text-indigo-700">
                 by {test.teacherName} · code {test.code}
+              </div>
+              <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold uppercase text-amber-700">
+                <Shield className="h-3 w-3" /> Proctoring every 1 min
               </div>
             </div>
             <div className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 font-mono text-sm font-black text-rose-600 shadow-sm">
@@ -249,6 +297,7 @@ export default function StudentTestPage() {
               setTest(null);
               setResult(null);
               setCode("");
+              setConsent(false);
             }}
             className="mt-4 text-xs font-bold text-indigo-700 underline"
           >

@@ -20,6 +20,13 @@ type Mcq = {
   explanation?: string;
 };
 
+type Moment = {
+  at: number;
+  imageDataUrl?: string;
+  audioDataUrl?: string;
+  note?: string;
+};
+
 type TestRow = {
   id: string;
   code: string;
@@ -29,7 +36,13 @@ type TestRow = {
   questions: Mcq[];
   submissions: Record<
     string,
-    { name: string; score: number; total: number; at: number }
+    {
+      name: string;
+      score: number;
+      total: number;
+      at: number;
+      moments?: Moment[];
+    }
   >;
   endsAt: number;
 };
@@ -63,6 +76,10 @@ export default function TeacherTestPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [momentsFor, setMomentsFor] = useState<{
+    name: string;
+    moments: Moment[];
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -372,18 +389,34 @@ export default function TeacherTestPage() {
                 Submissions ({subs.length})
               </div>
               {subs.length > 0 && (
-                <ul className="mt-1 max-h-32 overflow-y-auto text-[11px] text-slate-600">
-                  {subs
+                <ul className="mt-1 max-h-40 overflow-y-auto text-[11px] text-slate-600">
+                  {Object.entries(t.submissions || {})
+                    .map(([, s]) => s)
                     .sort((a, b) => b.score - a.score)
                     .map((s, i) => (
                       <li
                         key={i}
-                        className="flex justify-between border-b border-slate-50 py-1"
+                        className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-50 py-1.5"
                       >
-                        <span>{s.name}</span>
-                        <span className="font-bold">
-                          {s.score}/{s.total}
+                        <span>
+                          {s.name}{" "}
+                          <strong>
+                            {s.score}/{s.total}
+                          </strong>
                         </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMomentsFor({
+                              name: s.name,
+                              moments: s.moments || [],
+                            })
+                          }
+                          className="rounded-lg bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100"
+                        >
+                          View moments during test (
+                          {(s.moments || []).length})
+                        </button>
                       </li>
                     ))}
                 </ul>
@@ -392,6 +425,61 @@ export default function TeacherTestPage() {
           );
         })}
       </ul>
+
+      {momentsFor && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-slate-900">
+                {momentsFor.name} · test moments
+              </h3>
+              <button
+                type="button"
+                onClick={() => setMomentsFor(null)}
+                className="text-xs font-bold text-slate-500"
+              >
+                Close
+              </button>
+            </div>
+            {momentsFor.moments.length === 0 ? (
+              <p className="mt-4 text-xs text-slate-400">
+                No snapshots yet (student may have denied screen/mic).
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-4">
+                {momentsFor.moments.map((m, i) => (
+                  <li
+                    key={i}
+                    className="rounded-xl border border-slate-100 p-2 text-xs"
+                  >
+                    <div className="text-[10px] text-slate-400">
+                      {new Date(m.at).toLocaleString()}
+                    </div>
+                    {m.note && (
+                      <div className="mt-1 text-amber-700">{m.note}</div>
+                    )}
+                    {m.imageDataUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={m.imageDataUrl}
+                        alt="moment"
+                        className="mt-2 max-h-48 w-full rounded-lg object-contain bg-slate-50"
+                      />
+                    )}
+                    {m.audioDataUrl && (
+                      <audio
+                        controls
+                        src={m.audioDataUrl}
+                        className="mt-2 w-full"
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

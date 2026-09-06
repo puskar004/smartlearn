@@ -14,6 +14,7 @@ import {
   Users,
   Video,
 } from "lucide-react";
+import MeetFrame from "@/components/MeetFrame";
 import {
   apiAddMaterial,
   apiCreateClassroom,
@@ -598,16 +599,6 @@ function TeacherInner() {
                         <div className="text-xs text-rose-600">
                           Room {room.liveSession.joinCode}
                         </div>
-                        {room.liveSession.meetUrl && (
-                          <a
-                            href={room.liveSession.meetUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-indigo-700 underline"
-                          >
-                            <Video className="h-3.5 w-3.5" /> Open Google Meet
-                          </a>
-                        )}
                       </div>
                       <button
                         type="button"
@@ -621,6 +612,14 @@ function TeacherInner() {
                         End session
                       </button>
                     </div>
+                    {room.liveSession.meetUrl && (
+                      <div className="mt-3">
+                        <MeetFrame
+                          meetUrl={room.liveSession.meetUrl}
+                          title="Teacher · Google Meet"
+                        />
+                      </div>
+                    )}
                     <div className="mt-3 max-h-48 space-y-2 overflow-y-auto rounded-xl bg-white p-3">
                       {(room.liveSession.messages || []).map((m) => (
                         <div key={m.id} className="text-xs">

@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import FocusLock from "@/components/FocusLock";
 import UserBootstrap from "@/components/UserBootstrap";
-import FullscreenGate from "@/components/FullscreenGate";
 import AppSidebar from "@/components/AppSidebar";
 import AppTopBar from "@/components/AppTopBar";
 import SiteHeader from "@/components/SiteHeader";
@@ -13,8 +12,10 @@ import TaskChecklist from "@/components/TaskChecklist";
 import StudentSync from "@/components/StudentSync";
 import RoleGate from "@/components/RoleGate";
 import ExtremeLock from "@/components/ExtremeLock";
+import SessionLockChrome, { isSessionLocked } from "@/components/SessionLock";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
+import { cn } from "@/lib/utils";
 
 const MARKETING = new Set(["/", "/login", "/sign-in", "/sign-up"]);
 
@@ -30,6 +31,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const marketing = isMarketing(path);
   const { userId } = useAuth();
   const [role, setRole] = useState<"student" | "teacher">("student");
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     const sync = () => {
@@ -44,17 +46,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener(ROLE_EVENT, sync);
   }, [userId]);
 
+  useEffect(() => {
+    const sync = () => setLocked(isSessionLocked());
+    sync();
+    window.addEventListener("sl-session-lock", sync);
+    return () => window.removeEventListener("sl-session-lock", sync);
+  }, []);
+
   const isTeacher = role === "teacher";
-  // Fullscreen lock only on student home — not every panel / not teacher
-  const showFsGate =
-    !marketing && !isTeacher && (path === "/dashboard" || path === "/");
+  // Students: focus lock only outside teacher routes; teachers never locked
+  const studentFocus = !isTeacher && !locked;
 
   return (
-    <div className="min-h-screen bg-[#f4f6ff] text-slate-900">
+    <div
+      className={cn(
+        "min-h-screen bg-[#f4f6ff] text-slate-900",
+        "sl-responsive-shell"
+      )}
+    >
       <UserBootstrap />
-      {showFsGate && <FullscreenGate />}
-      {!isTeacher && <FocusLock />}
+      {studentFocus && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
+      <SessionLockChrome />
 
       {marketing ? (
         <>
@@ -65,11 +78,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <RoleGate>
           <div className="min-h-screen">
             {!isTeacher && <StudentSync />}
-            <AppSidebar />
-            <div className="pl-[72px] lg:pl-[260px]">
-              <AppTopBar />
+            {/* Hide chrome while student in locked live/test */}
+            {!(locked && !isTeacher) && <AppSidebar />}
+            <div
+              className={cn(
+                locked && !isTeacher
+                  ? "pl-0"
+                  : "pl-[72px] lg:pl-[260px]"
+              )}
+            >
+              {!(locked && !isTeacher) && <AppTopBar />}
               <main className="min-h-[calc(100vh-4rem)]">{children}</main>
-              {!isTeacher && path === "/dashboard" && (
+              {!isTeacher && path === "/dashboard" && !locked && (
                 <TaskChecklist floating />
               )}
             </div>

@@ -23,7 +23,7 @@ export type LiveTest = {
   startsAt: number;
   endsAt: number;
   active: boolean;
-  /** studentId → answers */
+  /** studentId → answers + proctor moments */
   submissions: Record<
     string,
     {
@@ -32,6 +32,12 @@ export type LiveTest = {
       score: number;
       total: number;
       at: number;
+      moments?: {
+        at: number;
+        imageDataUrl?: string;
+        audioDataUrl?: string;
+        note?: string;
+      }[];
     }
   >;
 };
@@ -156,13 +162,57 @@ export async function submitTest(
     if (answers[i] === q.correctIndex) score += 1;
   });
 
+  const prev = test.submissions[studentId];
   test.submissions[studentId] = {
     name,
     answers,
     score,
     total: test.questions.length,
     at: Date.now(),
+    moments: prev?.moments || [],
   };
   await saveTest(test);
   return test.submissions[studentId];
+}
+
+export async function addTestMoment(
+  code: string,
+  studentId: string,
+  name: string,
+  moment: {
+    at: number;
+    imageDataUrl?: string;
+    audioDataUrl?: string;
+    note?: string;
+  }
+) {
+  const test = await findTestByCode(code);
+  if (!test) throw new Error("Test not found");
+  if (!test.active) throw new Error("Test closed");
+
+  const cur = test.submissions[studentId] || {
+    name,
+    answers: [],
+    score: 0,
+    total: test.questions.length,
+    at: Date.now(),
+    moments: [],
+  };
+  const moments = [
+    {
+      at: moment.at || Date.now(),
+      imageDataUrl: moment.imageDataUrl
+        ? String(moment.imageDataUrl).slice(0, 140_000)
+        : undefined,
+      audioDataUrl: moment.audioDataUrl
+        ? String(moment.audioDataUrl).slice(0, 140_000)
+        : undefined,
+      note: moment.note ? String(moment.note).slice(0, 200) : undefined,
+    },
+    ...(cur.moments || []),
+  ].slice(0, 40);
+
+  test.submissions[studentId] = { ...cur, name, moments };
+  await saveTest(test);
+  return moments;
 }

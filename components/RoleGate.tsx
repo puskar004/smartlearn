@@ -24,6 +24,8 @@ const STUDENT_ONLY = [
   "/join-class",
   "/support",
   "/test",
+  "/live-class",
+  "/profile",
 ];
 
 export default function RoleGate({ children }: { children: React.ReactNode }) {
@@ -56,7 +58,6 @@ export default function RoleGate({ children }: { children: React.ReactNode }) {
       path.startsWith("/sign-in") ||
       path.startsWith("/sign-up");
 
-    // Must pick role + login before app
     if (!isSignedIn && !isPublic) {
       router.replace("/login");
       return;
@@ -70,14 +71,34 @@ export default function RoleGate({ children }: { children: React.ReactNode }) {
       (p) => path === p || path.startsWith(p + "/")
     );
 
+    // Teachers stay in teacher hub
     if (isTeacher && (onStudentRoute || path === "/")) {
       router.replace("/teacher");
       return;
     }
+
+    // Students hard-blocked from any teacher exploration
     if (!isTeacher && onTeacherRoute) {
       router.replace("/dashboard");
+      return;
     }
   }, [ready, role, path, isSignedIn, isLoaded, userId, router]);
+
+  // Soft wall UI if student somehow lands on teacher
+  if (
+    ready &&
+    isSignedIn &&
+    userId &&
+    role !== "teacher" &&
+    path.startsWith("/teacher")
+  ) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 text-center text-sm text-slate-600">
+        <p className="font-bold text-slate-900">Teacher section is locked</p>
+        <p>Students cannot explore teacher tools.</p>
+      </div>
+    );
+  }
 
   return <>{children}</>;
 }

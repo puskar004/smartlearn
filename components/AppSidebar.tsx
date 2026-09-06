@@ -33,6 +33,7 @@ const studentNav = [
   { href: "/pyq", label: "PYQs", icon: ClipboardList },
   { href: "/quiz", label: "Practice & Quiz", icon: Target },
   { href: "/test", label: "Live Test", icon: ClipboardList },
+  { href: "/live-class", label: "Live Class", icon: Radio },
   { href: "/ai-tutor", label: "AI Tutor", icon: Brain },
   { href: "/feynman", label: "Feynman Mode", icon: Sparkles },
   { href: "/blueprint", label: "Study Plan", icon: CalendarDays },
