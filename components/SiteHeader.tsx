@@ -33,6 +33,7 @@ const examMenu = [
   { href: "/blueprint", label: "Study Plan" },
   { href: "/extreme", label: "Extreme Mode" },
   { href: "/common-room", label: "Common Room" },
+  { href: "/feynman", label: "Feynman Mode" },
 ];
 
 function Drop({

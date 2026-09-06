@@ -133,7 +133,8 @@ export async function apiStartLive(
   code: string,
   title: string,
   subject: string,
-  minutes: number
+  minutes: number,
+  meetUrl?: string
 ) {
   const res = await fetch("/api/classroom", {
     method: "POST",
@@ -144,6 +145,7 @@ export async function apiStartLive(
       title,
       subject,
       minutes,
+      meetUrl,
     }),
   });
   return res.json();

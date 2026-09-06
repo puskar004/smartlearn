@@ -17,7 +17,6 @@ const STUDENT_ONLY = [
   "/blueprint",
   "/mistakes",
   "/feynman",
-  "/study-music",
   "/parent",
   "/safe-search",
   "/common-room",

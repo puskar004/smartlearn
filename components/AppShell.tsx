@@ -12,7 +12,6 @@ import SiteHeader from "@/components/SiteHeader";
 import TaskChecklist from "@/components/TaskChecklist";
 import StudentSync from "@/components/StudentSync";
 import RoleGate from "@/components/RoleGate";
-import GlobalMusicPlayer from "@/components/GlobalMusicPlayer";
 import ExtremeLock from "@/components/ExtremeLock";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
@@ -46,15 +45,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [userId]);
 
   const isTeacher = role === "teacher";
+  // Fullscreen lock only on student home — not every panel / not teacher
+  const showFsGate =
+    !marketing && !isTeacher && (path === "/dashboard" || path === "/");
 
   return (
     <div className="min-h-screen bg-[#f4f6ff] text-slate-900">
       <UserBootstrap />
-      <FullscreenGate />
+      {showFsGate && <FullscreenGate />}
       {!isTeacher && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
-      {/* Always mount music player so it survives Home / Join Class / every section */}
-      <GlobalMusicPlayer />
 
       {marketing ? (
         <>
@@ -69,7 +69,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="pl-[72px] lg:pl-[260px]">
               <AppTopBar />
               <main className="min-h-[calc(100vh-4rem)]">{children}</main>
-              {!isTeacher && <TaskChecklist floating />}
+              {!isTeacher && path === "/dashboard" && (
+                <TaskChecklist floating />
+              )}
             </div>
           </div>
         </RoleGate>

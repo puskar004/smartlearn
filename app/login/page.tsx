@@ -63,7 +63,7 @@ export default function LoginChooserPage() {
               Login as Student
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
-              NCERT, quizzes, AI tutor, tasks, mood music, and join your teacher
+              NCERT, quizzes, AI tutor, tasks, and join your teacher
               with a private code.
             </p>
             <div className="mt-5 inline-flex items-center gap-1 text-sm font-bold text-violet-700">

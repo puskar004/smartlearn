@@ -226,7 +226,8 @@ export async function startLive(
   code: string,
   title: string,
   subject: string,
-  minutes: number
+  minutes: number,
+  meetUrl?: string
 ) {
   return updateClassroom(teacherId, code, (c) => {
     const live: LiveSession = {
@@ -237,6 +238,7 @@ export async function startLive(
       endsAt: Date.now() + minutes * 60_000,
       active: true,
       joinCode: makeCode(4),
+      meetUrl: meetUrl?.trim() || undefined,
       messages: [],
     };
     return { ...c, liveSession: live };

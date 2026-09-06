@@ -36,6 +36,8 @@ export type LiveSession = {
   endsAt: number;
   active: boolean;
   joinCode: string;
+  /** Google Meet / Zoom link */
+  meetUrl?: string;
   messages: { id: string; author: string; text: string; at: number }[];
 };
 
