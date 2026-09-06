@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
   ExternalLink,
@@ -9,18 +9,20 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { EduNewsItem } from "@/app/api/edu-news/route";
 
-const CATS = [
-  "All",
-  "CBSE",
-  "NTA",
-  "JEE",
-  "NEET",
-  "Form",
-  "Board",
-  "Other",
-] as const;
+type Cat = "All" | "CBSE" | "NTA" | "JEE" | "NEET" | "Form" | "Board" | "Other";
+
+type EduNewsItem = {
+  id: string;
+  title: string;
+  link: string;
+  source: string;
+  published: string;
+  category: Exclude<Cat, "All">;
+  summary?: string;
+};
+
+const CATS: Cat[] = ["All", "CBSE", "NTA", "JEE", "NEET", "Form", "Board", "Other"];
 
 const CAT_COLOR: Record<string, string> = {
   CBSE: "bg-indigo-100 text-indigo-800",
@@ -34,20 +36,25 @@ const CAT_COLOR: Record<string, string> = {
 
 export default function NewsPage() {
   const [items, setItems] = useState<EduNewsItem[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cat, setCat] = useState<(typeof CATS)[number]>("All");
+  const [cat, setCat] = useState<Cat>("All");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/edu-news", { cache: "no-store" });
+      const res = await fetch(`/api/edu-news?t=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
-      setItems(data.items || []);
+      const list = (data.items || []) as EduNewsItem[];
+      setItems(list);
+      setCounts(data.counts || {});
       setNote(data.note || "");
       setUpdatedAt(data.updatedAt || null);
     } catch (e) {
@@ -55,15 +62,17 @@ export default function NewsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const filtered = useMemo(() => {
     if (cat === "All") return items;
-    return items.filter((i) => i.category === cat);
+    return items.filter(
+      (i) => String(i.category || "").toUpperCase() === cat.toUpperCase()
+    );
   }, [items, cat]);
 
   const deadlines = useMemo(
@@ -71,7 +80,7 @@ export default function NewsPage() {
       items.filter(
         (i) =>
           i.category === "Form" ||
-          /deadline|last date|registration|apply|form/i.test(i.title)
+          /deadline|last date|registration|apply|form fill/i.test(i.title)
       ),
     [items]
   );
@@ -86,35 +95,38 @@ export default function NewsPage() {
           CBSE · NTA · JEE · NEET updates
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          Live headlines: syllabus circulars, NTA notices, and competitive exam
-          form deadlines — so you never miss a date.
+          Tap a category to filter. Showing{" "}
+          <strong className="text-sky-800">
+            {filtered.length}
+          </strong>{" "}
+          of {items.length} headlines
+          {cat !== "All" ? ` in ${cat}` : ""}.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           {updatedAt && (
-            <span>
-              Updated {new Date(updatedAt).toLocaleString()}
-            </span>
+            <span>Updated {new Date(updatedAt).toLocaleString()}</span>
           )}
           <button
             type="button"
             onClick={() => void load()}
             className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 font-bold text-sky-700 shadow-sm ring-1 ring-sky-100 hover:bg-sky-50"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />{" "}
+            <RefreshCw
+              className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+            />{" "}
             Refresh
           </button>
         </div>
       </div>
 
-      {/* Deadlines strip */}
-      {deadlines.length > 0 && (
+      {deadlines.length > 0 && cat === "All" && (
         <div className="mt-5 rounded-2xl border border-rose-100 bg-rose-50/80 p-4">
           <div className="flex items-center gap-2 text-sm font-bold text-rose-900">
             <CalendarClock className="h-4 w-4" /> Form / deadline alerts
           </div>
           <ul className="mt-3 space-y-2">
             {deadlines.slice(0, 5).map((d) => (
-              <li key={d.id}>
+              <li key={d.id + "-dl"}>
                 <a
                   href={d.link}
                   target="_blank"
@@ -130,23 +142,44 @@ export default function NewsPage() {
         </div>
       )}
 
+      {/* Category chips with counts — always clickable */}
       <div className="mt-5 flex flex-wrap gap-2">
-        {CATS.map((c) => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => setCat(c)}
-            className={cn(
-              "rounded-full px-3.5 py-1.5 text-xs font-bold transition",
-              cat === c
-                ? "bg-sky-600 text-white shadow"
-                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-sky-50"
-            )}
-          >
-            {c}
-          </button>
-        ))}
+        {CATS.map((c) => {
+          const count =
+            c === "All" ? items.length : counts[c] || 0;
+          return (
+            <button
+              key={c}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setCat(c);
+              }}
+              className={cn(
+                "relative z-10 rounded-full px-3.5 py-1.5 text-xs font-bold transition",
+                cat === c
+                  ? "bg-sky-600 text-white shadow ring-2 ring-sky-300"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-sky-50"
+              )}
+            >
+              {c}
+              <span
+                className={cn(
+                  "ml-1.5 rounded-full px-1.5 py-0.5 text-[10px]",
+                  cat === c ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
+
+      <p className="mt-2 text-[11px] font-semibold text-slate-500">
+        Active filter: <span className="text-sky-700">{cat}</span>
+      </p>
 
       {loading && (
         <div className="mt-12 flex justify-center text-slate-400">
@@ -163,7 +196,7 @@ export default function NewsPage() {
       {!loading && (
         <>
           {note && (
-            <p className="mt-4 text-center text-[11px] text-slate-400">{note}</p>
+            <p className="mt-3 text-center text-[11px] text-slate-400">{note}</p>
           )}
           <ul className="mt-4 space-y-3">
             {filtered.map((item) => (
@@ -214,7 +247,8 @@ export default function NewsPage() {
           </ul>
           {filtered.length === 0 && (
             <p className="mt-8 text-center text-sm text-slate-400">
-              No items in this category right now.
+              No <strong>{cat}</strong> headlines right now. Try Refresh or
+              another category.
             </p>
           )}
         </>

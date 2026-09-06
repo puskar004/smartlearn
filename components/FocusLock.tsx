@@ -165,10 +165,9 @@ export default function FocusLock() {
       if (document.visibilityState === "hidden") {
         alertParent();
       } else if (document.visibilityState === "visible") {
-        // Coming back — force fullscreen again during student session
         try {
           if (
-            document.documentElement.dataset.sessionLock === "test" &&
+            document.documentElement.dataset.sessionLock &&
             !document.fullscreenElement
           ) {
             void document.documentElement.requestFullscreen?.();
@@ -179,10 +178,19 @@ export default function FocusLock() {
       }
     };
 
+    // pagehide / blur backup — some mobile browsers
+    const onPageHide = () => {
+      if (!armed.current) return;
+      if (isPdfReading()) return;
+      alertParent();
+    };
+
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       window.clearTimeout(armTimer);
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, [isSignedIn, userId, role, onTeacher, alertParent]);
 
