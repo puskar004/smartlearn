@@ -13,6 +13,7 @@ import StudentSync from "@/components/StudentSync";
 import RoleGate from "@/components/RoleGate";
 import ExtremeLock from "@/components/ExtremeLock";
 import SessionLockChrome, { isSessionLocked } from "@/components/SessionLock";
+import GradeGate from "@/components/GradeGate";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
     >
       <UserBootstrap />
+      {!isTeacher && <GradeGate />}
       {/* Tab-switch warning: students only (FocusLock skips /teacher) */}
       {!isTeacher && <FocusLock />}
       {!isTeacher && <ExtremeLock />}

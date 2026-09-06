@@ -1,13 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trophy } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
 import { CURRICULUM, type Grade } from "@/lib/curriculum";
+import { loadProgress, saveProgress } from "@/lib/user-store";
 
 export default function QuizIndexPage() {
+  const { userId } = useAuth();
   const [grade, setGrade] = useState<Grade>("12");
   const pack = useMemo(() => CURRICULUM.find((g) => g.grade === grade)!, [grade]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const p = loadProgress(userId);
+    if (p.grade) setGrade(p.grade);
+    const onG = () => setGrade(loadProgress(userId).grade);
+    window.addEventListener("sl-grade-changed", onG);
+    return () => window.removeEventListener("sl-grade-changed", onG);
+  }, [userId]);
+
+  const pickGrade = (g: Grade) => {
+    setGrade(g);
+    if (userId) {
+      const p = loadProgress(userId);
+      saveProgress({ ...p, grade: g, gradeChosen: true });
+      window.dispatchEvent(new Event("sl-grade-changed"));
+    }
+  };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
@@ -18,8 +39,8 @@ export default function QuizIndexPage() {
         Chapter levels for board speed
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-slate-500">
-        Short, high-yield MCQs so you can revise a full chapter in minutes —
-        definitions, traps, PYQ mindset, and presentation tips.
+        Showing <strong>Class {grade}</strong> chapters from your profile. Change
+        class below if needed.
       </p>
 
       <div className="mt-6 flex gap-2">
@@ -27,7 +48,7 @@ export default function QuizIndexPage() {
           <button
             key={g}
             type="button"
-            onClick={() => setGrade(g)}
+            onClick={() => pickGrade(g)}
             className={`rounded-full px-4 py-1.5 text-sm font-bold ${
               grade === g ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"
             }`}

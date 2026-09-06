@@ -121,7 +121,9 @@ export default function DashboardPage() {
             <span aria-hidden>👋</span>
           </h1>
           <p className="mt-2 text-sm text-slate-600">
-            Your learning journey continues. Stay curious, keep learning!
+            {p?.gradeChosen
+              ? `Class ${p.grade} desk — NCERT, quizzes & plan match your class.`
+              : "Your learning journey continues. Stay curious, keep learning!"}
           </p>
         </div>
         <div className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 text-right md:block">

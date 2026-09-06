@@ -27,6 +27,8 @@ export type UserProgress = {
   userId: string;
   createdAt: number;
   grade: "10" | "11" | "12";
+  /** Student picked class 10/11/12 at login */
+  gradeChosen: boolean;
   xp: number;
   streak: number;
   lastStudyDay: string | null;
@@ -57,6 +59,7 @@ export function emptyProgress(userId: string): UserProgress {
     userId,
     createdAt: Date.now(),
     grade: "12",
+    gradeChosen: false,
     xp: 0,
     streak: 0,
     lastStudyDay: null,

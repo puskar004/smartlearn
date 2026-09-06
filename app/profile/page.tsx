@@ -51,8 +51,14 @@ export default function ProfilePage() {
     if (userId) {
       const p = loadProgress(userId);
       p.grade = grade;
+      p.gradeChosen = true;
       saveProgress(p);
       setProgress(p);
+      try {
+        window.dispatchEvent(new Event("sl-grade-changed"));
+      } catch {
+        // ignore
+      }
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);

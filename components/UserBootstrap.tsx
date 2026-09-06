@@ -5,12 +5,15 @@ import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { bindUser, getActiveUserId, setActiveUserId } from "@/lib/user-store";
 import {
+  clearPendingGrade,
   clearPendingRole,
   consumeTeacherFreshLogin,
+  getPendingGrade,
   getPendingRole,
 } from "@/lib/pending-role";
 import { apiCreateClassroom, getRole, setRole } from "@/lib/teacher-store";
 import { emitRoleChanged } from "@/lib/role-events";
+import { loadProgress, saveProgress } from "@/lib/user-store";
 
 export default function UserBootstrap() {
   const { userId, isSignedIn } = useAuth();
@@ -34,6 +37,22 @@ export default function UserBootstrap() {
     if (pending === "teacher" || pending === "student") {
       setRole(userId, pending);
       clearPendingRole();
+    }
+
+    const pendingGrade = getPendingGrade();
+    if (pendingGrade) {
+      const p = loadProgress(userId);
+      saveProgress({
+        ...p,
+        grade: pendingGrade,
+        gradeChosen: true,
+      });
+      clearPendingGrade();
+      try {
+        window.dispatchEvent(new Event("sl-grade-changed"));
+      } catch {
+        // ignore
+      }
     }
 
     const role = getRole(userId);

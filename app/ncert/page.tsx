@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { CURRICULUM, type Grade, type Subject } from "@/lib/curriculum";
-import { loadProgress, markChapterOpened } from "@/lib/user-store";
+import {
+  loadProgress,
+  markChapterOpened,
+  saveProgress,
+} from "@/lib/user-store";
 import PdfReaderModal from "@/components/PdfReaderModal";
 import { cn } from "@/lib/utils";
 
@@ -278,9 +282,14 @@ function NcertInner() {
 
   useEffect(() => {
     if (!userId) return;
-    const p = loadProgress(userId);
-    setOpened(new Set(p.chaptersOpened));
-    if (p.grade) setGrade(p.grade);
+    const sync = () => {
+      const p = loadProgress(userId);
+      setOpened(new Set(p.chaptersOpened));
+      if (p.grade) setGrade(p.grade);
+    };
+    sync();
+    window.addEventListener("sl-grade-changed", sync);
+    return () => window.removeEventListener("sl-grade-changed", sync);
   }, [userId]);
 
   const subjects = useMemo(() => {
@@ -379,12 +388,19 @@ function NcertInner() {
             <button
               key={g}
               type="button"
-              onClick={() => setGrade(g)}
+              onClick={() => {
+                setGrade(g);
+                if (userId) {
+                  const p = loadProgress(userId);
+                  saveProgress({ ...p, grade: g, gradeChosen: true });
+                  window.dispatchEvent(new Event("sl-grade-changed"));
+                }
+              }}
               className={cn(
-                "rounded-full px-4 py-1.5 text-sm font-bold transition",
+                "rounded-full px-4 py-1.5 text-sm font-bold",
                 grade === g
-                  ? "bg-violet-600 text-white shadow-md shadow-violet-600/30"
-                  : "text-slate-500 hover:bg-violet-50 hover:text-violet-700"
+                  ? "bg-white text-indigo-700 shadow"
+                  : "bg-white/20 text-white hover:bg-white/30"
               )}
             >
               Class {g}

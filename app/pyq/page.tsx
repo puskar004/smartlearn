@@ -1,18 +1,32 @@
 "use client";
 
-import { useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { FileText, Download } from "lucide-react";
+import { useAuth } from "@clerk/nextjs";
 import { CURRICULUM, type Grade } from "@/lib/curriculum";
 import { getPyqPapers } from "@/lib/pyq-catalog";
 import PdfReaderModal from "@/components/PdfReaderModal";
+import { loadProgress, saveProgress } from "@/lib/user-store";
 
 function PyqInner() {
   const sp = useSearchParams();
+  const { userId } = useAuth();
   const [grade, setGrade] = useState<Grade>(
     (sp.get("grade") as Grade) || "12"
   );
+
+  useEffect(() => {
+    if (!userId) return;
+    const sync = () => {
+      const p = loadProgress(userId);
+      if (p.grade) setGrade(p.grade);
+    };
+    sync();
+    window.addEventListener("sl-grade-changed", sync);
+    return () => window.removeEventListener("sl-grade-changed", sync);
+  }, [userId]);
   const pack = useMemo(
     () => CURRICULUM.find((g) => g.grade === grade)!,
     [grade]
@@ -51,6 +65,11 @@ function PyqInner() {
               setSubjectId(
                 CURRICULUM.find((x) => x.grade === g)!.subjects[0].id
               );
+              if (userId) {
+                const p = loadProgress(userId);
+                saveProgress({ ...p, grade: g, gradeChosen: true });
+                window.dispatchEvent(new Event("sl-grade-changed"));
+              }
             }}
             className={`rounded-full px-4 py-1.5 text-sm font-semibold ${
               grade === g
