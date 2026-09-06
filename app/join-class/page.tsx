@@ -270,10 +270,20 @@ export default function JoinClassPage() {
                       }
                       return;
                     }
-                    // stored server PDF
+                    if (u.startsWith("data:")) {
+                      const w = window.open();
+                      if (w) {
+                        w.document.write(
+                          `<!doctype html><title>${m.title || "PDF"}</title><iframe src="${u}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>`
+                        );
+                      }
+                      return;
+                    }
+                    // durable https host or API
                     if (
                       u.includes("/api/classroom/material") ||
-                      u.startsWith("/api/")
+                      u.startsWith("/api/") ||
+                      u.startsWith("http")
                     ) {
                       window.open(u, "_blank", "noopener,noreferrer");
                       return;

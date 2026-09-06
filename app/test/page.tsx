@@ -268,16 +268,28 @@ export default function StudentTestPage() {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Not found");
+      if (data.alreadyAttempted) {
+        const pr = data.priorResult as
+          | { score: number; total: number }
+          | undefined;
+        throw new Error(
+          pr
+            ? `You have already attempted this test. Score: ${pr.score}/${pr.total}.`
+            : "You have already attempted this test. You cannot join again."
+        );
+      }
       const t = data.test as TestMeta;
-      if (!t.active) throw new Error("This test is closed");
+      if (!t.active) throw new Error("This test is closed by teacher");
       const len = t.questions.length;
-      setTest(t);
+      // Teacher-set duration — timer starts when YOU start (not when test was created)
+      const mins = Math.max(5, Number(t.durationMin) || 30);
+      const endsAt = Date.now() + mins * 60_000;
+      setTest({ ...t, endsAt, durationMin: mins });
       setAnswers(Array(len).fill(-1));
       setVisited(Array(len).fill(false).map((_, i) => i === 0));
       setMarked(Array(len).fill(false));
       setQi(0);
-      setLeft(Math.max(0, Math.floor((t.endsAt - Date.now()) / 1000)));
-      // Enter fullscreen as soon as test loads
+      setLeft(mins * 60);
       window.setTimeout(() => void enterFullscreen(), 200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -289,8 +301,9 @@ export default function StudentTestPage() {
 
   useEffect(() => {
     if (!test || result) return;
+    const end = test.endsAt;
     const id = setInterval(() => {
-      const s = Math.max(0, Math.floor((test.endsAt - Date.now()) / 1000));
+      const s = Math.max(0, Math.floor((end - Date.now()) / 1000));
       setLeft(s);
       if (s <= 0) void submit(true);
     }, 1000);

@@ -65,11 +65,27 @@ export async function GET(req: NextRequest) {
       ({ correctIndex, explanation, ...rest }) => rest
     );
     const isTeacher = userId === t.teacherId;
+    const mySub =
+      userId && t.submissions?.[userId] ? t.submissions[userId] : null;
+    // Final attempt only (proctor moments may create empty stub submissions)
+    const doneAttempt = Boolean(
+      mySub &&
+        mySub.at &&
+        Array.isArray(mySub.answers) &&
+        mySub.answers.length === t.questions.length &&
+        mySub.total === t.questions.length &&
+        mySub.answers.some((a) => typeof a === "number")
+    );
     return NextResponse.json({
       ok: true,
+      alreadyAttempted: doneAttempt,
+      priorResult: doneAttempt
+        ? { score: mySub!.score, total: mySub!.total, at: mySub!.at }
+        : null,
       test: {
         ...t,
-        // stay live until teacher closes — ignore endsAt for join
+        // Timer is durationMin from student start — endsAt is informational only
+        durationMin: t.durationMin || 30,
         questions: isTeacher ? t.questions : publicQ,
         submissions: isTeacher ? t.submissions : {},
       },

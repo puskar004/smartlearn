@@ -254,12 +254,25 @@ export async function submitTest(
   if (!test) throw new Error("Invalid code — test not found or deleted");
   if (!test.active) throw new Error("Test is closed by teacher");
 
+  const prev = test.submissions[studentId];
+  // Block re-attempt if already fully submitted
+  if (
+    prev &&
+    Array.isArray(prev.answers) &&
+    prev.answers.length === test.questions.length &&
+    prev.at &&
+    prev.total === test.questions.length
+  ) {
+    throw new Error(
+      `You have already attempted this test (score ${prev.score}/${prev.total}).`
+    );
+  }
+
   let score = 0;
   test.questions.forEach((q, i) => {
     if (answers[i] === q.correctIndex) score += 1;
   });
 
-  const prev = test.submissions[studentId];
   test.submissions[studentId] = {
     name,
     answers,

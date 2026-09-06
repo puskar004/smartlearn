@@ -58,17 +58,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isTeacher = role === "teacher";
   // Fullscreen + tab-switch only during live test (not whole site)
   const onTest = path === "/test" || path.startsWith("/test/");
+  // Hide sidebar/topbar for entire student test page (clean exam UI)
+  const hideChrome = (!isTeacher && onTest) || (locked && !isTeacher);
 
   return (
     <div
       className={cn(
         "min-h-screen bg-[#f4f6ff] text-slate-900",
-        "sl-responsive-shell"
+        "sl-responsive-shell",
+        hideChrome && "sl-exam-mode"
       )}
     >
       <UserBootstrap />
       {!isTeacher && <GradeGate />}
-      {!isTeacher && onTest && <FullscreenGate />}
+      {!isTeacher && onTest && locked && <FullscreenGate />}
       {!isTeacher && onTest && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
       <SessionLockChrome />
@@ -81,19 +84,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ) : (
         <RoleGate>
           <div className="min-h-screen">
-            {!isTeacher && <StudentSync />}
-            {/* Hide chrome only during locked live TEST (not live class) */}
-            {!(locked && !isTeacher) && <AppSidebar />}
-            <div
-              className={cn(
-                locked && !isTeacher
-                  ? "pl-0"
-                  : "pl-[72px] lg:pl-[260px]"
-              )}
-            >
-              {!(locked && !isTeacher) && <AppTopBar />}
-              <main className="min-h-[calc(100vh-4rem)]">{children}</main>
-              {!isTeacher && path === "/dashboard" && !locked && (
+            {!isTeacher && !onTest && <StudentSync />}
+            {!hideChrome && <AppSidebar />}
+            <div className={cn(hideChrome ? "pl-0" : "pl-[72px] lg:pl-[260px]")}>
+              {!hideChrome && <AppTopBar />}
+              <main
+                className={cn(
+                  hideChrome ? "min-h-screen" : "min-h-[calc(100vh-4rem)]"
+                )}
+              >
+                {children}
+              </main>
+              {!isTeacher && path === "/dashboard" && !hideChrome && (
                 <TaskChecklist floating />
               )}
             </div>

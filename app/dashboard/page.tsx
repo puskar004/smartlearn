@@ -112,36 +112,38 @@ export default function DashboardPage() {
     <div className="px-4 py-6 lg:px-8 lg:py-8">
       {/* Welcome banner */}
       <div className="relative overflow-hidden rounded-[28px] border border-violet-100 bg-gradient-to-r from-[#f3e8ff] via-[#eef2ff] to-[#e0f2fe] p-6 shadow-sm sm:p-8">
-        <div className="relative z-10 max-w-xl">
-          <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
-            Welcome back,{" "}
-            <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              {first}!
-            </span>{" "}
-            <span aria-hidden>👋</span>
-          </h1>
-          <p className="mt-2 text-sm text-slate-600">
-            {p?.gradeChosen
-              ? `Class ${p.grade} desk — NCERT, quizzes & plan match your class.`
-              : "Your learning journey continues. Stay curious, keep learning!"}
-          </p>
-        </div>
-        <div className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 text-right md:block">
-          <p className="font-serif text-lg italic text-indigo-700/80">
-            “A better you,
-            <br />
-            brighter tomorrow.”
-          </p>
-          <div className="mt-3 ml-auto flex h-24 w-36 items-end justify-center gap-1 rounded-2xl bg-white/70 p-2 shadow-sm backdrop-blur">
-            <div className="h-10 w-8 rounded bg-sky-300/80" />
-            <div className="h-14 w-8 rounded bg-indigo-400/80" />
-            <div className="h-8 w-8 rounded bg-violet-300/80" />
-            <div className="mb-1 text-[9px] font-bold leading-tight text-indigo-700">
-              Progress
+        <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="max-w-xl">
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
+              Welcome back,{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+                {first}!
+              </span>{" "}
+              <span aria-hidden>👋</span>
+            </h1>
+            <p className="mt-2 text-sm text-slate-600">
+              {p?.gradeChosen
+                ? `Class ${p.grade} desk — NCERT, quizzes & plan match your class.`
+                : "Your learning journey continues. Stay curious, keep learning!"}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-3 self-end md:self-center">
+            <p className="text-right font-serif text-base italic leading-snug text-indigo-700/90 sm:text-lg">
+              “A better you,
               <br />
-              Over
-              <br />
-              Perfection
+              brighter tomorrow.”
+            </p>
+            <div className="flex h-20 w-40 items-end justify-end gap-1 rounded-2xl bg-white/70 p-2 shadow-sm backdrop-blur sm:h-24 sm:w-44">
+              <div className="h-10 w-7 rounded bg-sky-300/80 sm:w-8" />
+              <div className="h-14 w-7 rounded bg-indigo-400/80 sm:w-8" />
+              <div className="h-8 w-7 rounded bg-violet-300/80 sm:w-8" />
+              <div className="mb-1 max-w-[4.5rem] text-right text-[9px] font-bold leading-tight text-indigo-700">
+                Progress
+                <br />
+                Over
+                <br />
+                Perfection
+              </div>
             </div>
           </div>
         </div>

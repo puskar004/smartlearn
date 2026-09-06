@@ -2,7 +2,6 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { addMaterialToClass } from "@/lib/classroom-server";
 import {
-  materialFileUrl,
   materialMaxBytes,
   readMaterialFile,
   saveMaterialFile,
@@ -11,7 +10,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Serve stored PDF / notes file */
+/** Serve stored PDF when local key still exists (same instance). Prefer durable https URLs. */
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
@@ -21,9 +20,19 @@ export async function GET(req: NextRequest) {
   if (!key) {
     return NextResponse.json({ error: "Missing key" }, { status: 400 });
   }
+  // If key is actually a full URL (legacy), redirect
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    return NextResponse.redirect(key);
+  }
   const hit = await readMaterialFile(key);
   if (!hit) {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+    return NextResponse.json(
+      {
+        error:
+          "File not found on server (expired after deploy). Ask teacher to re-upload the PDF, or use a Google Drive link.",
+      },
+      { status: 404 }
+    );
   }
   return new NextResponse(new Uint8Array(hit.buf), {
     headers: {
@@ -36,7 +45,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * Multipart upload: code, title, subject, type, file (PDF up to 5MB)
- * Stores binary on disk; only short URL goes into classroom meta.
+ * Prefers durable remote URL so students can always open.
  */
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -89,13 +98,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const key = await saveMaterialFile(userId, code, buf, ext);
-    const url = materialFileUrl(key);
+    const saved = await saveMaterialFile(userId, code, buf, ext);
 
     const user = await currentUser();
     const room = await addMaterialToClass(userId, code, {
       title: title || name.replace(/\.[^.]+$/, ""),
-      url,
+      url: saved.url,
       type,
       subject,
       teacherName: user?.fullName || user?.firstName || "Teacher",
@@ -111,9 +119,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       classroom: room,
-      key,
-      url,
+      key: saved.key,
+      url: saved.url,
+      durable: saved.durable,
       size: buf.length,
+      note: saved.durable
+        ? undefined
+        : "File stored temporarily — prefer Google Drive link if students cannot open later.",
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload failed";
