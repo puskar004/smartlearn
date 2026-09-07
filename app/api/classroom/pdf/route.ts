@@ -91,9 +91,8 @@ export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
 
   try {
-    // A) Direct URL path
-    if (directUrl) {
-      // data: may be huge — only if short enough for query (rare)
+    // A) Direct URL path (also used together with code)
+    if (directUrl && !code) {
       const b = await bytesFromMaterialUrl(directUrl, origin);
       if (b) return pdfResponse(b);
       return NextResponse.json(
@@ -107,6 +106,12 @@ export async function GET(req: NextRequest) {
 
     if (!code) {
       return NextResponse.json({ error: "code required" }, { status: 400 });
+    }
+
+    // Try direct url first when provided with code (fast path)
+    if (directUrl) {
+      const b = await bytesFromMaterialUrl(directUrl, origin);
+      if (b) return pdfResponse(b);
     }
 
     // B) Resolve material list for class, then pick by id

@@ -14,7 +14,6 @@ type Props = {
   open: boolean;
   title: string;
   ncertLink?: string;
-  /** Prefer server open by class code + material id (student path) */
   classCode?: string;
   materialId?: string;
   onClose: () => void;
@@ -32,65 +31,57 @@ export default function PdfReaderModal({
 }: Props) {
   const [mode, setMode] = useState<Mode>("reader");
   const [tick, setTick] = useState(0);
-  const [srcIndex, setSrcIndex] = useState(0);
   const pdf = resolveEmbeddablePdf(ncertLink);
 
   const origin =
     typeof window !== "undefined" ? window.location.origin : undefined;
 
-  /** Same-origin student/teacher open — never hits NCERT wording for class files */
-  const classOpenSrc = useMemo(() => {
-    if (!classCode) return null;
-    const q = new URLSearchParams();
-    q.set("code", classCode.toUpperCase());
-    if (materialId) q.set("id", materialId);
-    return `/api/classroom/pdf?${q.toString()}`;
-  }, [classCode, materialId]);
-
-  const sources = useMemo(() => {
-    const list: string[] = [];
-    const add = (u?: string | null) => {
-      if (u && !list.includes(u)) list.push(u);
-    };
-    if (pdf?.startsWith("data:")) add(pdf);
-    if (pdf?.startsWith("/api/")) add(pdf);
-    add(classOpenSrc);
-    if (pdf && /^https?:\/\//i.test(pdf)) {
-      add(inAppPdfSrc(pdf, origin));
-      // short url direct via classroom pdf
-      if (pdf.length < 1800) {
-        add(`/api/classroom/pdf?url=${encodeURIComponent(pdf)}`);
+  /** One stable source — no multi-retry loop (that caused shake). */
+  const proxySrc = useMemo(() => {
+    if (!pdf && !classCode) return null;
+    // Embedded bytes
+    if (pdf?.startsWith("data:")) return pdf;
+    // Local API file
+    if (pdf?.startsWith("/api/")) return pdf;
+    // Class material open
+    if (classCode) {
+      const q = new URLSearchParams();
+      q.set("code", classCode.toUpperCase());
+      if (materialId) q.set("id", materialId);
+      // Also pass url when short so server can fetch if id miss
+      if (pdf && /^https?:\/\//i.test(pdf) && pdf.length < 1500) {
+        q.set("url", pdf);
       }
+      return `/api/classroom/pdf?${q.toString()}`;
     }
-    if (pdf && !pdf.startsWith("data:") && !pdf.startsWith("http") && !pdf.startsWith("/")) {
-      add(inAppPdfSrc(pdf, origin));
-    }
-    return list;
-  }, [classOpenSrc, pdf, origin]);
+    if (pdf) return inAppPdfSrc(pdf, origin);
+    return null;
+  }, [pdf, classCode, materialId, origin]);
 
-  const proxySrc = sources[Math.min(srcIndex, Math.max(0, sources.length - 1))] || null;
+  const stableSrc = useMemo(() => {
+    if (!proxySrc) return null;
+    // tick only changes on manual Reload
+    if (proxySrc.startsWith("data:")) return proxySrc;
+    const join = proxySrc.includes("?") ? "&" : "?";
+    return `${proxySrc}${join}_r=${tick}`;
+  }, [proxySrc, tick]);
 
   const iframeSrc = useMemo(() => {
     if (!open) return "about:blank";
     if (mode === "portal" && ncertLink) return ncertLink;
-    if (mode === "gview" && pdf) {
-      if (pdf.startsWith("data:")) return proxySrc || "about:blank";
+    if (mode === "gview" && pdf && !pdf.startsWith("data:")) {
       return googleEmbedPdf(pdf.startsWith("http") ? pdf : proxySrc || pdf);
     }
-    if (mode === "plugin" && proxySrc) {
-      if (proxySrc.startsWith("data:")) return proxySrc;
-      const join = proxySrc.includes("?") ? "&" : "?";
-      return `${proxySrc}${join}t=${tick}`;
+    if (mode === "plugin" && stableSrc && !stableSrc.startsWith("data:")) {
+      return stableSrc;
     }
     return "about:blank";
-  }, [open, mode, pdf, ncertLink, proxySrc, tick]);
+  }, [open, mode, pdf, ncertLink, proxySrc, stableSrc]);
 
   useEffect(() => {
     setPdfReading(open);
     if (!open) return;
-    setMode(sources.length ? "reader" : "portal");
-    setSrcIndex(0);
-    setTick((t) => t + 1);
+    setMode(stableSrc || pdf ? "reader" : "portal");
     document.documentElement.dataset.pdfOpen = "1";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -98,34 +89,32 @@ export default function PdfReaderModal({
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const keep = window.setInterval(() => {
-      document.documentElement.dataset.pdfOpen = "1";
-    }, 1000);
     return () => {
-      window.clearInterval(keep);
       setPdfReading(false);
       delete document.documentElement.dataset.pdfOpen;
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, pdf, classOpenSrc, sources.length, onClose]);
+    // intentionally only when open toggles — avoid reload loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex flex-col bg-slate-950/90 p-1 backdrop-blur-sm sm:p-3"
+      className="fixed inset-0 z-[120] flex flex-col bg-slate-900/70 p-1 backdrop-blur-sm sm:p-3"
       data-pdf-reader="1"
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-950 px-3 py-2.5">
-          <FileText className="h-4 w-4 text-emerald-400" />
-          <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-100">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
+          <FileText className="h-4 w-4 text-emerald-600" />
+          <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">
             {title}
           </div>
-          {(pdf || classOpenSrc) && (
-            <div className="flex flex-wrap rounded-lg bg-slate-800 p-0.5 text-[11px] font-semibold">
+          {(pdf || classCode) && (
+            <div className="flex flex-wrap rounded-lg bg-slate-200/80 p-0.5 text-[11px] font-semibold">
               {(
                 [
                   ["reader", "Reader"],
@@ -140,8 +129,8 @@ export default function PdfReaderModal({
                   onClick={() => setMode(id)}
                   className={`rounded-md px-2.5 py-1 transition ${
                     mode === id
-                      ? "bg-slate-700 text-emerald-300 shadow"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-white text-emerald-700 shadow"
+                      : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
                   {label}
@@ -149,11 +138,11 @@ export default function PdfReaderModal({
               ))}
             </div>
           )}
-          {proxySrc && !proxySrc.startsWith("data:") && (
+          {stableSrc && !stableSrc.startsWith("data:") && (
             <a
-              href={proxySrc}
+              href={stableSrc}
               download={`${title.replace(/[^\w]+/g, "_").slice(0, 40)}.pdf`}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-emerald-50"
             >
               <Download className="h-3 w-3" /> Download
             </a>
@@ -161,44 +150,34 @@ export default function PdfReaderModal({
           <button
             type="button"
             onClick={() => setTick((t) => t + 1)}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-emerald-50"
           >
             <ExternalLink className="h-3 w-3" /> Reload
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-950 hover:text-rose-300"
+            className="rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
             aria-label="Close reader"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="relative min-h-0 flex-1 bg-slate-950">
-          {mode === "reader" && proxySrc ? (
-            <PdfJsViewer
-              key={`${proxySrc}-${tick}-${srcIndex}`}
-              src={proxySrc}
-              title={title}
-              onFail={() => {
-                setSrcIndex((i) => {
-                  if (i + 1 < sources.length) return i + 1;
-                  return i;
-                });
-              }}
-            />
+        <div className="relative min-h-0 flex-1 bg-slate-100">
+          {mode === "reader" && stableSrc ? (
+            <PdfJsViewer key={stableSrc} src={stableSrc} title={title} />
           ) : (
             <iframe
-              key={`${iframeSrc}-${tick}`}
+              key={iframeSrc}
               title={title}
               src={iframeSrc}
-              className="h-full w-full border-0 bg-slate-900"
+              className="h-full w-full border-0 bg-white"
               allow="fullscreen"
             />
           )}
-          <p className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[10px] text-slate-200">
-            SmartLearn PDF · Esc closes · dark reader
+          <p className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-slate-900/70 px-3 py-1 text-[10px] text-white">
+            SmartLearn PDF · Esc closes
           </p>
         </div>
       </div>

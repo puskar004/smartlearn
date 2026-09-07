@@ -6,7 +6,6 @@ import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { Bell, Flame, Search, Sparkles, Star } from "lucide-react";
 import NavAuth from "@/components/NavAuth";
-import ThemeToggle from "@/components/ThemeToggle";
 import { loadProgress } from "@/lib/user-store";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
@@ -79,7 +78,7 @@ export default function AppTopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/60 bg-white/75 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/80">
+    <header className="sticky top-0 z-30 border-b border-white/60 bg-white/75 backdrop-blur-xl">
       <div className="flex items-center gap-3 px-4 py-3 lg:px-6">
         {!isTeacher && (
           <form
@@ -91,14 +90,13 @@ export default function AppTopBar() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search for chapters, topics, questions..."
-              className="w-full max-w-xl rounded-full border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:bg-slate-900"
+              className="w-full max-w-xl rounded-full border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
             />
           </form>
         )}
         {isTeacher && <div className="flex-1" />}
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          <ThemeToggle />
           {!isTeacher && (
             <Link
               href="/blueprint"
@@ -119,7 +117,7 @@ export default function AppTopBar() {
                   setUnread(0);
                 }
               }}
-              className="relative rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+              className="relative rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-600"
               aria-label="Notifications"
             >
               <Bell className="h-4 w-4" />

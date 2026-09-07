@@ -16,6 +16,7 @@ import {
   Star,
   Flame,
   PlayCircle,
+  GraduationCap,
 } from "lucide-react";
 import {
   accuracy,
@@ -25,6 +26,8 @@ import {
 } from "@/lib/user-store";
 import { cn } from "@/lib/utils";
 import { displayName } from "@/lib/display-name";
+import { setRole } from "@/lib/teacher-store";
+import { emitRoleChanged } from "@/lib/role-events";
 
 const tiles = [
   {
@@ -148,6 +151,33 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Separate teacher panel entry — not mixed into student tools */}
+      {isSignedIn && userId && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-white px-4 py-3 shadow-sm">
+          <div>
+            <div className="text-sm font-bold text-slate-900">
+              Are you a teacher?
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Opens a separate Teacher panel (classes, PDFs, live). Student tools
+              stay here.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRole(userId, "teacher");
+              emitRoleChanged();
+              window.location.href = "/teacher";
+            }}
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-indigo-600/20"
+          >
+            <GraduationCap className="h-4 w-4" />
+            Join as Teacher
+          </button>
+        </div>
+      )}
 
       {/* Stats row */}
       {isSignedIn && p && (
