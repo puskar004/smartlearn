@@ -191,6 +191,12 @@ export function addCustomTask(
   };
   const next = [t, ...tasks];
   saveTasks(userId, next);
+  try {
+    window.dispatchEvent(new Event("sl-tasks"));
+    window.dispatchEvent(new Event("sl-progress"));
+  } catch {
+    // ignore
+  }
   return next;
 }
 

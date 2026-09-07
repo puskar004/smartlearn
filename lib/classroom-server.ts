@@ -48,16 +48,18 @@ function lightClassroom(c: Classroom): Classroom {
           type: (m.type === "video" || m.type === "link"
             ? m.type
             : "notes") as "notes" | "video" | "link",
-          url: String(m.url).slice(0, 500),
+          // Do not truncate URLs — was causing Open 404
+          url: String(m.url).slice(0, 4000),
           subject: String(m.subject || "General").slice(0, 60),
           createdAt: Number(m.createdAt) || Date.now(),
+          expiresAt: m.expiresAt ? Number(m.expiresAt) : undefined,
           teacherName: String(m.teacherName || "").slice(0, 80),
         }))
         .slice(0, 20),
       alerts: alerts.slice(0, 10),
-      attendanceLog: attendanceLog.slice(0, 10).map((r) => ({
+      attendanceLog: attendanceLog.slice(0, 20).map((r) => ({
         ...r,
-        attendees: Array.isArray(r.attendees) ? r.attendees.slice(0, 30) : [],
+        attendees: Array.isArray(r.attendees) ? r.attendees.slice(0, 80) : [],
       })),
       students: students.slice(0, 60).map((s) => ({
         studentId: String(s.studentId || ""),
@@ -1358,6 +1360,9 @@ export async function kickFromLive(
       ...c,
       liveSession: {
         ...sess,
+        // Kick must NEVER end the live session for teacher/others
+        active: true,
+        meetUrl: sess.meetUrl,
         kickedIds,
         kickReasons,
         attendees: stamp(sess.attendees || []),

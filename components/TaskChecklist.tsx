@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import {
   CheckCircle2,
   Circle,
   ListTodo,
+  Plus,
   Trash2,
   X,
 } from "lucide-react";
 import {
+  addCustomTask,
   deleteTask,
   loadTasks,
   toggleTaskDone,
@@ -27,26 +29,54 @@ export default function TaskChecklist({
   const { userId, isSignedIn } = useAuth();
   const [tasks, setTasks] = useState<StudyTask[]>([]);
   const [open, setOpen] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [title, setTitle] = useState("");
+  const [cadence, setCadence] = useState<TaskCadence>("daily");
+  const [target, setTarget] = useState(1);
 
   useEffect(() => {
     if (userId) setTasks(loadTasks(userId));
+    const sync = () => {
+      if (userId) setTasks(loadTasks(userId));
+    };
+    window.addEventListener("sl-tasks", sync);
+    return () => window.removeEventListener("sl-tasks", sync);
   }, [userId]);
 
   if (!isSignedIn || !userId) return null;
 
   const doneCount = tasks.filter((t) => t.completed).length;
 
+  const onAdd = (e: FormEvent) => {
+    e.preventDefault();
+    const t = title.trim();
+    if (!t) return;
+    const next = addCustomTask(userId, t, cadence, Math.max(1, target), "items");
+    setTasks(next);
+    setTitle("");
+    setTarget(1);
+    setShowAdd(false);
+  };
+
   const body = (
     <div className="flex max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-violet-100 bg-white/95 shadow-xl shadow-violet-500/10 backdrop-blur">
       <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
         <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
           <ListTodo className="h-4 w-4 text-violet-600" />
-          Auto progress
+          Study checklist
           <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">
             {doneCount}/{tasks.length}
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowAdd((v) => !v)}
+            className="rounded-lg p-1 text-violet-600 hover:bg-violet-50"
+            title="Add custom task"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
           {floating && (
             <button
               type="button"
@@ -59,8 +89,50 @@ export default function TaskChecklist({
         </div>
       </div>
       <p className="border-b border-slate-100 bg-violet-50/50 px-3 py-1.5 text-[10px] text-violet-800">
-        System tracks quizzes, NCERT, Feynman &amp; PYQs automatically.
+        Auto tracks quizzes, NCERT, Feynman &amp; PYQs. Add your own tasks too.
       </p>
+
+      {showAdd && (
+        <form
+          onSubmit={onAdd}
+          className="space-y-2 border-b border-slate-100 bg-white px-3 py-2"
+        >
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Custom task title…"
+            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-violet-400"
+            maxLength={80}
+            required
+          />
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={cadence}
+              onChange={(e) => setCadence(e.target.value as TaskCadence)}
+              className="rounded-lg border border-slate-200 px-2 py-1 text-[11px]"
+            >
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={target}
+              onChange={(e) => setTarget(Number(e.target.value) || 1)}
+              className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-[11px]"
+              title="Target count"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-bold text-white"
+            >
+              Add task
+            </button>
+          </div>
+        </form>
+      )}
 
       <ul className="flex-1 space-y-1 overflow-y-auto p-2">
         {(["daily", "weekly", "monthly"] as TaskCadence[]).map((c) => {

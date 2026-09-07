@@ -37,6 +37,9 @@ export default function LiveClassPage() {
   const [live, setLive] = useState<LiveInfo | null>(null);
   const [className, setClassName] = useState("");
   const [classCode, setClassCode] = useState("");
+  const [sections, setSections] = useState<
+    { code: string; name: string; live?: boolean }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -45,38 +48,39 @@ export default function LiveClassPage() {
   const [kickReason, setKickReason] = useState("");
   const lastAttended = useRef<string | null>(null);
   const kickNotified = useRef(false);
+  const preferredCode = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const res = await fetch("/api/classroom?action=joined");
-      const data = await res.json();
-      const room = data.classroom;
-      if (!room) {
-        setLive(null);
-        setError("Join a teacher class first (Join Teacher).");
-        setLoading(false);
-        return;
-      }
+  const applyRoom = useCallback(
+    (
+      room: {
+        code?: string;
+        name?: string;
+        liveSession?: LiveInfo & {
+          kickedIds?: string[];
+          active?: boolean;
+        } | null;
+        kicked?: boolean;
+        kickReason?: string;
+      },
+      joinedFallback?: string
+    ) => {
+      const code = room.code || joinedFallback || "";
       setClassName(room.name || "");
-      setClassCode(room.code || data.joined || "");
+      setClassCode(code);
 
-      if (data.kicked || room.kicked) {
+      if (room.kicked) {
         setKicked(true);
-        setKickReason(
-          data.kickReason || room.kickReason || "Removed by teacher"
-        );
+        setKickReason(room.kickReason || "Removed by teacher");
         setLive(null);
-        if (!kickNotified.current) {
+        if (!kickNotified.current && userId) {
           kickNotified.current = true;
           pushNotification(userId, {
             title: "Kicked from live class",
-            body: data.kickReason || room.kickReason || "Teacher removed you",
+            body: room.kickReason || "Teacher removed you",
             href: "/remarks",
           });
         }
         setError(null);
-        setLoading(false);
         return;
       }
 
@@ -95,10 +99,10 @@ export default function LiveClassPage() {
           scheduledAt: sess.scheduledAt,
         });
         setError(null);
-        if (sess.id && lastAttended.current !== sess.id) {
-          lastAttended.current = sess.id;
+        if (sess.id && lastAttended.current !== `${code}:${sess.id}`) {
+          lastAttended.current = `${code}:${sess.id}`;
           void apiMarkAttendance(
-            room.code || data.joined || "",
+            code,
             displayName(user) || user?.fullName || "Student"
           );
         }
@@ -118,18 +122,70 @@ export default function LiveClassPage() {
         setLive(null);
         setError("No live session right now. Wait for your teacher to go live.");
       }
+    },
+    [user, userId]
+  );
+
+  const load = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const res = await fetch("/api/classroom?action=joined");
+      const data = await res.json();
+      const list = (data.classrooms || []) as {
+        code: string;
+        name: string;
+        liveSession?: { active?: boolean } | null;
+        kicked?: boolean;
+        kickReason?: string;
+      }[];
+      const room = data.classroom;
+
+      if (!room && !list.length) {
+        setLive(null);
+        setSections([]);
+        setError("Join a teacher class first (Join Teacher).");
+        setLoading(false);
+        return;
+      }
+
+      // Multi-section: list all joined classes without glitching
+      const sec = (list.length ? list : room ? [room] : []).map((r) => ({
+        code: r.code,
+        name: r.name || r.code,
+        live: Boolean(r.liveSession?.active),
+      }));
+      setSections(sec);
+
+      // Prefer: user pick → any live session → primary joined
+      const pick =
+        (preferredCode.current &&
+          list.find((x) => x.code === preferredCode.current)) ||
+        list.find((x) => x.liveSession?.active && !x.kicked) ||
+        list.find((x) => x.code === data.joined) ||
+        room ||
+        list[0];
+
+      if (!pick) {
+        setLive(null);
+        setError("Join a teacher class first (Join Teacher).");
+        setLoading(false);
+        return;
+      }
+
+      applyRoom(pick, data.joined);
     } catch {
       setError("Could not load live class");
     } finally {
       setLoading(false);
     }
-  }, [userId, user]);
+  }, [userId, applyRoom]);
 
   useEffect(() => {
     if (!userId) return;
     if (getRole(userId) === "teacher") return;
     void load();
-    const id = setInterval(() => void load(), 60_000);
+    // Faster poll while in live so kick applies without ending teacher session
+    const id = setInterval(() => void load(), 8_000);
     return () => clearInterval(id);
   }, [userId, load]);
 
@@ -226,6 +282,31 @@ export default function LiveClassPage() {
           <p className="mt-1 text-sm text-slate-500">
             {className || getJoinedClass(userId || "") || "Your class"}
           </p>
+          {sections.length > 1 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {sections.map((s) => (
+                <button
+                  key={s.code}
+                  type="button"
+                  onClick={() => {
+                    preferredCode.current = s.code;
+                    lastAttended.current = null;
+                    kickNotified.current = false;
+                    setKicked(false);
+                    void load();
+                  }}
+                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
+                    classCode === s.code
+                      ? "border-rose-300 bg-rose-50 text-rose-800"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-rose-200"
+                  }`}
+                >
+                  {s.name}
+                  {s.live ? " · LIVE" : ""}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {live?.active && (
           <button

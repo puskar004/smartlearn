@@ -194,6 +194,16 @@ function TeacherInner() {
     }
   }, [userId]);
 
+  // Live attendance: poll while on live/attendance so students show up in real time
+  useEffect(() => {
+    if (!userId) return;
+    if (tab !== "live" && tab !== "attendance") return;
+    const id = setInterval(() => {
+      void refresh();
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [userId, tab, refresh]);
+
   if (!isSignedIn || !userId) {
     return (
       <div className="px-6 py-16 text-center text-sm text-slate-500">
@@ -357,12 +367,16 @@ function TeacherInner() {
           type: matType,
           file: matFile,
         });
-        if (!data.ok) {
+        if (!data.ok && !data.url && !data.classroom) {
           throw new Error(
             data.error ||
               (typeof data === "string" ? data : "Upload failed")
           );
         }
+        const pubUrl =
+          data.url ||
+          (data.classroom?.materials || [])[0]?.url ||
+          "";
         if (data.classroom) {
           setRoom(data.classroom as Classroom);
           setClasses((prev) =>
@@ -370,13 +384,13 @@ function TeacherInner() {
               c.code === activeCode ? (data.classroom as Classroom) : c
             )
           );
-        } else if (data.url) {
+        } else if (pubUrl) {
           const mat = {
             id: `mat-${Date.now()}`,
             title: matTitle.trim(),
             subject: matSubject.trim() || "General",
             type: matType,
-            url: data.url as string,
+            url: pubUrl,
             createdAt: Date.now(),
             teacherName: user?.fullName || "Teacher",
           };
@@ -385,9 +399,23 @@ function TeacherInner() {
               ? { ...r, materials: [mat, ...(r.materials || [])] }
               : r
           );
+        } else {
+          throw new Error(
+            data.error ||
+              "Could not save PDF. Try again or paste a Drive link."
+          );
         }
+        const mb = (
+          (data.size || matFile.size) /
+          (1024 * 1024)
+        ).toFixed(2);
+        const isLocal =
+          data.durable === false ||
+          (pubUrl && pubUrl.startsWith("/api/"));
         setMatNote(
-          `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB) · students can view for 48 hours`
+          isLocal
+            ? `Saved PDF (${mb} MB) · Open works here. For other devices, paste a Drive link if cloud host is down.`
+            : `Published PDF (${mb} MB) · students can view for 48 hours`
         );
       } else {
         const url = normalizeMaterialUrl(matUrl);
@@ -1191,12 +1219,37 @@ function TeacherInner() {
                                           data.error || "Kick failed"
                                         );
                                       }
-                                      if (data.classroom) setRoom(data.classroom);
+                                      if (data.classroom) {
+                                        // Merge kick into room WITHOUT dropping meetUrl / ending session
+                                        setRoom((prev) => {
+                                          const next = data.classroom as Classroom;
+                                          if (!prev?.liveSession) return next;
+                                          return {
+                                            ...next,
+                                            liveSession: {
+                                              ...next.liveSession!,
+                                              meetUrl:
+                                                next.liveSession?.meetUrl ||
+                                                prev.liveSession.meetUrl,
+                                              active: true,
+                                              messages:
+                                                next.liveSession?.messages ||
+                                                prev.liveSession.messages,
+                                            },
+                                          };
+                                        });
+                                        setClasses((prev) =>
+                                          prev.map((c) =>
+                                            c.code === room.code
+                                              ? (data.classroom as Classroom)
+                                              : c
+                                          )
+                                        );
+                                      }
                                       setMatNote(
                                         `Kicked ${s.name} from live · they cannot rejoin this session`
                                       );
                                       setPenaltyNote("");
-                                      void refresh();
                                     } catch (e) {
                                       setError(
                                         e instanceof Error

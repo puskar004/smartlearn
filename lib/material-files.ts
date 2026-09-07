@@ -40,24 +40,26 @@ export async function saveMaterialFile(
           : "application/octet-stream";
 
   mem.set(key, { buf, contentType: mime });
+  let wroteDisk = false;
   try {
     await fs.mkdir(dataDir(), { recursive: true });
     await fs.writeFile(path.join(dataDir(), key), buf);
+    wroteDisk = true;
   } catch {
     // ignore
   }
 
-  // 1) Public host first — required so students on other servers can open
-  let remote = await uploadBufferRemote(buf, key, mime);
-  if (!remote) {
-    // one retry (transient host failures)
-    remote = await uploadBufferRemote(buf, key, mime);
-  }
-  if (remote) {
-    return { key, url: remote, durable: true };
+  const localUrl = `/api/classroom/material?key=${encodeURIComponent(key)}`;
+
+  // 1) Public host (budgeted) — students on other devices
+  try {
+    const remote = await uploadBufferRemote(buf, key, mime);
+    if (remote) return { key, url: remote, durable: true };
+  } catch {
+    // fall through
   }
 
-  // 2) Small embed (only if hosts fail) — still shared via Clerk if tiny
+  // 2) Small embed
   if (buf.length <= 80_000 && mime === "application/pdf") {
     const b64 = buf.toString("base64");
     return {
@@ -67,11 +69,11 @@ export async function saveMaterialFile(
     };
   }
 
-  // 3) Same-origin API (same-instance only — last resort)
+  // 3) Same-origin API — always works for teacher Open + same server
   return {
     key,
-    url: `/api/classroom/material?key=${encodeURIComponent(key)}`,
-    durable: false,
+    url: localUrl,
+    durable: wroteDisk,
   };
 }
 

@@ -22,12 +22,11 @@ const STUDENT_ONLY = [
   "/common-room",
   "/extreme",
   "/join-class",
-  "/support",
   "/test",
   "/live-class",
   "/news",
-  "/profile",
 ];
+// /profile and /support are shared (teacher Settings uses /profile)
 
 export default function RoleGate({ children }: { children: React.ReactNode }) {
   const { userId, isSignedIn, isLoaded } = useAuth();

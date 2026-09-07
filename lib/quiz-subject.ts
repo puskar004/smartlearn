@@ -176,6 +176,17 @@ export function resolveQuizSubject(
 
 /** Classify bank question by tags + prompt */
 export function subjectOfBankQ(tags: string[], prompt: string): QuizSubject {
+  // Explicit subject: tags always win (prevents Chem under Physics bleed)
+  for (const t of tags) {
+    const tl = t.toLowerCase().trim();
+    const m = tl.match(/^(?:subject:)?(physics|chemistry|biology|maths|math|history|civics|geography|economics|english|cs|accountancy|business)\b/);
+    if (m) {
+      const s = m[1];
+      if (s === "math") return "maths";
+      return s as QuizSubject;
+    }
+  }
+
   const blob = [...tags, prompt].join(" ");
   const order: Exclude<QuizSubject, "general">[] = [
     "chemistry",

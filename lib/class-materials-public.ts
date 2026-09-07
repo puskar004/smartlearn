@@ -22,14 +22,14 @@ export function activeNotes(list: TeacherMaterial[] = []): TeacherMaterial[] {
   return list
     .filter((m) => {
       if (!m?.url) return false;
-      // students need openable URLs
-      if (
-        !m.url.startsWith("http://") &&
-        !m.url.startsWith("https://") &&
-        !(m.url.startsWith("data:") && m.url.length < 200_000)
-      ) {
-        return false;
-      }
+      // students need openable URLs (https, small data, or same-origin API)
+      const u = m.url;
+      const ok =
+        u.startsWith("http://") ||
+        u.startsWith("https://") ||
+        u.startsWith("/api/") ||
+        (u.startsWith("data:") && u.length < 200_000);
+      if (!ok) return false;
       const exp = m.expiresAt || (m.createdAt || 0) + NOTES_TTL_MS;
       if (m.createdAt && exp < now) return false;
       return true;

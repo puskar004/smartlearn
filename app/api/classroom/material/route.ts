@@ -113,26 +113,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Upload file bytes → MUST be public https for students on other devices
+    // Save locally always; try public host without blocking forever
     const saved = await saveMaterialFile(userId, code, buf, ext);
-    let publishUrl = saved.url;
+    const publishUrl = saved.url;
 
-    if (!publishUrl.startsWith("http://") && !publishUrl.startsWith("https://")) {
-      // Retry remote host — local/data URLs won't reach other students
-      const { uploadBufferRemote } = await import("@/lib/remote-upload");
-      const again = await uploadBufferRemote(buf, saved.key, "application/pdf");
-      if (again) {
-        publishUrl = again;
-      } else if (publishUrl.startsWith("data:") && publishUrl.length > 80_000) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "Could not host PDF for students. Check network and try again (or paste a Drive link).",
-          },
-          { status: 200 }
-        );
-      }
+    if (!publishUrl) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Could not save PDF. Try a smaller file or paste a Drive link.",
+        },
+        { status: 200 }
+      );
     }
 
     const user = await currentUser().catch(() => null);

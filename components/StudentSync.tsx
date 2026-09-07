@@ -51,7 +51,9 @@ export default function StudentSync() {
       if (!codes.length) return;
       const snap = snapshot();
       for (const code of codes) {
-        void apiSyncStudent(code, snap);
+        void apiSyncStudent(code, snap).catch(() => {
+          // ignore offline / server restart
+        });
       }
     };
 

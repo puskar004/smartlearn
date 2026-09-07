@@ -77,9 +77,11 @@ export async function GET(req: NextRequest) {
             id: m.id,
             title: m.title,
             type: m.type,
-            url: String(m.url || "").slice(0, 400),
+            // Keep full URL so Open/PDF proxy works (was truncating → 404)
+            url: String(m.url || "").slice(0, 4000),
             subject: m.subject,
             createdAt: m.createdAt,
+            expiresAt: m.expiresAt,
             teacherName: m.teacherName,
           })),
           students: (r.students || []).slice(0, 50).map((s) => ({
@@ -108,12 +110,16 @@ export async function GET(req: NextRequest) {
                 meetUrl: r.liveSession.meetUrl,
                 scheduledAt: r.liveSession.scheduledAt,
                 messages: (r.liveSession.messages || []).slice(-20),
-                attendees: (r.liveSession.attendees || []).slice(0, 40),
-                kickedIds: (r.liveSession.kickedIds || []).slice(0, 30),
+                attendees: (r.liveSession.attendees || []).slice(0, 80),
+                kickedIds: (r.liveSession.kickedIds || []).slice(0, 40),
+                kickReasons: r.liveSession.kickReasons || {},
               }
             : null,
           alerts: (r.alerts || []).slice(0, 8),
-          attendanceLog: (r.attendanceLog || []).slice(0, 8),
+          attendanceLog: (r.attendanceLog || []).slice(0, 20).map((rec) => ({
+            ...rec,
+            attendees: (rec.attendees || []).slice(0, 80),
+          })),
         }));
         return NextResponse.json({ ok: true, classrooms: safe });
       } catch (e) {

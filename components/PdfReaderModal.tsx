@@ -42,18 +42,19 @@ export default function PdfReaderModal({
     if (!pdf && !classCode) return null;
     // Direct data PDF — open in-app without server
     if (pdf?.startsWith("data:")) return pdf;
+    // Class notes: always resolve via classroom PDF API (fixes teacher/student 404)
+    if (classCode) {
+      const q = new URLSearchParams();
+      q.set("code", classCode.toUpperCase());
+      if (materialId) q.set("id", materialId);
+      if (pdf && pdf.length < 1800) q.set("url", pdf);
+      return `/api/classroom/pdf?${q.toString()}`;
+    }
     // Same-origin API file
     if (pdf?.startsWith("/api/")) return pdf;
     // Prefer direct https via our proxy (in-app, no new tab)
     if (pdf && /^https?:\/\//i.test(pdf)) {
       return inAppPdfSrc(pdf, origin);
-    }
-    if (classCode) {
-      const q = new URLSearchParams();
-      q.set("code", classCode.toUpperCase());
-      if (materialId) q.set("id", materialId);
-      if (pdf && pdf.length < 1500) q.set("url", pdf);
-      return `/api/classroom/pdf?${q.toString()}`;
     }
     if (pdf) return inAppPdfSrc(pdf, origin);
     return null;

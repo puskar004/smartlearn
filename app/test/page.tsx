@@ -143,21 +143,28 @@ export default function StudentTestPage() {
     };
   }, []);
 
-  // Start exam clock only after proctor ready + fullscreen (once)
+  // After camera/mic/share granted → lock fullscreen, then start clock
   const timerStarted = useRef(false);
+  const fsAsked = useRef(false);
   useEffect(() => {
-    if (!inTest) timerStarted.current = false;
+    if (!inTest) {
+      timerStarted.current = false;
+      fsAsked.current = false;
+    }
   }, [inTest]);
   useEffect(() => {
-    if (!proctorReady || !isFs || !test || result) return;
-    if (timerStarted.current) return;
+    if (!proctorReady || !test || result) return;
+    if (!isFs && !fsAsked.current) {
+      fsAsked.current = true;
+      void enterFullscreen();
+      return;
+    }
+    if (!isFs || timerStarted.current) return;
     timerStarted.current = true;
-    // Full teacher duration starts only when proctor + fullscreen ready
     const secs = Math.max(60, (test.durationMin || 30) * 60);
     const endsAt = Date.now() + secs * 1000;
     setTest((t) => (t ? { ...t, endsAt } : t));
     setLeft(secs);
-    void enterFullscreen();
   }, [proctorReady, isFs, test, result]);
 
   const enterFullscreen = async () => {
@@ -369,7 +376,9 @@ export default function StudentTestPage() {
       setMarked(Array(len).fill(false));
       setQi(0);
       setLeft(mins * 60);
-      window.setTimeout(() => void enterFullscreen(), 200);
+      setProctorReady(false);
+      setIsFs(false);
+      // Camera/mic first (proctor). Fullscreen only after permissions granted.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
       setTest(null);

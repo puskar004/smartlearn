@@ -67,14 +67,18 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-        <User className="h-3.5 w-3.5" /> Student Profile
+        <User className="h-3.5 w-3.5" />{" "}
+        {role === "teacher" ? "Teacher Settings" : "Student Profile"}
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
-        Focus identity &amp; device permissions
+        {role === "teacher"
+          ? "Account & preferences"
+          : "Focus identity & device permissions"}
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Each login has its own XP, mistakes, and plan. Camera powers the 30s
-        eye-focus alarm.
+        {role === "teacher"
+          ? "Manage your teacher account, role switch, and notifications."
+          : "Each login has its own XP, mistakes, and plan. Camera powers the 30s eye-focus alarm."}
       </p>
 
       <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

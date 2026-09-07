@@ -6,10 +6,17 @@ import { Maximize2, Shield } from "lucide-react";
 /**
  * Blocks the app until the user enters (and stays in) fullscreen.
  * Browser requires a user gesture for requestFullscreen.
+ * Optional deferUntil: CSS selector that must match before gate shows
+ * (e.g. after camera permission — avoids FS exit on getUserMedia prompt).
  */
-export default function FullscreenGate() {
+export default function FullscreenGate({
+  deferUntil,
+}: {
+  deferUntil?: string;
+} = {}) {
   const [fs, setFs] = useState(false);
   const [ready, setReady] = useState(false);
+  const [deferredOk, setDeferredOk] = useState(!deferUntil);
   const [error, setError] = useState<string | null>(null);
 
   const check = useCallback(() => {
@@ -26,7 +33,6 @@ export default function FullscreenGate() {
     const onChange = () => check();
     document.addEventListener("fullscreenchange", onChange);
     document.addEventListener("webkitfullscreenchange", onChange as EventListener);
-    // Also block if window is not roughly maximized (tab leave handled elsewhere)
     const onResize = () => {
       // soft hint only
     };
@@ -40,6 +46,19 @@ export default function FullscreenGate() {
       window.removeEventListener("resize", onResize);
     };
   }, [check]);
+
+  useEffect(() => {
+    if (!deferUntil) {
+      setDeferredOk(true);
+      return;
+    }
+    const tick = () => {
+      setDeferredOk(Boolean(document.querySelector(deferUntil)));
+    };
+    tick();
+    const id = window.setInterval(tick, 400);
+    return () => clearInterval(id);
+  }, [deferUntil]);
 
   const enter = async () => {
     setError(null);
@@ -63,7 +82,7 @@ export default function FullscreenGate() {
     }
   };
 
-  if (!ready || fs) return null;
+  if (!ready || !deferredOk || fs) return null;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/95 p-6 backdrop-blur-md">

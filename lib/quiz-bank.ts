@@ -22,7 +22,7 @@ export type BankQ = {
 export const BOARD_BANK: BankQ[] = [
   // Physics / Science — electricity
   {
-    tags: ["electricity", "ohm", "current", "resistance"],
+    tags: ["subject:physics", "electricity", "ohm", "current", "resistance"],
     prompt: "According to Ohm’s law, the current through a conductor is directly proportional to:",
     options: [
       "Potential difference across its ends (temperature constant)",
@@ -34,21 +34,21 @@ export const BOARD_BANK: BankQ[] = [
     explanation: "V ∝ I at constant temperature; V = IR.",
   },
   {
-    tags: ["electricity", "ohm", "series", "parallel", "resistor"],
+    tags: ["subject:physics", "electricity", "ohm", "series", "parallel", "resistor"],
     prompt: "Three resistors of 2 Ω, 3 Ω and 6 Ω are connected in parallel. Equivalent resistance is:",
     options: ["1 Ω", "11 Ω", "0.5 Ω", "6 Ω"],
     correctIndex: 0,
     explanation: "1/R = 1/2 + 1/3 + 1/6 = 1 ⇒ R = 1 Ω.",
   },
   {
-    tags: ["electricity", "power", "joule", "heating"],
+    tags: ["subject:physics", "electricity", "power", "joule", "heating"],
     prompt: "SI unit of electric power is:",
     options: ["Watt", "Joule", "Coulomb", "Ohm"],
     correctIndex: 0,
     explanation: "Power P = VI; unit is watt (J/s).",
   },
   {
-    tags: ["magnetic", "motor", "fleming", "current"],
+    tags: ["subject:physics", "magnetic", "motor", "fleming", "current"],
     prompt: "Fleming’s left-hand rule is used to find the direction of:",
     options: [
       "Force on a current-carrying conductor in a magnetic field",
@@ -61,7 +61,7 @@ export const BOARD_BANK: BankQ[] = [
   },
   // Light / optics
   {
-    tags: ["light", "reflection", "mirror", "ray optics", "optics"],
+    tags: ["subject:physics", "light", "reflection", "mirror", "ray optics", "optics"],
     prompt: "For a concave mirror, a real, inverted and magnified image is formed when object is:",
     options: [
       "Between F and C",
@@ -73,14 +73,14 @@ export const BOARD_BANK: BankQ[] = [
     explanation: "Object between F and C → real inverted magnified beyond C.",
   },
   {
-    tags: ["light", "refraction", "lens", "ray optics", "optics"],
+    tags: ["subject:physics", "light", "refraction", "lens", "ray optics", "optics"],
     prompt: "Power of a lens of focal length 50 cm is:",
     options: ["+2 D", "+0.5 D", "−2 D", "+50 D"],
     correctIndex: 0,
     explanation: "P = 1/f(m) = 1/0.5 = +2 D (convex assumed positive).",
   },
   {
-    tags: ["light", "human eye", "defect", "myopia", "colour"],
+    tags: ["subject:physics", "light", "human eye", "defect", "myopia", "colour"],
     prompt: "Myopia (short-sightedness) is corrected by using a:",
     options: ["Concave lens", "Convex lens", "Cylindrical lens only", "Plane mirror"],
     correctIndex: 0,
@@ -88,7 +88,7 @@ export const BOARD_BANK: BankQ[] = [
   },
   // Waves / modern
   {
-    tags: ["wave optics", "interference", "diffraction", "young"],
+    tags: ["subject:physics", "wave optics", "interference", "diffraction", "young"],
     prompt: "In Young’s double-slit experiment, fringe width is proportional to:",
     options: [
       "Wavelength λ",
@@ -125,21 +125,21 @@ export const BOARD_BANK: BankQ[] = [
   },
   // Chemistry
   {
-    tags: ["acid", "base", "salt", "ph", "indicator"],
+    tags: ["subject:chemistry", "acid", "base", "salt", "ph", "indicator"],
     prompt: "A solution with pH = 3 is:",
     options: ["Acidic", "Basic", "Neutral", "Cannot say"],
     correctIndex: 0,
     explanation: "pH < 7 → acidic.",
   },
   {
-    tags: ["metal", "reactivity", "non-metal", "corrosion"],
+    tags: ["subject:chemistry", "metal", "reactivity", "non-metal", "corrosion"],
     prompt: "Which metal is most reactive among Na, Cu, Au, Fe?",
     options: ["Na", "Cu", "Au", "Fe"],
     correctIndex: 0,
     explanation: "Sodium is highly reactive alkali metal.",
   },
   {
-    tags: ["carbon", "organic", "homologous", "covalent"],
+    tags: ["subject:chemistry", "carbon", "organic", "homologous", "covalent"],
     prompt: "Carbon forms large number of compounds mainly due to:",
     options: [
       "Catenation and tetravalency",
@@ -190,7 +190,7 @@ export const BOARD_BANK: BankQ[] = [
   },
   // Maths
   {
-    tags: ["quadratic", "roots", "polynomial", "equation"],
+    tags: ["subject:maths", "quadratic", "roots", "polynomial", "equation"],
     prompt: "For ax² + bx + c = 0 (a ≠ 0), sum of roots is:",
     options: ["−b/a", "c/a", "b/a", "−c/a"],
     correctIndex: 0,
@@ -269,7 +269,7 @@ export const BOARD_BANK: BankQ[] = [
     explanation: "Left ventricle pumps oxygenated blood to body.",
   },
   {
-    tags: ["heredity", "mendel", "gene", "variation"],
+    tags: ["subject:biology", "heredity", "mendel", "gene", "variation"],
     prompt: "Mendel’s law of segregation states that alleles:",
     options: [
       "Separate during gamete formation",
@@ -281,7 +281,7 @@ export const BOARD_BANK: BankQ[] = [
     explanation: "Allele pairs segregate into different gametes.",
   },
   {
-    tags: ["reproduction", "asexual", "sexual", "organism"],
+    tags: ["subject:biology", "reproduction", "asexual", "sexual", "organism"],
     prompt: "Binary fission is common in:",
     options: ["Amoeba", "Human", "Mustard plant only", "Birds"],
     correctIndex: 0,
@@ -308,7 +308,7 @@ export const BOARD_BANK: BankQ[] = [
   },
   // SST / others generic board
   {
-    tags: ["nationalism", "india", "history", "gandhi"],
+    tags: ["subject:history", "nationalism", "india", "history", "gandhi"],
     prompt: "The Non-Cooperation Movement was launched in:",
     options: ["1920", "1857", "1942 only", "1991"],
     correctIndex: 0,
@@ -327,7 +327,7 @@ export const BOARD_BANK: BankQ[] = [
     explanation: "Federalism = constitutional division of powers.",
   },
   {
-    tags: ["development", "economy", "gdp", "sector"],
+    tags: ["subject:economics", "development", "economy", "gdp", "sector"],
     prompt: "Which sector includes banking and transport?",
     options: ["Tertiary", "Primary", "Secondary only", "None"],
     correctIndex: 0,
@@ -501,9 +501,12 @@ export function questionsForChapter(input: {
     .toLowerCase();
 
   // HARD LOCK: only bank items whose classified subject == chapter family
-  const sameSubject = BOARD_BANK.filter(
-    (q) => subjectOfBankQ(q.tags, q.prompt) === family
-  );
+  // Never let "general" bleed into a named subject section
+  const sameSubject = BOARD_BANK.filter((q) => {
+    const s = subjectOfBankQ(q.tags, q.prompt);
+    if (family === "general") return true;
+    return s === family;
+  });
 
   const scored = sameSubject
     .map((q) => {

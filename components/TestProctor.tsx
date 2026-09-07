@@ -20,8 +20,8 @@ type Props = {
   onMoment?: (m: MomentPayload) => void;
 };
 
-/** Snap + short audio every second while test runs */
-const INTERVAL_MS = 1_000;
+/** 2–3 screenshots every 5 minutes (~one snap every ~2 min) */
+const INTERVAL_MS = 120_000;
 
 export default function TestProctor({
   active,
@@ -265,7 +265,7 @@ export default function TestProctor({
             } catch {
               // ignore
             }
-          }, 8_000);
+          }, 60_000);
         } catch {
           // video optional if MediaRecorder fails
         }
@@ -276,7 +276,7 @@ export default function TestProctor({
 
       if (cancelledRef.current) return;
       readyRef.current = true;
-      setStatus("Proctoring ON · snap every 1s · screen video continuous");
+      setStatus("Proctoring ON · 2–3 snaps / 5 min · screen video on");
       readyCbRef.current?.();
 
       let tickN = 0;
@@ -408,7 +408,10 @@ export default function TestProctor({
   if (!active) return null;
 
   return (
-    <div className="mb-3 space-y-2">
+    <div
+      className="mb-3 space-y-2"
+      data-proctor-ready={camOk && micOk && screenOk ? "1" : "0"}
+    >
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
         <span className="inline-flex items-center gap-1">
           <Camera
@@ -456,8 +459,8 @@ export default function TestProctor({
           className="h-14 w-14 rounded-full border-2 border-emerald-400 object-cover bg-slate-900"
         />
         <p className="text-[10px] text-slate-500">
-          Every 30s: photo + voice + screen video → teacher (kept until teacher
-          deletes test).
+          ~2–3 photos every 5 min + screen video chunks → teacher (kept until
+          teacher deletes test).
         </p>
       </div>
     </div>

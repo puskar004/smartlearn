@@ -507,14 +507,25 @@ export default function JoinClassPage() {
                               <li key={m.id || m.url}>
                                 <button
                                   type="button"
-                                  onClick={() =>
+                                  onClick={() => {
+                                    const u = m.url || "";
+                                    if (
+                                      m.type === "video" ||
+                                      m.type === "link" ||
+                                      /^https?:\/\/(www\.)?(youtube|youtu\.be|meet\.google)/i.test(
+                                        u
+                                      )
+                                    ) {
+                                      window.open(u, "_blank", "noopener,noreferrer");
+                                      return;
+                                    }
                                     setViewer({
                                       title: m.title || "Class notes",
-                                      url: m.url,
+                                      url: u,
                                       code: r.code,
                                       id: m.id,
-                                    })
-                                  }
+                                    });
+                                  }}
                                   className="flex w-full items-center gap-3 rounded-2xl border border-white bg-white px-3 py-3 text-left shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
                                 >
                                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50">

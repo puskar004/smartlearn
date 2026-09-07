@@ -71,7 +71,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     >
       <UserBootstrap />
       {!isTeacher && <GradeGate />}
-      {!isTeacher && onTest && locked && <FullscreenGate />}
+      {/* Fullscreen only after proctor ready — camera prompt must not kill FS */}
+      {!isTeacher && onTest && locked && (
+        <FullscreenGate deferUntil="[data-proctor-ready='1']" />
+      )}
       {!isTeacher && onTest && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
       <SessionLockChrome />

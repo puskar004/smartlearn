@@ -36,15 +36,23 @@ async function bytesFromMaterialUrl(
     return b && isPdfBytes(b) ? b : null;
   }
 
-  // Our own material key API
+  // Our own material key API (absolute or relative)
   if (url.includes("/api/classroom/material") && url.includes("key=")) {
     try {
-      const u = new URL(url, origin);
+      const u = new URL(url, origin || "http://localhost");
       const key = u.searchParams.get("key") || "";
       if (key) {
+        // key might itself be a remote https URL
+        if (key.startsWith("http://") || key.startsWith("https://")) {
+          const remote = await resolvePdfBytes(key);
+          if (remote && isPdfBytes(remote)) return remote;
+        }
         const hit = await readMaterialFile(key);
-        if (hit?.buf && isPdfBytes(new Uint8Array(hit.buf))) {
-          return new Uint8Array(hit.buf);
+        if (hit?.buf) {
+          const bytes = new Uint8Array(hit.buf);
+          if (isPdfBytes(bytes)) return bytes;
+          // images uploaded as notes
+          if (hit.contentType?.startsWith("image/")) return bytes;
         }
       }
     } catch {
@@ -53,7 +61,11 @@ async function bytesFromMaterialUrl(
   }
 
   if (url.startsWith("/api/classroom/material?key=")) {
-    const key = decodeURIComponent(url.split("key=")[1] || "");
+    const key = decodeURIComponent(url.split("key=")[1]?.split("&")[0] || "");
+    if (key.startsWith("http://") || key.startsWith("https://")) {
+      const remote = await resolvePdfBytes(key);
+      if (remote && isPdfBytes(remote)) return remote;
+    }
     const hit = await readMaterialFile(key);
     if (hit?.buf && isPdfBytes(new Uint8Array(hit.buf))) {
       return new Uint8Array(hit.buf);

@@ -271,11 +271,16 @@ export async function apiSyncStudent(
   code: string,
   snapshot: StudentSnapshot
 ) {
-  return fetch("/api/classroom", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "sync", code, snapshot }),
-  }).then((r) => r.json());
+  try {
+    const r = await fetch("/api/classroom", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "sync", code, snapshot }),
+    });
+    return await r.json().catch(() => ({ ok: false }));
+  } catch {
+    return { ok: false };
+  }
 }
 
 export async function apiAddMaterial(
@@ -361,10 +366,21 @@ export async function apiUploadMaterialFile(opts: {
   fd.set("subject", opts.subject);
   fd.set("type", opts.type);
   fd.set("file", opts.file);
-  const res = await fetch("/api/classroom/material", {
-    method: "POST",
-    body: fd,
-  });
+  let res: Response;
+  try {
+    res = await fetch("/api/classroom/material", {
+      method: "POST",
+      body: fd,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      error:
+        e instanceof Error
+          ? `Network error: ${e.message}. Is the dev server running?`
+          : "Network error during upload",
+    };
+  }
   const text = await res.text();
   let data: {
     ok?: boolean;
@@ -379,24 +395,22 @@ export async function apiUploadMaterialFile(opts: {
   } catch {
     data = {
       ok: false,
-      error: text.slice(0, 120) || `Upload failed (${res.status})`,
+      error:
+        text.slice(0, 160) ||
+        `Upload failed (${res.status}). Server returned non-JSON.`,
     };
   }
   if (!res.ok && !data.error) {
     data.error = `Upload failed (${res.status}). ${text.slice(0, 80)}`;
   }
-  // Rate limit: if server still returned url, treat as success
-  if (
-    !data.ok &&
-    data.url &&
-    /too many|429|rate/i.test(String(data.error || text))
-  ) {
+  // Rate limit / soft host: if we got url or classroom, treat as success
+  if (!data.ok && (data.url || data.classroom)) {
     data.ok = true;
     data.error = undefined;
   }
   // Always cache locally so student on same browser sees instantly
-  if (data.ok && data.classroom) {
-    const mats = (data.classroom.materials || []) as TeacherMaterial[];
+  if (data.ok) {
+    const mats = (data.classroom?.materials || []) as TeacherMaterial[];
     if (mats.length) cacheClassMaterials(opts.code, mats);
     else if (data.url) {
       pushCachedMaterial(opts.code, {
