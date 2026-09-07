@@ -28,19 +28,42 @@ export function parseTextbookPhp(
   return null;
 }
 
+/** Normalize host landing pages to a fetchable PDF URL when possible */
+export function normalizeTeacherPdfUrl(url: string): string {
+  const u = url.trim();
+  if (!u) return u;
+  // tmpfiles page URL without tokenized /dl/ — proxy will scrape; keep as-is
+  if (/tmpfiles\.org/i.test(u) && !/\/dl\//i.test(u)) {
+    try {
+      const parsed = new URL(u);
+      // Prefer https page; pdf-proxy resolves real /dl/ token
+      return parsed.href;
+    } catch {
+      return u;
+    }
+  }
+  return u;
+}
+
 export function resolveEmbeddablePdf(ncertLink?: string): string | null {
   if (!ncertLink) return null;
-  const u = ncertLink.trim();
+  const u = normalizeTeacherPdfUrl(ncertLink.trim());
   // data: PDF
-  if (u.startsWith("data:application/pdf") || u.startsWith("data:application/octet-stream"))
+  if (
+    u.startsWith("data:application/pdf") ||
+    u.startsWith("data:application/octet-stream")
+  )
     return u;
   // same-origin /api material or proxy
   if (u.startsWith("/api/")) return u;
   if (/\.pdf(\?|$)/i.test(u)) return u;
   // tmpfiles / catbox / any https that looks like a file
-  if (/^https?:\/\//i.test(u) && /pdf|drive\.google|tmpfiles|catbox|blob\.vercel/i.test(u))
+  if (
+    /^https?:\/\//i.test(u) &&
+    /pdf|drive\.google|tmpfiles|catbox|blob\.vercel|0x0\.st/i.test(u)
+  )
     return u;
-  if (/^https?:\/\//i.test(u)) return u; // try any https as PDF source
+  if (/^https?:\/\//i.test(u)) return u;
   const parsed = parseTextbookPhp(u);
   if (parsed) return chapterPdfUrl(parsed.code, parsed.ch);
   return null;

@@ -39,30 +39,16 @@ export async function saveMaterialFile(
           ? "image/jpeg"
           : "application/octet-stream";
 
-  // 1) Prefer public durable host
-  const remote = await uploadBufferRemote(buf, key, mime);
-  if (remote) {
-    mem.set(key, { buf, contentType: mime });
-    try {
-      await fs.mkdir(dataDir(), { recursive: true });
-      await fs.writeFile(path.join(dataDir(), key), buf);
-    } catch {
-      // ignore
-    }
-    return { key, url: remote, durable: true };
-  }
-
-  // 2) Local disk + API URL (works in dev; on Vercel may be same-instance only)
+  mem.set(key, { buf, contentType: mime });
   try {
     await fs.mkdir(dataDir(), { recursive: true });
     await fs.writeFile(path.join(dataDir(), key), buf);
   } catch {
     // ignore
   }
-  mem.set(key, { buf, contentType: mime });
 
-  // 3) Small files: embed as data URL so students always get the file via Clerk bank
-  if (buf.length <= 220_000) {
+  // 1) Small PDFs: data URL always works in-app (no host HTML traps)
+  if (buf.length <= 380_000 && mime === "application/pdf") {
     const b64 = buf.toString("base64");
     return {
       key,
@@ -71,7 +57,13 @@ export async function saveMaterialFile(
     };
   }
 
-  // 4) Serve via our API (student must hit warm instance — better than nothing)
+  // 2) Public durable host (catbox preferred)
+  const remote = await uploadBufferRemote(buf, key, mime);
+  if (remote) {
+    return { key, url: remote, durable: true };
+  }
+
+  // 3) Serve via our API
   return {
     key,
     url: `/api/classroom/material?key=${encodeURIComponent(key)}`,

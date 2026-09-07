@@ -13,7 +13,6 @@ const ALLOW = [
   "cbse.gov.in",
   "cdn.cbse.gov.in",
   "web.archive.org",
-  // teacher uploads / drive
   "tmpfiles.org",
   "www.tmpfiles.org",
   "catbox.moe",
@@ -29,7 +28,6 @@ const ALLOW = [
 
 function hostAllowed(host: string) {
   if (ALLOW.some((h) => host === h || host.endsWith(`.${h}`))) return true;
-  // any vercel blob subdomain
   if (host.includes("blob.vercel-storage.com")) return true;
   if (host.includes("tmpfiles.org")) return true;
   if (host.includes("catbox.moe")) return true;
@@ -40,10 +38,48 @@ function hostAllowed(host: string) {
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
+function isPdfBytes(buf: Uint8Array) {
+  if (buf.byteLength < 5) return false;
+  return (
+    buf[0] === 0x25 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x44 &&
+    buf[3] === 0x46
+  ); // %PDF
+}
+
+/** tmpfiles page → real /dl/{token}/...pdf link */
+function extractTmpfilesDl(html: string, base: string): string | null {
+  const m =
+    html.match(
+      /https?:\/\/(?:www\.)?tmpfiles\.org\/dl\/[^\s"'<>]+/i
+    ) ||
+    html.match(/href="(\/dl\/[^"]+)"/i);
+  if (!m) return null;
+  const raw = m[1] || m[0];
+  try {
+    return new URL(raw, base).href;
+  } catch {
+    return null;
+  }
+}
+
 function candidates(url: string): string[] {
   const list = [url];
   try {
     const u = new URL(url);
+    // tmpfiles: try both page and simple /dl/ forms
+    if (u.hostname.includes("tmpfiles.org")) {
+      const path = u.pathname.replace(/\/+$/, "");
+      if (!path.includes("/dl/")) {
+        list.push(`https://tmpfiles.org/dl${path}`);
+        list.push(`https://tmpfiles.org${path}`);
+      } else {
+        // strip /dl/ for page scrape
+        const pagePath = path.replace(/^\/dl\/[^/]+/, "") || path;
+        list.push(`https://tmpfiles.org${pagePath.startsWith("/") ? pagePath : `/${pagePath}`}`);
+      }
+    }
     if (u.hostname === "ncert.nic.in") {
       list.push(url.replace("://ncert.nic.in", "://www.ncert.nic.in"));
     }
@@ -53,7 +89,6 @@ function candidates(url: string): string[] {
     if (u.protocol === "https:") {
       list.push(url.replace(/^https:/, "http:"));
     }
-    // Wayback machine identity capture (when NCERT blocks cloud IPs)
     if (u.hostname.includes("ncert") || u.hostname.includes("cbse")) {
       list.push(`https://web.archive.org/web/0id_/${url}`);
       list.push(`https://web.archive.org/web/2024id_/${url}`);
@@ -64,7 +99,7 @@ function candidates(url: string): string[] {
   return Array.from(new Set(list));
 }
 
-async function fetchPdf(url: string): Promise<Response | null> {
+async function fetchBytes(url: string): Promise<Uint8Array | null> {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 45000);
@@ -76,28 +111,36 @@ async function fetchPdf(url: string): Promise<Response | null> {
         "User-Agent": UA,
         Accept: "application/pdf,application/octet-stream,*/*",
         "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://ncert.nic.in/textbook.php",
         "Cache-Control": "no-cache",
       },
       cache: "no-store",
     });
     clearTimeout(t);
     if (!res.ok) return null;
-    const ct = (res.headers.get("content-type") || "").toLowerCase();
-    // accept pdf or octet-stream
-    if (
-      ct.includes("pdf") ||
-      ct.includes("octet-stream") ||
-      ct.includes("binary") ||
-      !ct
-    ) {
-      return res;
-    }
-    // sometimes wrong content-type but body is pdf
-    return res;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    return buf.byteLength ? buf : null;
   } catch {
     return null;
   }
+}
+
+async function resolvePdfBytes(url: string): Promise<Uint8Array | null> {
+  for (const candidate of candidates(url)) {
+    const buf = await fetchBytes(candidate);
+    if (!buf) continue;
+    if (isPdfBytes(buf)) return buf;
+
+    // HTML landing page (tmpfiles) — scrape real download URL
+    const head = new TextDecoder().decode(buf.slice(0, Math.min(buf.length, 8000)));
+    if (/<!DOCTYPE|<html/i.test(head) && /tmpfiles/i.test(candidate + head)) {
+      const dl = extractTmpfilesDl(head, candidate);
+      if (dl) {
+        const pdf = await fetchBytes(dl);
+        if (pdf && isPdfBytes(pdf)) return pdf;
+      }
+    }
+  }
+  return null;
 }
 
 export async function GET(req: NextRequest) {
@@ -117,31 +160,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
   }
 
-  const tried: string[] = [];
-  for (const candidate of candidates(url)) {
-    tried.push(candidate);
-    const res = await fetchPdf(candidate);
-    if (!res || !res.body) continue;
-
-    // Stream body — avoids loading entire multi-MB PDF into memory twice
-    return new NextResponse(res.body, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": 'inline; filename="ncert.pdf"',
-        "Cache-Control": "public, max-age=3600, s-maxage=86400",
-        "X-Content-Type-Options": "nosniff",
-        "Access-Control-Allow-Origin": "*",
+  const bytes = await resolvePdfBytes(url);
+  if (!bytes) {
+    return NextResponse.json(
+      {
+        error: "fetch failed",
+        detail: "Could not download PDF (host returned HTML or blocked)",
       },
-    });
+      { status: 502 }
+    );
   }
 
-  return NextResponse.json(
-    {
-      error: "fetch failed",
-      detail: "Could not download PDF from NCERT/CBSE servers",
-      tried,
+  return new NextResponse(Buffer.from(bytes), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": 'inline; filename="notes.pdf"',
+      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Allow-Origin": "*",
     },
-    { status: 502 }
-  );
+  });
 }

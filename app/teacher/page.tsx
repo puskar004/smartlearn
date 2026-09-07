@@ -18,12 +18,12 @@ import {
   Video,
 } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
+import PdfReaderModal from "@/components/PdfReaderModal";
 import {
   apiAddMaterial,
   apiCreateClassroom,
   apiDeleteClassroom,
   apiEndLive,
-  apiGetRoom,
   apiListMyClasses,
   apiPostMessage,
   apiKickLive,
@@ -101,6 +101,10 @@ function TeacherInner() {
     { studentId: string; name: string; text: string; at: number }[]
   >([]);
   const [penaltyNote, setPenaltyNote] = useState("");
+  const [pdfViewer, setPdfViewer] = useState<{
+    title: string;
+    url: string;
+  } | null>(null);
 
   const showHomeBanner = tab === "students" || !sp.get("tab");
 
@@ -808,14 +812,22 @@ function TeacherInner() {
                         type="button"
                         onClick={() => {
                           const u = m.url || "";
-                          if (u.startsWith("data:")) {
-                            const a = document.createElement("a");
-                            a.href = u;
-                            a.download = `${m.title || "notes"}.pdf`;
-                            a.click();
+                          if (!u) return;
+                          if (
+                            m.type === "video" ||
+                            m.type === "link" ||
+                            /^https?:\/\/(www\.)?(youtube|youtu\.be|meet\.google)/i.test(
+                              u
+                            )
+                          ) {
+                            window.open(u, "_blank", "noopener,noreferrer");
                             return;
                           }
-                          window.open(u, "_blank", "noopener,noreferrer");
+                          // Always open notes PDF in-app
+                          setPdfViewer({
+                            title: m.title || "Class PDF",
+                            url: u,
+                          });
                         }}
                         className="text-xs font-bold text-indigo-600 hover:underline"
                       >
@@ -1320,6 +1332,13 @@ function TeacherInner() {
           </aside>
         </div>
       )}
+
+      <PdfReaderModal
+        open={Boolean(pdfViewer)}
+        title={pdfViewer?.title || "PDF"}
+        ncertLink={pdfViewer?.url}
+        onClose={() => setPdfViewer(null)}
+      />
     </div>
   );
 }

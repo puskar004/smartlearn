@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** Serve stored PDF by key */
+/** Serve stored PDF by key (signed-in students/teachers) */
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
@@ -21,8 +21,25 @@ export async function GET(req: NextRequest) {
   if (!key) {
     return NextResponse.json({ error: "Missing key" }, { status: 400 });
   }
+  // If someone stored a full URL as key, proxy-fetch PDF bytes
   if (key.startsWith("http://") || key.startsWith("https://")) {
-    return NextResponse.redirect(key);
+    try {
+      const origin = req.nextUrl.origin;
+      const proxy = `${origin}/api/pdf-proxy?url=${encodeURIComponent(key)}`;
+      const res = await fetch(proxy, { cache: "no-store" });
+      if (res.ok) {
+        return new NextResponse(res.body, {
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": 'inline; filename="notes.pdf"',
+            "Cache-Control": "private, max-age=600",
+          },
+        });
+      }
+    } catch {
+      // fall through
+    }
+    return NextResponse.json({ error: "Could not load remote PDF" }, { status: 502 });
   }
   const hit = await readMaterialFile(key);
   if (!hit) {

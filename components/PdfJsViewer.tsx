@@ -36,21 +36,34 @@ export default function PdfJsViewer({ src, title }: Props) {
         // Worker from CDN matching package major
         pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-        const res = await fetch(src, { cache: "force-cache" });
-        if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          throw new Error(
-            t.includes("fetch failed")
-              ? "Server could not reach NCERT PDF. Try again or Download."
-              : `Load failed (${res.status})`
-          );
+        let data: Uint8Array;
+        if (src.startsWith("data:")) {
+          const comma = src.indexOf(",");
+          const b64 = comma >= 0 ? src.slice(comma + 1) : "";
+          const bin = atob(b64);
+          data = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+        } else {
+          const res = await fetch(src, {
+            cache: "no-store",
+            credentials: "same-origin",
+          });
+          if (!res.ok) {
+            const t = await res.text().catch(() => "");
+            throw new Error(
+              t.includes("fetch failed")
+                ? "Could not reach PDF host. Try Reload or Download."
+                : `Load failed (${res.status})`
+            );
+          }
+          data = new Uint8Array(await res.arrayBuffer());
         }
-        const data = new Uint8Array(await res.arrayBuffer());
         if (data.byteLength < 100) throw new Error("Empty PDF response");
-        // PDF magic
         const head = String.fromCharCode(...data.slice(0, 5));
         if (!head.startsWith("%PDF")) {
-          throw new Error("Response was not a PDF (blocked or HTML error page)");
+          throw new Error(
+            "Response was not a PDF (blocked or HTML error page)"
+          );
         }
 
         const doc = await pdfjs.getDocument({ data }).promise;
