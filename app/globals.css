@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f4f6ff;
   --foreground: #0f172a;
+}
+
+.dark {
+  --background: #0b1220;
+  --foreground: #e2e8f0;
 }
 
 @theme inline {
@@ -22,6 +29,15 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   min-height: 100vh;
   cursor: auto;
+}
+
+html.dark body {
+  background:
+    radial-gradient(1000px 500px at 10% -10%, rgba(79, 70, 229, 0.22), transparent 55%),
+    radial-gradient(800px 400px at 90% 0%, rgba(14, 165, 233, 0.12), transparent 50%),
+    radial-gradient(700px 360px at 50% 100%, rgba(124, 58, 237, 0.12), transparent 45%),
+    var(--background);
+  color: var(--foreground);
 }
 
 html {

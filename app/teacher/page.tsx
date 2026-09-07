@@ -104,6 +104,7 @@ function TeacherInner() {
   const [pdfViewer, setPdfViewer] = useState<{
     title: string;
     url: string;
+    id?: string;
   } | null>(null);
 
   const showHomeBanner = tab === "students" || !sp.get("tab");
@@ -823,10 +824,10 @@ function TeacherInner() {
                             window.open(u, "_blank", "noopener,noreferrer");
                             return;
                           }
-                          // Always open notes PDF in-app
                           setPdfViewer({
                             title: m.title || "Class PDF",
                             url: u,
+                            id: m.id,
                           });
                         }}
                         className="text-xs font-bold text-indigo-600 hover:underline"
@@ -1337,6 +1338,8 @@ function TeacherInner() {
         open={Boolean(pdfViewer)}
         title={pdfViewer?.title || "PDF"}
         ncertLink={pdfViewer?.url}
+        classCode={activeCode || undefined}
+        materialId={pdfViewer?.id}
         onClose={() => setPdfViewer(null)}
       />
     </div>

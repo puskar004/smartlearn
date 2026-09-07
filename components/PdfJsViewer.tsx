@@ -131,12 +131,12 @@ export default function PdfJsViewer({ src, title }: Props) {
 
   if (loading) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm text-slate-500">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm text-slate-300">
+        <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
         <p>Loading {title || "PDF"}…</p>
-        {elapsed >= 8 && (
-          <p className="text-[11px] text-slate-400">
-            Still working ({elapsed}s) — large file or slow host…
+        {elapsed >= 6 && (
+          <p className="text-[11px] text-slate-500">
+            Still working ({elapsed}s)…
           </p>
         )}
       </div>
@@ -144,13 +144,16 @@ export default function PdfJsViewer({ src, title }: Props) {
   }
 
   if (error || !blobUrl) {
+    const friendly =
+      error && /ncert/i.test(error)
+        ? "Could not open this class PDF. Ask teacher to re-upload."
+        : error || "Could not open PDF";
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm font-semibold text-rose-600">
-          {error || "Could not open PDF"}
-        </p>
-        <p className="max-w-sm text-[11px] text-slate-500">
-          Try Reload above. If it still fails, teacher should re-upload the PDF.
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-slate-950 px-6 text-center">
+        <p className="text-sm font-semibold text-rose-400">{friendly}</p>
+        <p className="max-w-sm text-[11px] text-slate-400">
+          Tap Reload. If it still fails, teacher must re-upload (old tmp links
+          expire).
         </p>
         <a
           href={src.startsWith("data:") ? blobUrl || src : src}
@@ -167,7 +170,7 @@ export default function PdfJsViewer({ src, title }: Props) {
     <iframe
       title={title || "PDF"}
       src={blobUrl}
-      className="h-full w-full border-0 bg-white"
+      className="h-full w-full border-0 bg-slate-900"
     />
   );
 }

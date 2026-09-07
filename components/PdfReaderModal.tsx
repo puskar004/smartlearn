@@ -14,19 +14,20 @@ type Props = {
   open: boolean;
   title: string;
   ncertLink?: string;
+  /** Prefer server open by class code + material id (student path) */
+  classCode?: string;
+  materialId?: string;
   onClose: () => void;
 };
 
 type Mode = "reader" | "plugin" | "gview" | "portal";
 
-/**
- * In-app NCERT/CBSE PDF reader.
- * Primary: pdf.js canvas via same-origin proxy (no Chrome X-Frame block).
- */
 export default function PdfReaderModal({
   open,
   title,
   ncertLink,
+  classCode,
+  materialId,
   onClose,
 }: Props) {
   const [mode, setMode] = useState<Mode>("reader");
@@ -36,18 +37,26 @@ export default function PdfReaderModal({
   const origin =
     typeof window !== "undefined" ? window.location.origin : undefined;
 
+  /** Same-origin student/teacher open — never hits NCERT wording for class files */
+  const classOpenSrc = useMemo(() => {
+    if (!classCode) return null;
+    const q = new URLSearchParams();
+    q.set("code", classCode.toUpperCase());
+    if (materialId) q.set("id", materialId);
+    return `/api/classroom/pdf?${q.toString()}`;
+  }, [classCode, materialId]);
+
   const proxySrc = useMemo(() => {
+    if (classOpenSrc) return classOpenSrc;
     if (!pdf) return null;
-    // data: must stay as-is (never wrap in absolute origin)
     if (pdf.startsWith("data:")) return pdf;
     return inAppPdfSrc(pdf, origin);
-  }, [pdf, origin]);
+  }, [classOpenSrc, pdf, origin]);
 
   const iframeSrc = useMemo(() => {
     if (!open) return "about:blank";
     if (mode === "portal" && ncertLink) return ncertLink;
     if (mode === "gview" && pdf) {
-      // gview cannot open data: — fall back to proxy/original https
       if (pdf.startsWith("data:")) return proxySrc || "about:blank";
       return googleEmbedPdf(pdf.startsWith("http") ? pdf : proxySrc || pdf);
     }
@@ -62,9 +71,8 @@ export default function PdfReaderModal({
   useEffect(() => {
     setPdfReading(open);
     if (!open) return;
-    setMode(pdf ? "reader" : "portal");
+    setMode(pdf || classOpenSrc ? "reader" : "portal");
     setTick((t) => t + 1);
-    // Keep flag true for whole open duration (survives focus blips)
     document.documentElement.dataset.pdfOpen = "1";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -72,7 +80,6 @@ export default function PdfReaderModal({
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    // Re-assert every few seconds while open (focus lock safety)
     const keep = window.setInterval(() => {
       document.documentElement.dataset.pdfOpen = "1";
     }, 1000);
@@ -83,30 +90,30 @@ export default function PdfReaderModal({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, pdf, onClose]);
+  }, [open, pdf, classOpenSrc, onClose]);
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex flex-col bg-slate-950/80 p-1 backdrop-blur-sm sm:p-3"
+      className="fixed inset-0 z-[120] flex flex-col bg-slate-950/90 p-1 backdrop-blur-sm sm:p-3"
       data-pdf-reader="1"
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-600 bg-white shadow-2xl">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5">
-          <FileText className="h-4 w-4 text-emerald-600" />
-          <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-950 px-3 py-2.5">
+          <FileText className="h-4 w-4 text-emerald-400" />
+          <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-100">
             {title}
           </div>
-          {pdf && (
-            <div className="flex flex-wrap rounded-lg bg-slate-200/70 p-0.5 text-[11px] font-semibold">
+          {(pdf || classOpenSrc) && (
+            <div className="flex flex-wrap rounded-lg bg-slate-800 p-0.5 text-[11px] font-semibold">
               {(
                 [
                   ["reader", "Reader"],
                   ["plugin", "PDF"],
                   ["gview", "Viewer"],
-                  ["portal", "NCERT page"],
+                  ["portal", "Source"],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -115,8 +122,8 @@ export default function PdfReaderModal({
                   onClick={() => setMode(id)}
                   className={`rounded-md px-2.5 py-1 transition ${
                     mode === id
-                      ? "bg-white text-emerald-700 shadow"
-                      : "text-slate-500 hover:text-slate-800"
+                      ? "bg-slate-700 text-emerald-300 shadow"
+                      : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
                   {label}
@@ -124,11 +131,11 @@ export default function PdfReaderModal({
               ))}
             </div>
           )}
-          {proxySrc && (
+          {proxySrc && !proxySrc.startsWith("data:") && (
             <a
               href={proxySrc}
               download={`${title.replace(/[^\w]+/g, "_").slice(0, 40)}.pdf`}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
             >
               <Download className="h-3 w-3" /> Download
             </a>
@@ -136,21 +143,21 @@ export default function PdfReaderModal({
           <button
             type="button"
             onClick={() => setTick((t) => t + 1)}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
           >
             <ExternalLink className="h-3 w-3" /> Reload
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"
+            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-950 hover:text-rose-300"
             aria-label="Close reader"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="relative min-h-0 flex-1 bg-slate-100">
+        <div className="relative min-h-0 flex-1 bg-slate-950">
           {mode === "reader" && proxySrc ? (
             <PdfJsViewer
               key={`${proxySrc}-${tick}`}
@@ -162,12 +169,12 @@ export default function PdfReaderModal({
               key={`${iframeSrc}-${tick}`}
               title={title}
               src={iframeSrc}
-              className="h-full w-full border-0 bg-white"
+              className="h-full w-full border-0 bg-slate-900"
               allow="fullscreen"
             />
           )}
-          <p className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] text-white">
-            SmartLearn PDF reader · Esc closes · tab-switch paused
+          <p className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1 text-[10px] text-slate-200">
+            SmartLearn PDF · Esc closes · dark reader
           </p>
         </div>
       </div>

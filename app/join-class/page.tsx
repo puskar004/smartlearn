@@ -46,9 +46,12 @@ export default function JoinClassPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [openMats, setOpenMats] = useState<Record<string, boolean>>({});
-  const [viewer, setViewer] = useState<{ title: string; url: string } | null>(
-    null
-  );
+  const [viewer, setViewer] = useState<{
+    title: string;
+    url: string;
+    code?: string;
+    id?: string;
+  } | null>(null);
 
   const mergeMaterials = (
     code: string,
@@ -454,6 +457,8 @@ export default function JoinClassPage() {
                                 setViewer({
                                   title: m.title || "Notes PDF",
                                   url: m.url,
+                                  code: r.code,
+                                  id: m.id,
                                 })
                               }
                               className="flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
@@ -497,6 +502,8 @@ export default function JoinClassPage() {
         open={Boolean(viewer)}
         title={viewer?.title || "PDF"}
         ncertLink={viewer?.url}
+        classCode={viewer?.code}
+        materialId={viewer?.id}
         onClose={() => setViewer(null)}
       />
     </div>
