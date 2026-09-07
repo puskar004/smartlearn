@@ -48,6 +48,7 @@ export default function JoinClassPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
   const [booting, setBooting] = useState(true);
   const [viewer, setViewer] = useState<{
     title: string;
@@ -74,21 +75,59 @@ export default function JoinClassPage() {
     const c = classCode.toUpperCase();
     try {
       const mr = await fetch(
-        `/api/classroom?action=materials&code=${encodeURIComponent(c)}`,
-        { cache: "no-store" }
+        `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${Date.now()}`,
+        { cache: "no-store", credentials: "same-origin" }
       );
       const md = await mr.json().catch(() => ({}));
+      const list = (md.materials || []) as TeacherMaterial[];
+      const materials = mergeMaterials(c, list);
       return {
-        materials: mergeMaterials(c, (md.materials || []) as TeacherMaterial[]),
+        materials,
         name: (md.name as string) || undefined,
         teacherName: (md.teacherName as string) || undefined,
+        count: materials.length,
       };
     } catch {
+      const materials = readCachedClassMaterials(c);
       return {
-        materials: readCachedClassMaterials(c),
+        materials,
         name: undefined,
         teacherName: undefined,
+        count: materials.length,
       };
+    }
+  };
+
+  const refreshMaterials = async (classCode: string) => {
+    const up = classCode.toUpperCase();
+    setRefreshing(up);
+    setErr(null);
+    try {
+      const got = await fetchMaterials(up);
+      setRooms((prev) =>
+        prev.map((x) =>
+          x.code === up
+            ? {
+                ...x,
+                showMats: true,
+                materials: got.materials,
+                name: got.name || x.name,
+                teacherName: got.teacherName || x.teacherName,
+              }
+            : x
+        )
+      );
+      if (got.count === 0) {
+        setMsg(
+          `No PDFs on ${up} yet. Ask teacher to Publish again on this code.`
+        );
+      } else {
+        setMsg(`Loaded ${got.count} PDF(s) for ${up}.`);
+      }
+    } catch {
+      setErr("Could not refresh materials. Try again.");
+    } finally {
+      setRefreshing(null);
     }
   };
 
@@ -261,28 +300,15 @@ export default function JoinClassPage() {
 
   const toggleMats = async (c: string) => {
     const up = c.toUpperCase();
+    const room = rooms.find((r) => r.code === up);
+    const opening = !room?.showMats;
     setRooms((prev) =>
       prev.map((r) =>
         r.code === up ? { ...r, showMats: !r.showMats } : r
       )
     );
-    // refresh materials when opening
-    const room = rooms.find((r) => r.code === up);
-    if (room && !room.showMats) {
-      const got = await fetchMaterials(up);
-      setRooms((prev) =>
-        prev.map((r) =>
-          r.code === up
-            ? {
-                ...r,
-                showMats: true,
-                materials: got.materials,
-                name: got.name || r.name,
-                teacherName: got.teacherName || r.teacherName,
-              }
-            : r
-        )
-      );
+    if (opening) {
+      await refreshMaterials(up);
     }
   };
 
@@ -436,27 +462,31 @@ export default function JoinClassPage() {
                           Notes stay available for 48 hours · open inside
                           SmartLearn (no new tab)
                         </p>
-                        {mats.length === 0 ? (
+                        <div className="mb-2 flex justify-end">
+                          <button
+                            type="button"
+                            disabled={refreshing === r.code}
+                            onClick={() => void refreshMaterials(r.code)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                          >
+                            {refreshing === r.code ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            Refresh materials
+                          </button>
+                        </div>
+                        {refreshing === r.code ? (
+                          <div className="rounded-xl bg-white px-3 py-6 text-center text-xs text-slate-500">
+                            <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-indigo-600" />
+                            Loading PDFs…
+                          </div>
+                        ) : mats.length === 0 ? (
                           <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-xs text-slate-500">
-                            No notes yet. Ask teacher to publish a PDF on code{" "}
+                            No notes yet. Ask teacher to click{" "}
+                            <span className="font-bold">Publish to class</span>{" "}
+                            on code{" "}
                             <span className="font-mono font-bold">{r.code}</span>
-                            .
-                            <button
-                              type="button"
-                              className="mt-2 block w-full font-bold text-indigo-600"
-                              onClick={async () => {
-                                const got = await fetchMaterials(r.code);
-                                setRooms((prev) =>
-                                  prev.map((x) =>
-                                    x.code === r.code
-                                      ? { ...x, materials: got.materials }
-                                      : x
-                                  )
-                                );
-                              }}
-                            >
-                              Refresh materials
-                            </button>
+                            , then tap Refresh materials.
                           </div>
                         ) : (
                           <ul className="space-y-2">
