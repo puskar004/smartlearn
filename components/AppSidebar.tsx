@@ -92,7 +92,7 @@ export default function AppSidebar() {
   const bottom = isTeacher ? bottomTeacher : bottomStudent;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 flex w-[72px] flex-col border-r border-indigo-100/80 bg-white/80 backdrop-blur-xl lg:w-[260px]">
+    <aside className="fixed inset-y-0 left-0 z-40 flex w-[72px] flex-col border-r border-indigo-100/80 bg-white/80 backdrop-blur-xl dark:border-slate-700 dark:bg-slate-950/95 lg:w-[260px]">
       <Link
         href={isTeacher ? "/teacher" : "/dashboard"}
         className="flex items-center gap-3 px-4 py-5 lg:px-5"
@@ -104,10 +104,10 @@ export default function AppSidebar() {
           className="h-10 w-10 rounded-xl shadow-md shadow-indigo-500/20"
         />
         <div className="hidden leading-tight lg:block">
-          <div className="text-base font-extrabold tracking-tight text-slate-900">
-            Smart<span className="text-violet-600">Learn</span>
+          <div className="text-base font-extrabold tracking-tight text-slate-900 dark:text-slate-50">
+            Smart<span className="text-violet-600 dark:text-violet-400">Learn</span>
           </div>
-          <div className="text-[10px] font-medium text-slate-400">
+          <div className="text-[10px] font-medium text-slate-400 dark:text-slate-300">
             {isTeacher ? "Teacher console" : "Learn. Grow. Achieve."}
           </div>
         </div>
@@ -143,9 +143,9 @@ export default function AppSidebar() {
                 "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 active
                   ? isTeacher
-                    ? "bg-indigo-100 text-indigo-900 shadow-sm"
-                    : "bg-violet-100 text-violet-800 shadow-sm"
-                  : "text-slate-500 hover:bg-violet-50 hover:text-violet-700"
+                    ? "bg-indigo-100 text-indigo-900 shadow-sm dark:bg-indigo-900/60 dark:text-indigo-100"
+                    : "bg-violet-100 text-violet-800 shadow-sm dark:bg-violet-900/50 dark:text-violet-100"
+                  : "text-slate-500 hover:bg-violet-50 hover:text-violet-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-violet-200"
               )}
             >
               <Icon
@@ -153,9 +153,9 @@ export default function AppSidebar() {
                   "h-5 w-5 shrink-0 transition-colors",
                   active
                     ? isTeacher
-                      ? "text-indigo-600"
-                      : "text-violet-600"
-                    : "text-slate-400 group-hover:text-violet-500"
+                      ? "text-indigo-600 dark:text-indigo-300"
+                      : "text-violet-600 dark:text-violet-300"
+                    : "text-slate-400 group-hover:text-violet-500 dark:text-slate-400"
                 )}
               />
               <span className="hidden lg:inline">{item.label}</span>

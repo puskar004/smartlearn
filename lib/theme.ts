@@ -3,14 +3,15 @@ export const THEME_KEY = "sl_theme_v1";
 export type ThemeMode = "light" | "dark";
 
 export function getTheme(): ThemeMode {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   try {
     const v = localStorage.getItem(THEME_KEY);
     if (v === "light" || v === "dark") return v;
   } catch {
     // ignore
   }
-  return "dark";
+  // Default light; user can switch to dark via top toggle
+  return "light";
 }
 
 export function applyTheme(mode: ThemeMode) {

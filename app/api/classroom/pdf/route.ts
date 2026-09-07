@@ -154,12 +154,13 @@ export async function GET(req: NextRequest) {
       if (!uniq.has(key)) uniq.set(key, m);
     }
     const list = Array.from(uniq.values());
-    const hit =
-      (id && list.find((m) => m.id === id)) ||
-      (id && list.find((m) => (m.url || "").includes(id))) ||
-      list[0];
+    // Prefer matching id; else try every material until one PDF loads
+    const ordered = [
+      ...(id ? list.filter((m) => m.id === id) : []),
+      ...list.filter((m) => !id || m.id !== id),
+    ];
 
-    if (!hit?.url) {
+    if (!ordered.length) {
       return NextResponse.json(
         {
           error: "Material not found",
@@ -169,20 +170,24 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const bytes = await bytesFromMaterialUrl(hit.url, origin);
-    if (!bytes) {
-      return NextResponse.json(
-        {
-          error: "Could not open PDF",
-          detail:
-            "File host expired or blocked. Teacher must re-upload this PDF.",
-        },
-        { status: 502 }
-      );
+    for (const hit of ordered) {
+      if (!hit?.url) continue;
+      const bytes = await bytesFromMaterialUrl(hit.url, origin);
+      if (bytes) {
+        return pdfResponse(
+          bytes,
+          `${(hit.title || "notes").replace(/[^\w.-]+/g, "_").slice(0, 40)}.pdf`
+        );
+      }
     }
-    return pdfResponse(
-      bytes,
-      `${(hit.title || "notes").replace(/[^\w.-]+/g, "_").slice(0, 40)}.pdf`
+
+    return NextResponse.json(
+      {
+        error: "Could not open PDF",
+        detail:
+          "File host expired or blocked. Teacher must re-upload this PDF.",
+      },
+      { status: 502 }
     );
   } catch (e) {
     console.error("classroom pdf", e);

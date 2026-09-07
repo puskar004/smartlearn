@@ -143,3 +143,85 @@ html.sl-session-lock body {
 html.sl-session-lock aside {
   display: none !important;
 }
+
+/* ---- Dark mode readability (global) ---- */
+html.dark aside {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-color: rgb(51 65 85) !important;
+  color: rgb(226 232 240);
+}
+html.dark aside a,
+html.dark aside span,
+html.dark aside div,
+html.dark aside p {
+  color: inherit;
+}
+html.dark aside .text-slate-900,
+html.dark aside .text-slate-800,
+html.dark aside .text-slate-700,
+html.dark main .text-slate-900,
+html.dark main .text-slate-800,
+html.dark main .text-slate-700 {
+  color: rgb(241 245 249) !important;
+}
+html.dark aside .text-slate-600,
+html.dark aside .text-slate-500,
+html.dark aside .text-slate-400,
+html.dark main .text-slate-600,
+html.dark main .text-slate-500 {
+  color: rgb(203 213 225) !important;
+}
+html.dark main .text-slate-400 {
+  color: rgb(148 163 184) !important;
+}
+html.dark main .bg-white,
+html.dark header .bg-white,
+html.dark aside .bg-white\/80 {
+  background-color: rgb(30 41 59) !important;
+}
+html.dark main .bg-slate-50,
+html.dark main .bg-\[\#f4f6ff\] {
+  background-color: rgb(15 23 42) !important;
+}
+html.dark main .border-slate-100,
+html.dark main .border-slate-200,
+html.dark main .border-indigo-100,
+html.dark main .border-violet-100 {
+  border-color: rgb(51 65 85) !important;
+}
+html.dark main .bg-emerald-50 {
+  background-color: rgba(6, 78, 59, 0.45) !important;
+}
+html.dark main .text-emerald-700,
+html.dark main .text-emerald-800 {
+  color: rgb(110 231 183) !important;
+}
+html.dark main .bg-violet-50,
+html.dark main .bg-indigo-50,
+html.dark main .hover\:bg-violet-50:hover,
+html.dark main .hover\:bg-indigo-50:hover {
+  background-color: rgba(76, 29, 149, 0.35) !important;
+}
+html.dark main .text-violet-700,
+html.dark main .text-violet-800,
+html.dark main .text-indigo-700,
+html.dark main .text-indigo-800 {
+  color: rgb(196 181 253) !important;
+}
+html.dark main input,
+html.dark main textarea,
+html.dark main select {
+  background-color: rgb(15 23 42) !important;
+  color: rgb(241 245 249) !important;
+  border-color: rgb(71 85 105) !important;
+}
+html.dark main input::placeholder,
+html.dark main textarea::placeholder {
+  color: rgb(148 163 184) !important;
+}
+html.dark .sl-row:hover {
+  background-color: rgba(51, 65, 85, 0.85);
+}
+html.dark header {
+  color: rgb(226 232 240);
+}

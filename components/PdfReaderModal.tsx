@@ -32,6 +32,7 @@ export default function PdfReaderModal({
 }: Props) {
   const [mode, setMode] = useState<Mode>("reader");
   const [tick, setTick] = useState(0);
+  const [srcIndex, setSrcIndex] = useState(0);
   const pdf = resolveEmbeddablePdf(ncertLink);
 
   const origin =
@@ -46,12 +47,28 @@ export default function PdfReaderModal({
     return `/api/classroom/pdf?${q.toString()}`;
   }, [classCode, materialId]);
 
-  const proxySrc = useMemo(() => {
-    if (classOpenSrc) return classOpenSrc;
-    if (!pdf) return null;
-    if (pdf.startsWith("data:")) return pdf;
-    return inAppPdfSrc(pdf, origin);
+  const sources = useMemo(() => {
+    const list: string[] = [];
+    const add = (u?: string | null) => {
+      if (u && !list.includes(u)) list.push(u);
+    };
+    if (pdf?.startsWith("data:")) add(pdf);
+    if (pdf?.startsWith("/api/")) add(pdf);
+    add(classOpenSrc);
+    if (pdf && /^https?:\/\//i.test(pdf)) {
+      add(inAppPdfSrc(pdf, origin));
+      // short url direct via classroom pdf
+      if (pdf.length < 1800) {
+        add(`/api/classroom/pdf?url=${encodeURIComponent(pdf)}`);
+      }
+    }
+    if (pdf && !pdf.startsWith("data:") && !pdf.startsWith("http") && !pdf.startsWith("/")) {
+      add(inAppPdfSrc(pdf, origin));
+    }
+    return list;
   }, [classOpenSrc, pdf, origin]);
+
+  const proxySrc = sources[Math.min(srcIndex, Math.max(0, sources.length - 1))] || null;
 
   const iframeSrc = useMemo(() => {
     if (!open) return "about:blank";
@@ -71,7 +88,8 @@ export default function PdfReaderModal({
   useEffect(() => {
     setPdfReading(open);
     if (!open) return;
-    setMode(pdf || classOpenSrc ? "reader" : "portal");
+    setMode(sources.length ? "reader" : "portal");
+    setSrcIndex(0);
     setTick((t) => t + 1);
     document.documentElement.dataset.pdfOpen = "1";
     const onKey = (e: KeyboardEvent) => {
@@ -90,7 +108,7 @@ export default function PdfReaderModal({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, pdf, classOpenSrc, onClose]);
+  }, [open, pdf, classOpenSrc, sources.length, onClose]);
 
   if (!open) return null;
 
@@ -160,9 +178,15 @@ export default function PdfReaderModal({
         <div className="relative min-h-0 flex-1 bg-slate-950">
           {mode === "reader" && proxySrc ? (
             <PdfJsViewer
-              key={`${proxySrc}-${tick}`}
+              key={`${proxySrc}-${tick}-${srcIndex}`}
               src={proxySrc}
               title={title}
+              onFail={() => {
+                setSrcIndex((i) => {
+                  if (i + 1 < sources.length) return i + 1;
+                  return i;
+                });
+              }}
             />
           ) : (
             <iframe
