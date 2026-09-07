@@ -47,10 +47,37 @@ function TeacherInner() {
   const sp = useSearchParams();
   const tab = (sp.get("tab") as TeacherTab) || "students";
 
+  const cacheKey = userId ? `sl_teacher_classes_${userId}` : "";
   const [classes, setClasses] = useState<Classroom[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
   const [room, setRoom] = useState<Classroom | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const selectClass = useCallback(
+    (code: string, list?: Classroom[]) => {
+      const src = list || classes;
+      const c = code.toUpperCase();
+      setActiveCode(c);
+      const hit = src.find((x) => x.code === c) || null;
+      if (hit) setRoom(hit);
+      // never clear room on switch if hit missing — keep previous until loaded
+    },
+    [classes]
+  );
+
+  const persistClasses = useCallback(
+    (list: Classroom[]) => {
+      setClasses(list);
+      if (cacheKey) {
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(list));
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [cacheKey]
+  );
   const [busy, setBusy] = useState(false);
   const [className, setClassName] = useState("Class 12 Science A");
   const [renameTo, setRenameTo] = useState("");
@@ -81,44 +108,51 @@ function TeacherInner() {
     if (!userId) return;
     try {
       const list = await apiListMyClasses();
-      setClasses(list);
-      const code = activeCode || list[0]?.code || null;
-      if (!activeCode && list[0]) setActiveCode(list[0].code);
-      if (code) {
-        // Prefer room from list (already has materials) — skip extra room API
-        const fromList = list.find((c) => c.code === code) || null;
-        if (fromList) setRoom(fromList);
-        else {
-          const r = await apiGetRoom(code);
-          setRoom(r);
-        }
-      } else {
-        setRoom(null);
+      if (list.length) {
+        persistClasses(list);
+        setActiveCode((prev) => {
+          const next = prev && list.some((c) => c.code === prev) ? prev : list[0].code;
+          const hit = list.find((c) => c.code === next) || list[0];
+          setRoom(hit);
+          return next;
+        });
       }
       setError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
-      // Soft-handle Clerk rate limits
+      // Never wipe UI on rate limit — keep cached classes
       if (/too many requests|429|rate|busy/i.test(msg)) {
-        // Keep last good data; soft banner only
-        setError("Refreshing… if this stays, click Create/Upload again.");
-        window.setTimeout(() => setError(null), 4000);
-      } else {
+        setError(null);
+      } else if (classes.length === 0) {
         setError(msg);
       }
     } finally {
       setLoading(false);
     }
-  }, [userId, activeCode]);
+  }, [userId, persistClasses, classes.length]);
 
   useEffect(() => {
     if (!userId) return;
     if (getRole(userId) !== "teacher") {
       setRole(userId, "teacher");
     }
+    // Instant restore from cache (no wait)
+    try {
+      const raw = localStorage.getItem(`sl_teacher_classes_${userId}`);
+      if (raw) {
+        const cached = JSON.parse(raw) as Classroom[];
+        if (Array.isArray(cached) && cached.length) {
+          setClasses(cached);
+          setActiveCode(cached[0].code);
+          setRoom(cached[0]);
+          setLoading(false);
+        }
+      }
+    } catch {
+      // ignore
+    }
     void refresh();
-    // No aggressive polling — refresh on actions only (smooth, no rate limit)
-  }, [userId, refresh]);
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps — load once per user
 
   useEffect(() => {
     if (room?.name) setRenameTo(room.name);
@@ -146,8 +180,20 @@ function TeacherInner() {
     setBusy(true);
     try {
       const c = await apiCreateClassroom(className);
+      setClasses((prev) => {
+        const next = [c, ...prev.filter((x) => x.code !== c.code)];
+        try {
+          if (userId)
+            localStorage.setItem(
+              `sl_teacher_classes_${userId}`,
+              JSON.stringify(next)
+            );
+        } catch {
+          // ignore
+        }
+        return next;
+      });
       setActiveCode(c.code);
-      setClasses((prev) => [c, ...prev.filter((x) => x.code !== c.code)]);
       setRoom(c);
       setRenameTo(c.name);
       router.replace("/teacher?tab=code");
@@ -470,8 +516,7 @@ function TeacherInner() {
             key={c.code}
             type="button"
             onClick={() => {
-              setActiveCode(c.code);
-              void apiGetRoom(c.code).then((r) => setRoom(r));
+              selectClass(c.code);
             }}
             className={cn(
               "rounded-xl border px-3 py-2 text-xs font-bold transition",
@@ -493,8 +538,7 @@ function TeacherInner() {
               key={c.code}
               type="button"
               onClick={() => {
-                setActiveCode(c.code);
-                void apiGetRoom(c.code).then((r) => setRoom(r));
+                selectClass(c.code);
               }}
               className={cn(
                 "rounded-lg border px-2.5 py-1 text-[11px] font-bold",
@@ -509,14 +553,18 @@ function TeacherInner() {
         </div>
       )}
 
-      {loading ? (
+      {loading && classes.length === 0 ? (
         <div className="mt-10 flex justify-center text-slate-400">
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
-      ) : !room ? (
+      ) : classes.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-10 text-center text-sm text-slate-500">
           Create your first class to get a <strong>private code</strong> students
           can join from any phone.
+        </div>
+      ) : !room ? (
+        <div className="mt-8 rounded-2xl border border-dashed border-amber-200 bg-amber-50/50 p-8 text-center text-sm text-amber-900">
+          Select a class chip above to manage it.
         </div>
       ) : (
         <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_300px]">

@@ -283,32 +283,13 @@ export async function createClassroomForTeacher(
 export async function listTeacherClassrooms(
   teacherId: string
 ): Promise<Classroom[]> {
+  // Single Clerk getUser — no remote scans (avoids rate limits)
   const meta = await getTeacherMeta(teacherId);
   const rooms = meta.classrooms || [];
-  let fileBank: Record<string, TeacherMaterial[]> = {};
-  try {
-    const { getMaterialsForTeacher } = await import(
-      "@/lib/materials-bank-store"
-    );
-    fileBank = await getMaterialsForTeacher(teacherId);
-  } catch {
-    // ignore
-  }
-  return rooms.map((r) => {
-    const merged = materialsForRoom(meta, r.code, r);
-    const extra = fileBank[r.code] || [];
-    const map = new Map<string, TeacherMaterial>();
-    for (const m of [...extra, ...merged]) {
-      if (!m?.url) continue;
-      map.set(m.id || m.url, m);
-    }
-    return {
-      ...r,
-      materials: Array.from(map.values()).sort(
-        (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
-      ),
-    };
-  });
+  return rooms.map((r) => ({
+    ...r,
+    materials: materialsForRoom(meta, r.code, r),
+  }));
 }
 
 export async function getClassroomForTeacher(

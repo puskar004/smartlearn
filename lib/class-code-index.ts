@@ -79,20 +79,23 @@ async function persist(idx: Index) {
   } catch {
     // ignore
   }
-  try {
-    const remote = await uploadBufferRemote(
-      Buffer.from(JSON.stringify(idx), "utf8"),
-      `class-codes-${Date.now()}.json`,
-      "application/json"
-    );
-    if (remote) {
-      idx.remoteUrl = remote;
-      mem.idx = idx;
-      await fs.writeFile(pointerPath(), remote, "utf8").catch(() => null);
-      await fs.writeFile(fp, JSON.stringify(idx), "utf8").catch(() => null);
+  // Skip remote mirror on every write (was causing rate/limit noise).
+  // Optional background mirror only if no remoteUrl yet.
+  if (!idx.remoteUrl) {
+    try {
+      const remote = await uploadBufferRemote(
+        Buffer.from(JSON.stringify(idx), "utf8"),
+        `class-codes-${Date.now()}.json`,
+        "application/json"
+      );
+      if (remote) {
+        idx.remoteUrl = remote;
+        mem.idx = idx;
+        await fs.writeFile(pointerPath(), remote, "utf8").catch(() => null);
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 }
 
