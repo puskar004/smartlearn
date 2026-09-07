@@ -168,7 +168,7 @@ export default function JoinClassPage() {
     };
     document.addEventListener("visibilitychange", onVis);
     // poll materials gently
-    const id = window.setInterval(() => void syncFromLocalAndServer(), 20_000);
+    const id = window.setInterval(() => void syncFromLocalAndServer(), 60_000);
     return () => {
       window.removeEventListener(ROLE_EVENT, onRole);
       document.removeEventListener("visibilitychange", onVis);

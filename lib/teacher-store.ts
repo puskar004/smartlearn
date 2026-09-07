@@ -152,7 +152,10 @@ export async function apiCreateClassroom(name: string): Promise<Classroom> {
 
 export async function apiListMyClasses(): Promise<Classroom[]> {
   const res = await fetch("/api/classroom?action=mine");
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 429 || /too many requests/i.test(String(data.error || ""))) {
+    throw new Error("Too Many Requests — wait 10s and try again");
+  }
   if (!res.ok) throw new Error(data.error || "Failed to load classes");
   return (data.classrooms || []) as Classroom[];
 }

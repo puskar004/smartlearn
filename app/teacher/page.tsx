@@ -85,14 +85,25 @@ function TeacherInner() {
       const code = activeCode || list[0]?.code || null;
       if (!activeCode && list[0]) setActiveCode(list[0].code);
       if (code) {
-        const r = await apiGetRoom(code);
-        setRoom(r);
+        // Prefer room from list (already has materials) — skip extra room API
+        const fromList = list.find((c) => c.code === code) || null;
+        if (fromList) setRoom(fromList);
+        else {
+          const r = await apiGetRoom(code);
+          setRoom(r);
+        }
       } else {
         setRoom(null);
       }
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      const msg = e instanceof Error ? e.message : "Failed to load";
+      // Soft-handle Clerk rate limits
+      if (/too many requests|429|rate/i.test(msg)) {
+        setError("Server busy — wait a few seconds, then refresh.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -104,7 +115,8 @@ function TeacherInner() {
       setRole(userId, "teacher");
     }
     void refresh();
-    const id = setInterval(() => void refresh(), 25_000);
+    // Slow poll — avoid Clerk "Too Many Requests"
+    const id = setInterval(() => void refresh(), 60_000);
     return () => clearInterval(id);
   }, [userId, refresh]);
 

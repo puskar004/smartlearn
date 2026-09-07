@@ -149,34 +149,62 @@ function pushAlert(
   return [next, ...(c.alerts || [])].slice(0, 40);
 }
 
-/** Scan teachers for a class code (works across devices). */
+/** Resolve class by code — uses code index first (no full user scan). */
 export async function findClassroomByCode(
   code: string
 ): Promise<{ teacherId: string; classroom: Classroom } | null> {
   const normalized = code.trim().toUpperCase();
   if (!normalized) return null;
 
-  const client = await clerkClient();
-  let offset = 0;
-  const limit = 100;
-
-  for (let page = 0; page < 20; page++) {
-    const res = await client.users.getUserList({ limit, offset });
-    for (const u of res.data) {
-      const meta = metaOf(u);
-      if (meta.role !== "teacher") continue;
-      const rooms = meta.classrooms || [];
-      const room = rooms.find((c) => c.code === normalized);
+  // 1) Fast index lookup
+  try {
+    const { lookupTeacherByCode, registerClassCode } = await import(
+      "@/lib/class-code-index"
+    );
+    const tid = await lookupTeacherByCode(normalized);
+    if (tid) {
+      const room = await getClassroomForTeacher(tid, normalized);
       if (room) {
-        return {
-          teacherId: u.id,
-          classroom: { ...room, teacherId: u.id },
-        };
+        return { teacherId: tid, classroom: { ...room, teacherId: tid } };
       }
     }
-    offset += limit;
-    if (offset >= (res.totalCount || 0)) break;
-    if (res.data.length === 0) break;
+  } catch {
+    // ignore
+  }
+
+  // 2) Limited fallback scan (max 2 pages) — only if index miss
+  try {
+    const client = await clerkClient();
+    let offset = 0;
+    const limit = 50;
+    for (let page = 0; page < 2; page++) {
+      const res = await client.users.getUserList({ limit, offset });
+      for (const u of res.data) {
+        const meta = metaOf(u);
+        if (meta.role !== "teacher") continue;
+        const room = (meta.classrooms || []).find(
+          (c) => c.code === normalized
+        );
+        if (room) {
+          try {
+            const { registerClassCode } = await import(
+              "@/lib/class-code-index"
+            );
+            await registerClassCode(normalized, u.id);
+          } catch {
+            // ignore
+          }
+          return {
+            teacherId: u.id,
+            classroom: { ...room, teacherId: u.id },
+          };
+        }
+      }
+      offset += limit;
+      if (res.data.length < limit) break;
+    }
+  } catch (e) {
+    console.error("findClassroomByCode fallback", e);
   }
   return null;
 }
@@ -206,10 +234,18 @@ export async function createClassroomForTeacher(
   const meta = metaOf(user);
   const existing = meta.classrooms || [];
 
+  // Unique among this teacher's classes only (no global Clerk scan)
+  const used = new Set((existing || []).map((c) => c.code));
   let code = makeCode(6);
-  for (let i = 0; i < 12; i++) {
-    const hit = await findClassroomByCode(code);
-    if (!hit) break;
+  for (let i = 0; i < 20; i++) {
+    if (!used.has(code)) {
+      try {
+        const { isCodeTaken } = await import("@/lib/class-code-index");
+        if (!(await isCodeTaken(code))) break;
+      } catch {
+        break;
+      }
+    }
     code = makeCode(6);
   }
 
@@ -233,6 +269,13 @@ export async function createClassroomForTeacher(
     classrooms,
     activeClassCode: code,
   });
+
+  try {
+    const { registerClassCode } = await import("@/lib/class-code-index");
+    await registerClassCode(code, teacherId);
+  } catch {
+    // ignore
+  }
 
   return room;
 }
@@ -342,6 +385,13 @@ export async function deleteClassroom(
     classrooms,
     activeClassCode,
   });
+
+  try {
+    const { unregisterClassCode } = await import("@/lib/class-code-index");
+    await unregisterClassCode(normalized);
+  } catch {
+    // ignore
+  }
 
   for (const s of room.students || []) {
     try {

@@ -129,7 +129,7 @@ export default function LiveClassPage() {
     if (!userId) return;
     if (getRole(userId) === "teacher") return;
     void load();
-    const id = setInterval(() => void load(), 10_000);
+    const id = setInterval(() => void load(), 20_000);
     return () => clearInterval(id);
   }, [userId, load]);
 

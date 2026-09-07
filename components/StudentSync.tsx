@@ -153,7 +153,7 @@ export default function StudentSync() {
     };
 
     tick();
-    const id = setInterval(tick, 45_000);
+    const id = setInterval(tick, 90_000);
     window.addEventListener("storage", pullLocalAlerts);
     return () => {
       clearInterval(id);
