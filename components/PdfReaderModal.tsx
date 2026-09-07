@@ -38,14 +38,24 @@ export default function PdfReaderModal({
 
   const proxySrc = useMemo(() => {
     if (!pdf) return null;
+    // data: must stay as-is (never wrap in absolute origin)
+    if (pdf.startsWith("data:")) return pdf;
     return inAppPdfSrc(pdf, origin);
   }, [pdf, origin]);
 
   const iframeSrc = useMemo(() => {
     if (!open) return "about:blank";
     if (mode === "portal" && ncertLink) return ncertLink;
-    if (mode === "gview" && pdf) return googleEmbedPdf(pdf);
-    if (mode === "plugin" && proxySrc) return `${proxySrc}&t=${tick}`;
+    if (mode === "gview" && pdf) {
+      // gview cannot open data: — fall back to proxy/original https
+      if (pdf.startsWith("data:")) return proxySrc || "about:blank";
+      return googleEmbedPdf(pdf.startsWith("http") ? pdf : proxySrc || pdf);
+    }
+    if (mode === "plugin" && proxySrc) {
+      if (proxySrc.startsWith("data:")) return proxySrc;
+      const join = proxySrc.includes("?") ? "&" : "?";
+      return `${proxySrc}${join}t=${tick}`;
+    }
     return "about:blank";
   }, [open, mode, pdf, ncertLink, proxySrc, tick]);
 
@@ -53,6 +63,7 @@ export default function PdfReaderModal({
     setPdfReading(open);
     if (!open) return;
     setMode(pdf ? "reader" : "portal");
+    setTick((t) => t + 1);
     // Keep flag true for whole open duration (survives focus blips)
     document.documentElement.dataset.pdfOpen = "1";
     const onKey = (e: KeyboardEvent) => {
