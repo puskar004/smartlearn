@@ -207,7 +207,15 @@ export async function GET(req: NextRequest) {
       let className = `Class ${c}`;
       let teacherName = "";
 
-      // A) Durable materials bank FIRST (per-code remote JSON — works across instances)
+      // A) Shared class-code index FIRST (all instances)
+      try {
+        const { getClassMaterials } = await import("@/lib/class-code-index");
+        addAll(await getClassMaterials(c));
+      } catch {
+        // ignore
+      }
+
+      // A2) Materials bank
       try {
         const { getMaterialsByCode } = await import(
           "@/lib/materials-bank-store"

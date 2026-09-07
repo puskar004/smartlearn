@@ -262,12 +262,24 @@ export async function addMaterialToBank(
 
   const remoteUrl = await persistBank(bank);
 
-  // Keep class code → mats URL pointer for student lookup without Clerk
+  // CRITICAL: publish into shared class-code index (cross-instance)
   try {
-    const { setClassMaterialsUrl } = await import("@/lib/class-code-index");
+    const { publishClassMaterials, setClassMaterialsUrl } = await import(
+      "@/lib/class-code-index"
+    );
+    const published = await publishClassMaterials(
+      c,
+      teacherId,
+      materials,
+      teacherName || "Teacher"
+    );
+    if (published.length) {
+      // prefer shared list
+      materials.splice(0, materials.length, ...published);
+    }
     if (classUrl) await setClassMaterialsUrl(c, classUrl);
-  } catch {
-    // ignore
+  } catch (e) {
+    console.error("publishClassMaterials", e);
   }
 
   return { materials, remoteUrl: classUrl || remoteUrl };
@@ -279,9 +291,14 @@ export async function getMaterialsByCode(
 ): Promise<TeacherMaterial[]> {
   const c = code.toUpperCase();
 
-  // 1) Per-class remote URL from code index
+  // 1) Shared class-code index (works across all Vercel instances)
   try {
-    const { getClassMaterialsUrl } = await import("@/lib/class-code-index");
+    const { getClassMaterials, getClassMaterialsUrl } = await import(
+      "@/lib/class-code-index"
+    );
+    const shared = await getClassMaterials(c);
+    if (shared.length) return pruneList(shared);
+
     const u = await getClassMaterialsUrl(c);
     if (u) {
       const pack = await readCodeRemote(u);

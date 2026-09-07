@@ -116,49 +116,81 @@ export async function POST(req: NextRequest) {
     // Upload file bytes → public URL or local key
     const saved = await saveMaterialFile(userId, code, buf, ext);
 
-    // Prefer non-data short URL for Clerk; keep data URL only if small
     let publishUrl = saved.url;
+    // Shared index cannot hold huge data URLs
     if (publishUrl.startsWith("data:") && publishUrl.length > 100_000) {
-      // force API path for large embeds
       publishUrl = `/api/classroom/material?key=${encodeURIComponent(saved.key)}`;
     }
 
     const user = await currentUser().catch(() => null);
-    let room = null;
+    const teacherName = user?.fullName || user?.firstName || "Teacher";
+    const now = Date.now();
+    const mat = {
+      id: `mat-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      title: title || name.replace(/\.[^.]+$/, ""),
+      url: publishUrl,
+      type: type as "notes" | "video" | "link",
+      subject,
+      createdAt: now,
+      expiresAt: now + 48 * 60 * 60 * 1000,
+      teacherName,
+    };
+
+    // 1) ALWAYS publish to shared class-code index (student reads this)
+    let published: typeof mat[] = [mat];
+    try {
+      const { publishClassMaterials, registerClassCode } = await import(
+        "@/lib/class-code-index"
+      );
+      await registerClassCode(code, userId);
+      published = (await publishClassMaterials(
+        code,
+        userId,
+        [mat],
+        teacherName
+      )) as typeof mat[];
+    } catch (e) {
+      console.error("direct publishClassMaterials", e);
+    }
+
+    // 2) Also try full addMaterialToClass (bank + clerk soft)
+    let room: Awaited<ReturnType<typeof addMaterialToClass>> | null = null;
     try {
       room = await addMaterialToClass(userId, code, {
-        title: title || name.replace(/\.[^.]+$/, ""),
+        title: mat.title,
         url: publishUrl,
-        type,
+        type: mat.type,
         subject,
-        teacherName: user?.fullName || user?.firstName || "Teacher",
+        teacherName,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // Rate limit / Clerk down: file is already on host — still success
       if (!/too many|429|rate/i.test(msg)) {
         console.error("addMaterialToClass", msg);
       }
+    }
+
+    if (!room) {
       room = {
         code,
         name: code,
         teacherId: userId,
-        teacherName: user?.fullName || "Teacher",
-        createdAt: Date.now(),
-        materials: [
-          {
-            id: `mat-${Date.now()}`,
-            title: title || name.replace(/\.[^.]+$/, ""),
-            url: publishUrl,
-            type,
-            subject,
-            createdAt: Date.now(),
-            teacherName: user?.fullName || "Teacher",
-          },
-        ],
+        teacherName,
+        createdAt: now,
+        materials: published.length ? published : [mat],
         students: [],
         liveSession: null,
+        alerts: [],
+        attendanceLog: [],
       };
+    } else if (published.length) {
+      const map = new Map(
+        [...(room.materials || []), ...published].map((m) => [
+          m.id || m.url,
+          m,
+        ])
+      );
+      room = { ...room, materials: Array.from(map.values()) };
     }
 
     return NextResponse.json({
@@ -168,6 +200,8 @@ export async function POST(req: NextRequest) {
       url: publishUrl,
       durable: saved.durable,
       size: buf.length,
+      studentVisible: (published || []).length,
+      ttlHours: 48,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload failed";
