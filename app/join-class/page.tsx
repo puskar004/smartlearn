@@ -74,13 +74,26 @@ export default function JoinClassPage() {
   const fetchMaterials = async (classCode: string) => {
     const c = classCode.toUpperCase();
     try {
+      // Primary notes endpoint
       const mr = await fetch(
-        `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${Date.now()}`,
+        `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${Date.now()}`,
         { cache: "no-store", credentials: "same-origin" }
       );
-      const md = await mr.json().catch(() => ({}));
-      const list = (md.materials || []) as TeacherMaterial[];
+      let md = await mr.json().catch(() => ({}));
+      let list = (md.materials || []) as TeacherMaterial[];
+
+      // Fallback to materials action
+      if (!list.length) {
+        const mr2 = await fetch(
+          `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${Date.now()}`,
+          { cache: "no-store", credentials: "same-origin" }
+        );
+        md = await mr2.json().catch(() => ({}));
+        list = (md.materials || []) as TeacherMaterial[];
+      }
+
       const materials = mergeMaterials(c, list);
+      if (materials.length) cacheClassMaterials(c, materials);
       return {
         materials,
         name: (md.name as string) || undefined,

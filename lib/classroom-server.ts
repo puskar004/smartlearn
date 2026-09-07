@@ -223,6 +223,10 @@ async function saveMeta(
       smartlearn.materialsIndexUrl !== undefined
         ? smartlearn.materialsIndexUrl
         : liveExisting.materialsIndexUrl,
+    classMaterialPacks: {
+      ...(liveExisting.classMaterialPacks || {}),
+      ...(smartlearn.classMaterialPacks || {}),
+    },
   };
 
   let payload: SmartlearnMeta;
@@ -361,9 +365,14 @@ export async function findClassroomByCode(
   return null;
 }
 
-export async function getTeacherMeta(userId: string): Promise<SmartlearnMeta> {
-  const hit = getCachedMeta(userId);
-  if (hit) return hit;
+export async function getTeacherMeta(
+  userId: string,
+  opts?: { fresh?: boolean }
+): Promise<SmartlearnMeta> {
+  if (!opts?.fresh) {
+    const hit = getCachedMeta(userId);
+    if (hit) return hit;
+  }
 
   try {
     const client = await clerkClient();
@@ -383,6 +392,96 @@ export async function getTeacherMeta(userId: string): Promise<SmartlearnMeta> {
     }
     throw e;
   }
+}
+
+/** Student-facing notes for a class code (fresh Clerk + public pack) */
+export async function getNotesForClassCode(code: string): Promise<{
+  code: string;
+  name: string;
+  teacherName: string;
+  materials: TeacherMaterial[];
+}> {
+  const c = code.trim().toUpperCase();
+  const empty = {
+    code: c,
+    name: `Class ${c}`,
+    teacherName: "",
+    materials: [] as TeacherMaterial[],
+  };
+  if (!c) return empty;
+
+  const found = await findClassroomByCode(c);
+  if (!found) return empty;
+
+  const map = new Map<string, TeacherMaterial>();
+  const add = (list: TeacherMaterial[] = []) => {
+    for (const m of list) {
+      if (!m?.url) continue;
+      const exp = m.expiresAt || (m.createdAt || 0) + 48 * 60 * 60 * 1000;
+      if (m.createdAt && exp < Date.now()) continue;
+      if (
+        !m.url.startsWith("http") &&
+        !m.url.startsWith("data:") &&
+        !m.url.startsWith("/api/")
+      )
+        continue;
+      map.set(m.id || m.url, m);
+    }
+  };
+
+  add(found.classroom.materials || []);
+
+  try {
+    const meta = await getTeacherMeta(found.teacherId, { fresh: true });
+    add(meta.materialBank?.[c] || []);
+    add(materialsForRoom(meta, c, found.classroom));
+
+    const packUrl =
+      meta.classMaterialPacks?.[c] || meta.materialsIndexUrl || null;
+    if (packUrl?.startsWith("http")) {
+      const { fetchClassNotesPack } = await import(
+        "@/lib/class-materials-public"
+      );
+      const pack = await fetchClassNotesPack(packUrl);
+      if (pack) {
+        add(pack.materials);
+        if (pack.className) {
+          found.classroom.name = pack.className;
+        }
+        if (pack.teacherName) {
+          found.classroom.teacherName = pack.teacherName;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("getNotesForClassCode", e);
+  }
+
+  // shared index fallback
+  try {
+    const { getClassMaterials } = await import("@/lib/class-code-index");
+    add(await getClassMaterials(c));
+  } catch {
+    // ignore
+  }
+
+  try {
+    const { getMaterialsByCode } = await import("@/lib/materials-bank-store");
+    add(await getMaterialsByCode(c, null));
+  } catch {
+    // ignore
+  }
+
+  const materials = Array.from(map.values()).sort(
+    (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+  );
+
+  return {
+    code: c,
+    name: found.classroom.name || `Class ${c}`,
+    teacherName: found.classroom.teacherName || "Teacher",
+    materials,
+  };
 }
 
 export async function setUserRole(
@@ -967,6 +1066,34 @@ export async function addMaterialToClass(
     });
   }
 
+  // Public notes pack (catbox JSON) — students fetch without shared /tmp
+  let packUrl: string | null = null;
+  try {
+    const { uploadClassNotesPack, activeNotes } = await import(
+      "@/lib/class-materials-public"
+    );
+    const allForPack = activeNotes([
+      clerkMat,
+      ...(bank[normalized] || []),
+      ...roomMats,
+    ]);
+    packUrl = await uploadClassNotesPack({
+      code: normalized,
+      teacherId,
+      teacherName: existing?.teacherName || material.teacherName || "Teacher",
+      className: existing?.name || normalized,
+      materials: allForPack,
+      updatedAt: now,
+      ttlHours: 48,
+    });
+    if (packUrl) remoteUrl = packUrl;
+  } catch (e) {
+    console.error("uploadClassNotesPack", e);
+  }
+
+  const packs = { ...(meta.classMaterialPacks || {}) };
+  if (packUrl) packs[normalized] = packUrl;
+
   try {
     await saveMeta(
       teacherId,
@@ -976,6 +1103,7 @@ export async function addMaterialToClass(
         activeClassCode: meta.activeClassCode || normalized,
         materialBank: bank,
         materialsIndexUrl: remoteUrl || meta.materialsIndexUrl || null,
+        classMaterialPacks: packs,
         classrooms: rooms,
       },
       { force: true }
@@ -986,8 +1114,16 @@ export async function addMaterialToClass(
 
   // Ensure code maps to this teacher for student lookup
   try {
-    const { registerClassCode } = await import("@/lib/class-code-index");
+    const { registerClassCode, publishClassMaterials } = await import(
+      "@/lib/class-code-index"
+    );
     await registerClassCode(normalized, teacherId);
+    await publishClassMaterials(
+      normalized,
+      teacherId,
+      [clerkMat],
+      material.teacherName || "Teacher"
+    );
   } catch {
     // ignore
   }

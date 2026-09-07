@@ -169,125 +169,52 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: true, classroom: room });
     }
 
-    if (action === "materials" && code) {
+    if (
+      (action === "materials" || action === "notes") &&
+      code
+    ) {
       const c = code.toUpperCase();
-      const map = new Map<
-        string,
-        {
-          id?: string;
-          url?: string;
-          title?: string;
-          createdAt?: number;
-          expiresAt?: number;
-          teacherName?: string;
-          subject?: string;
-          type?: string;
-        }
-      >();
-      const ttl = 48 * 60 * 60 * 1000;
-      const now = Date.now();
-
-      const addAll = (list: unknown[]) => {
-        for (const raw of list) {
-          const m = raw as {
-            id?: string;
-            url?: string;
-            createdAt?: number;
-            expiresAt?: number;
-          };
-          if (!m?.url) continue;
-          const exp = m.expiresAt || (m.createdAt || 0) + ttl;
-          // Keep items without createdAt for a bit; drop clearly expired
-          if (m.createdAt && exp < now) continue;
-          map.set(m.id || m.url, m);
-        }
-      };
-
-      let seedUrl: string | null = null;
-      let className = `Class ${c}`;
-      let teacherName = "";
-
-      // A) Same path as join: find class by code → teacher Clerk materials
       try {
-        const found = await findClassroomByCode(c);
-        if (found) {
-          className = found.classroom.name || className;
-          teacherName = found.classroom.teacherName || teacherName;
-          addAll(found.classroom.materials || []);
+        const { getNotesForClassCode } = await import(
+          "@/lib/classroom-server"
+        );
+        const notes = await getNotesForClassCode(c);
+
+        // Teacher own view fallback
+        if (!notes.materials.length) {
           try {
-            const { getTeacherMeta, materialsForRoom } = await import(
-              "@/lib/classroom-server"
-            );
-            const tMeta = await getTeacherMeta(found.teacherId);
-            seedUrl = tMeta.materialsIndexUrl || null;
-            addAll(materialsForRoom(tMeta, c, found.classroom));
-            addAll(tMeta.materialBank?.[c] || []);
+            const mine = await listTeacherClassrooms(userId);
+            const own = mine.find((r) => r.code === c);
+            if (own?.materials?.length) {
+              notes.materials = own.materials;
+              notes.name = own.name || notes.name;
+              notes.teacherName = own.teacherName || notes.teacherName;
+            }
           } catch {
             // ignore
           }
         }
-      } catch {
-        // ignore
+
+        return NextResponse.json({
+          ok: true,
+          materials: notes.materials,
+          code: notes.code,
+          name: notes.name,
+          teacherName: notes.teacherName,
+          count: notes.materials.length,
+          ttlHours: 48,
+        });
+      } catch (e) {
+        console.error("materials", e);
+        return NextResponse.json({
+          ok: true,
+          materials: [],
+          code: c,
+          name: `Class ${c}`,
+          count: 0,
+          ttlHours: 48,
+        });
       }
-
-      // B) Shared class-code index
-      try {
-        const { getClassMaterials } = await import("@/lib/class-code-index");
-        addAll(await getClassMaterials(c));
-      } catch {
-        // ignore
-      }
-
-      // C) Materials bank
-      try {
-        const { getMaterialsByCode } = await import(
-          "@/lib/materials-bank-store"
-        );
-        addAll(await getMaterialsByCode(c, seedUrl));
-      } catch {
-        // ignore
-      }
-
-      // C) Teacher viewing own class
-      try {
-        const mine = await listTeacherClassrooms(userId);
-        const own = mine.find((r) => r.code === c);
-        if (own) {
-          if (own.name) className = own.name;
-          if (own.teacherName) teacherName = own.teacherName;
-          addAll(own.materials || []);
-        }
-      } catch {
-        // ignore
-      }
-
-      // D) Student joined payload
-      try {
-        const studentRooms = await listStudentClassrooms(userId);
-        const hit = studentRooms.find((r) => r.code === c);
-        if (hit) {
-          if (hit.name) className = hit.name;
-          if (hit.teacherName) teacherName = hit.teacherName;
-          addAll(hit.materials || []);
-        }
-      } catch {
-        // ignore
-      }
-
-      const materials = Array.from(map.values()).sort(
-        (a, b) =>
-          Number(b.createdAt || 0) - Number(a.createdAt || 0)
-      );
-
-      return NextResponse.json({
-        ok: true,
-        materials,
-        code: c,
-        name: className,
-        teacherName,
-        count: materials.length,
-        ttlHours: 48,
-      });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

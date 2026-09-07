@@ -111,6 +111,8 @@ export type SmartlearnMeta = {
   materialBank?: Record<string, TeacherMaterial[]>;
   /** Public JSON index of all class materials (durable across serverless). */
   materialsIndexUrl?: string | null;
+  /** Per-class public notes pack URL (catbox JSON) — students fetch this */
+  classMaterialPacks?: Record<string, string>;
   /** primary / last joined (compat) */
   joinedClassCode?: string | null;
   /** student can join multiple teacher codes */
