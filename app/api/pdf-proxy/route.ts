@@ -13,7 +13,29 @@ const ALLOW = [
   "cbse.gov.in",
   "cdn.cbse.gov.in",
   "web.archive.org",
+  // teacher uploads / drive
+  "tmpfiles.org",
+  "www.tmpfiles.org",
+  "catbox.moe",
+  "files.catbox.moe",
+  "litter.catbox.moe",
+  "0x0.st",
+  "drive.google.com",
+  "docs.google.com",
+  "www.googleapis.com",
+  "blob.vercel-storage.com",
+  "public.blob.vercel-storage.com",
 ];
+
+function hostAllowed(host: string) {
+  if (ALLOW.some((h) => host === h || host.endsWith(`.${h}`))) return true;
+  // any vercel blob subdomain
+  if (host.includes("blob.vercel-storage.com")) return true;
+  if (host.includes("tmpfiles.org")) return true;
+  if (host.includes("catbox.moe")) return true;
+  if (host.includes("google")) return true;
+  return false;
+}
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -91,7 +113,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Bad url" }, { status: 400 });
   }
 
-  if (!ALLOW.some((h) => host === h || host.endsWith(`.${h}`))) {
+  if (!hostAllowed(host)) {
     return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
   }
 

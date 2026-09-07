@@ -199,7 +199,64 @@ export async function apiAddMaterial(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "addMaterial", code, material }),
   });
-  return res.json();
+  const data = await res.json();
+  if (data.ok && data.classroom?.materials) {
+    cacheClassMaterials(code, data.classroom.materials as TeacherMaterial[]);
+  } else if (data.ok && material.url) {
+    pushCachedMaterial(code, {
+      id: `mat-${Date.now()}`,
+      createdAt: Date.now(),
+      title: material.title,
+      subject: material.subject,
+      type: material.type,
+      url: material.url,
+      teacherName: material.teacherName,
+    });
+  }
+  return data;
+}
+
+const MAT_CACHE = "sl_class_mats_v1_";
+
+/** Cache materials client-side so student UI updates even if server is slow */
+export function cacheClassMaterials(
+  code: string,
+  materials: TeacherMaterial[]
+) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      MAT_CACHE + code.toUpperCase(),
+      JSON.stringify(materials.slice(0, 40))
+    );
+  } catch {
+    // ignore
+  }
+}
+
+export function readCachedClassMaterials(code: string): TeacherMaterial[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(MAT_CACHE + code.toUpperCase());
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as TeacherMaterial[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushCachedMaterial(
+  code: string,
+  material: TeacherMaterial
+) {
+  const prev = readCachedClassMaterials(code);
+  const next = [
+    material,
+    ...prev.filter((m) => m.id !== material.id && m.url !== material.url),
+  ].slice(0, 40);
+  cacheClassMaterials(code, next);
+  return next;
 }
 
 /** Upload PDF/image file up to 5MB (stored as file, not Clerk base64). */
@@ -221,7 +278,14 @@ export async function apiUploadMaterialFile(opts: {
     body: fd,
   });
   const text = await res.text();
-  let data: { ok?: boolean; error?: string; classroom?: unknown; size?: number; durable?: boolean } = {};
+  let data: {
+    ok?: boolean;
+    error?: string;
+    classroom?: Classroom;
+    size?: number;
+    durable?: boolean;
+    url?: string;
+  } = {};
   try {
     data = JSON.parse(text);
   } catch {
@@ -232,6 +296,22 @@ export async function apiUploadMaterialFile(opts: {
   }
   if (!res.ok && !data.error) {
     data.error = `Upload failed (${res.status}). ${text.slice(0, 80)}`;
+  }
+  // Always cache locally so student on same browser sees instantly
+  if (data.ok && data.classroom) {
+    const mats = (data.classroom.materials || []) as TeacherMaterial[];
+    if (mats.length) cacheClassMaterials(opts.code, mats);
+    else if (data.url) {
+      pushCachedMaterial(opts.code, {
+        id: `mat-local-${Date.now()}`,
+        title: opts.title,
+        subject: opts.subject,
+        type: opts.type,
+        url: data.url,
+        createdAt: Date.now(),
+        teacherName: "Teacher",
+      });
+    }
   }
   return data;
 }

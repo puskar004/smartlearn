@@ -30,14 +30,32 @@ export function parseTextbookPhp(
 
 export function resolveEmbeddablePdf(ncertLink?: string): string | null {
   if (!ncertLink) return null;
-  if (/\.pdf(\?|$)/i.test(ncertLink)) return ncertLink;
-  const parsed = parseTextbookPhp(ncertLink);
+  const u = ncertLink.trim();
+  // data: PDF
+  if (u.startsWith("data:application/pdf") || u.startsWith("data:application/octet-stream"))
+    return u;
+  // same-origin /api material or proxy
+  if (u.startsWith("/api/")) return u;
+  if (/\.pdf(\?|$)/i.test(u)) return u;
+  // tmpfiles / catbox / any https that looks like a file
+  if (/^https?:\/\//i.test(u) && /pdf|drive\.google|tmpfiles|catbox|blob\.vercel/i.test(u))
+    return u;
+  if (/^https?:\/\//i.test(u)) return u; // try any https as PDF source
+  const parsed = parseTextbookPhp(u);
   if (parsed) return chapterPdfUrl(parsed.code, parsed.ch);
   return null;
 }
 
 /** Same-origin proxy — avoids Chrome X-Frame / “page blocked” on ncert.nic.in */
 export function proxiedPdf(pdfUrl: string) {
+  // already same-origin or data — no proxy
+  if (
+    pdfUrl.startsWith("data:") ||
+    pdfUrl.startsWith("/api/") ||
+    pdfUrl.startsWith("/")
+  ) {
+    return pdfUrl;
+  }
   return `/api/pdf-proxy?url=${encodeURIComponent(pdfUrl)}`;
 }
 

@@ -8,22 +8,24 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
   FileText,
   Link2,
   Loader2,
   School,
   Video,
 } from "lucide-react";
+import PdfReaderModal from "@/components/PdfReaderModal";
 import {
   apiJoinClassroom,
   apiLeaveClassroom,
   getJoinedClass,
   getJoinedClasses,
   getRole,
+  readCachedClassMaterials,
   removeJoinedClass,
   setJoinedClass,
   setJoinedClasses,
+  cacheClassMaterials,
   type TeacherMaterial,
 } from "@/lib/teacher-store";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
@@ -36,32 +38,6 @@ type JoinedRoom = {
   materials?: TeacherMaterial[];
 };
 
-function openMaterial(m: TeacherMaterial) {
-  const u = (m.url || "").trim();
-  if (!u) {
-    alert("No file link. Ask teacher to re-upload.");
-    return;
-  }
-  if (u.startsWith("data:")) {
-    try {
-      const a = document.createElement("a");
-      a.href = u;
-      a.download = `${m.title || "notes"}.pdf`;
-      a.click();
-      const w = window.open();
-      if (w) {
-        w.document.write(
-          `<!doctype html><title>${m.title || "PDF"}</title><iframe src="${u}" style="position:fixed;inset:0;border:0;width:100%;height:100%"></iframe>`
-        );
-      }
-    } catch {
-      window.open(u, "_blank");
-    }
-    return;
-  }
-  window.open(u, "_blank", "noopener,noreferrer");
-}
-
 export default function JoinClassPage() {
   const { userId, isSignedIn } = useAuth();
   const { user } = useUser();
@@ -70,55 +46,73 @@ export default function JoinClassPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [openMats, setOpenMats] = useState<Record<string, boolean>>({});
+  const [viewer, setViewer] = useState<{ title: string; url: string } | null>(
+    null
+  );
+
+  const mergeMaterials = (
+    code: string,
+    server: TeacherMaterial[]
+  ): TeacherMaterial[] => {
+    const cached = readCachedClassMaterials(code);
+    const map = new Map<string, TeacherMaterial>();
+    for (const m of [...server, ...cached]) {
+      if (!m?.url) continue;
+      map.set(m.id || m.url, m);
+    }
+    const all = Array.from(map.values()).sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
+    if (all.length) cacheClassMaterials(code, all);
+    return all;
+  };
 
   const loadMaterialsForCode = async (
     classCode: string,
     fallback?: JoinedRoom
   ): Promise<JoinedRoom> => {
     const c = classCode.toUpperCase();
+    let serverMats: TeacherMaterial[] = [];
+    let name = fallback?.name || `Class ${c}`;
+    let teacherName = fallback?.teacherName || "";
     try {
       const mr = await fetch(
         `/api/classroom?action=materials&code=${encodeURIComponent(c)}`,
         { cache: "no-store" }
       );
       const md = await mr.json();
-      return {
-        code: c,
-        name: md.name || fallback?.name || `Class ${c}`,
-        teacherName: fallback?.teacherName || "",
-        materials: (md.materials || []) as TeacherMaterial[],
-      };
+      serverMats = (md.materials || []) as TeacherMaterial[];
+      if (md.name) name = md.name;
     } catch {
-      return (
-        fallback || {
-          code: c,
-          name: `Class ${c}`,
-          materials: [],
-        }
-      );
+      // ignore
     }
+    return {
+      code: c,
+      name,
+      teacherName,
+      materials: mergeMaterials(c, serverMats),
+    };
   };
 
   const syncFromLocalAndServer = useCallback(async () => {
     if (!userId) return;
 
-    // 1) Always start from localStorage (sidebar source of truth)
     const localCodes = getJoinedClasses(userId);
-    const seed: JoinedRoom[] = localCodes.map((c) => ({
-      code: c,
-      name: `Class ${c}`,
-      materials: [],
-    }));
-    if (seed.length) {
-      setRooms(seed);
+    if (localCodes.length) {
+      setRooms(
+        localCodes.map((c) => ({
+          code: c,
+          name: `Class ${c}`,
+          materials: readCachedClassMaterials(c),
+        }))
+      );
       setOpenMats((p) => {
         const o = { ...p };
-        for (const r of seed) o[r.code] = o[r.code] ?? true;
+        for (const c of localCodes) o[c] = o[c] ?? true;
         return o;
       });
     }
 
-    // 2) Server joined list
     let serverList: JoinedRoom[] = [];
     let serverCodes: string[] = [];
     try {
@@ -132,14 +126,9 @@ export default function JoinClassPage() {
       // ignore
     }
 
-    // 3) Union of all codes
     const allCodes = [
       ...new Set(
-        [
-          ...localCodes,
-          ...serverCodes,
-          ...serverList.map((r) => r.code),
-        ]
+        [...localCodes, ...serverCodes, ...serverList.map((r) => r.code)]
           .map((c) => String(c || "").toUpperCase())
           .filter(Boolean)
       ),
@@ -150,10 +139,8 @@ export default function JoinClassPage() {
       return;
     }
 
-    // Keep localStorage in sync
     setJoinedClasses(userId, allCodes);
 
-    // 4) Load materials for every code
     const full = await Promise.all(
       allCodes.map(async (c) => {
         const fromServer = serverList.find(
@@ -176,14 +163,16 @@ export default function JoinClassPage() {
     void syncFromLocalAndServer();
     const onRole = () => void syncFromLocalAndServer();
     window.addEventListener(ROLE_EVENT, onRole);
-    // refresh when tab focused
     const onVis = () => {
       if (document.visibilityState === "visible") void syncFromLocalAndServer();
     };
     document.addEventListener("visibilitychange", onVis);
+    // poll materials gently
+    const id = window.setInterval(() => void syncFromLocalAndServer(), 20_000);
     return () => {
       window.removeEventListener(ROLE_EVENT, onRole);
       document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(id);
     };
   }, [userId, syncFromLocalAndServer]);
 
@@ -198,10 +187,10 @@ export default function JoinClassPage() {
   if (getRole(userId) === "teacher") {
     return (
       <div className="px-6 py-16 text-center text-sm text-slate-500">
-        You are in <strong>Teacher mode</strong>. Switch to student in Profile.
+        Switch to student in Profile to join a class.
         <div className="mt-3">
           <Link href="/teacher" className="font-bold text-indigo-600 underline">
-            Open Teacher Hub
+            Teacher Hub
           </Link>
         </div>
       </div>
@@ -211,7 +200,7 @@ export default function JoinClassPage() {
   const join = async () => {
     const trimmed = code.trim().toUpperCase();
     if (trimmed.length < 4) {
-      setMsg("Enter the full private code (6 characters).");
+      setMsg("Enter the full class code.");
       return;
     }
     setLoading(true);
@@ -241,32 +230,23 @@ export default function JoinClassPage() {
         setMsg(res.error || "Invalid code");
         return;
       }
-
       const room = res.classroom;
       const roomCode = (room?.code || trimmed).toUpperCase();
       setJoinedClass(userId, roomCode);
       setCode("");
       setMsg(`You have joined ${room?.name || roomCode}`);
 
-      // Instant UI
-      const instant: JoinedRoom = {
+      const withMats = await loadMaterialsForCode(roomCode, {
         code: roomCode,
         name: room?.name || `Class ${roomCode}`,
         teacherName: room?.teacherName || "",
         materials: (room?.materials || []) as TeacherMaterial[],
-      };
-      setRooms((prev) => [
-        instant,
-        ...prev.filter((r) => r.code !== roomCode),
-      ]);
-      setOpenMats((p) => ({ ...p, [roomCode]: true }));
-
-      // Load materials + confirm
-      const withMats = await loadMaterialsForCode(roomCode, instant);
+      });
       setRooms((prev) => [
         withMats,
         ...prev.filter((r) => r.code !== roomCode),
       ]);
+      setOpenMats((p) => ({ ...p, [roomCode]: true }));
       void syncFromLocalAndServer();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Join failed");
@@ -289,7 +269,6 @@ export default function JoinClassPage() {
     }
   };
 
-  // Fallback: if state empty but localStorage has code, show it
   const displayRooms: JoinedRoom[] =
     rooms.length > 0
       ? rooms
@@ -297,7 +276,7 @@ export default function JoinClassPage() {
           code: c,
           name: `Class ${c}`,
           teacherName: "",
-          materials: [] as TeacherMaterial[],
+          materials: readCachedClassMaterials(c),
         }));
 
   return (
@@ -306,10 +285,10 @@ export default function JoinClassPage() {
         <Link2 className="h-3.5 w-3.5" /> Class &amp; Notes
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
-        Join class &amp; see notes
+        Join class &amp; open PDFs
       </h1>
       <p className="mt-2 text-sm text-slate-500">
-        Joined classes and teacher PDFs show below.
+        Joined class appears below. Open PDFs inside SmartLearn (no new tab).
       </p>
 
       <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -327,7 +306,7 @@ export default function JoinClassPage() {
           }}
           placeholder="ABC123"
           maxLength={8}
-          className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-center font-mono text-2xl font-black tracking-[0.35em] text-slate-900 outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+          className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-center font-mono text-2xl font-black tracking-[0.35em] outline-none focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
         />
         <button
           type="button"
@@ -354,13 +333,13 @@ export default function JoinClassPage() {
               className="mt-3 block w-full font-bold text-indigo-600"
               onClick={() => void syncFromLocalAndServer()}
             >
-              Reload joined class {getJoinedClass(userId)}
+              Show class {getJoinedClass(userId)}
             </button>
           )}
         </div>
       ) : (
         <div className="mt-8 space-y-4">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between">
             <h2 className="text-lg font-extrabold text-slate-900">
               You have joined {displayRooms.length} class
               {displayRooms.length > 1 ? "es" : ""}
@@ -443,13 +422,20 @@ export default function JoinClassPage() {
 
                 {open && (
                   <div className="px-4 py-4 sm:px-5">
+                    <p className="mb-3 text-xs font-semibold text-slate-600">
+                      PDF section — tap a name to open inside SmartLearn
+                    </p>
                     {mats.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
-                        No PDFs yet for this class.
+                        No PDFs yet. Teacher must Publish again on this class
+                        code.
                         <button
                           type="button"
                           onClick={async () => {
-                            const updated = await loadMaterialsForCode(r.code, r);
+                            const updated = await loadMaterialsForCode(
+                              r.code,
+                              r
+                            );
                             setRooms((prev) =>
                               prev.map((x) =>
                                 x.code === r.code ? updated : x
@@ -464,36 +450,39 @@ export default function JoinClassPage() {
                     ) : (
                       <ul className="space-y-2">
                         {mats.map((m) => (
-                          <li
-                            key={m.id || m.url}
-                            className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3"
-                          >
-                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
-                              {m.type === "video" ? (
-                                <Video className="h-5 w-5 text-rose-500" />
-                              ) : (
-                                <BookOpen className="h-5 w-5 text-indigo-600" />
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-bold text-slate-900">
-                                {m.title}
-                              </div>
-                              <div className="text-[11px] text-slate-500">
-                                <span className="font-semibold text-indigo-700">
-                                  {m.subject || "General"}
-                                </span>
-                                {" · "}
-                                {m.type === "notes" ? "PDF" : m.type}
-                              </div>
-                            </div>
+                          <li key={m.id || m.url}>
                             <button
                               type="button"
-                              onClick={() => openMaterial(m)}
-                              className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-2 text-[11px] font-bold text-white"
+                              onClick={() =>
+                                setViewer({
+                                  title: m.title || "Notes PDF",
+                                  url: m.url,
+                                })
+                              }
+                              className="flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
                             >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              Open
+                              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
+                                {m.type === "video" ? (
+                                  <Video className="h-5 w-5 text-rose-500" />
+                                ) : (
+                                  <BookOpen className="h-5 w-5 text-indigo-600" />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-bold text-slate-900">
+                                  {m.title}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  <span className="font-semibold text-indigo-700">
+                                    {m.subject || "General"}
+                                  </span>
+                                  {" · "}
+                                  PDF / Notes · tap to open
+                                </div>
+                              </div>
+                              <span className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white">
+                                Open PDF
+                              </span>
                             </button>
                           </li>
                         ))}
@@ -506,6 +495,13 @@ export default function JoinClassPage() {
           })}
         </div>
       )}
+
+      <PdfReaderModal
+        open={Boolean(viewer)}
+        title={viewer?.title || "PDF"}
+        ncertLink={viewer?.url}
+        onClose={() => setViewer(null)}
+      />
     </div>
   );
 }
