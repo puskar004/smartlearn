@@ -103,68 +103,79 @@ export async function GET(req: NextRequest) {
 
     if (action === "materials" && code) {
       const c = code.toUpperCase();
-      // 1) Direct by class code (fast, works even if join map incomplete)
-      let materials: unknown[] = [];
+      const map = new Map<string, { id?: string; url?: string; title?: string }>();
+
+      const addAll = (list: unknown[]) => {
+        for (const raw of list) {
+          const m = raw as { id?: string; url?: string };
+          if (!m?.url) continue;
+          map.set(m.id || m.url, m);
+        }
+      };
+
+      // A) Teacher own classes + their materialsIndexUrl
       try {
-        const { getMaterialsByCode } = await import(
-          "@/lib/materials-bank-store"
-        );
-        materials = await getMaterialsByCode(c);
+        const mine = await listTeacherClassrooms(userId);
+        const own = mine.find((r) => r.code === c);
+        if (own) addAll(own.materials || []);
       } catch {
         // ignore
       }
 
-      const studentRooms = await listStudentClassrooms(userId);
-      const hit = studentRooms.find((r) => r.code === c);
-      if (hit) {
-        const map = new Map<string, unknown>();
-        for (const m of [
-          ...(materials as { id?: string; url?: string }[]),
-          ...(hit.materials || []),
-        ]) {
-          const key =
-            (m as { id?: string }).id ||
-            (m as { url?: string }).url ||
-            Math.random().toString();
-          map.set(key, m);
+      // B) Resolve teacher via code index → seed remote materials JSON
+      let seedUrl: string | null = null;
+      let className = `Class ${c}`;
+      try {
+        const { lookupTeacherByCode } = await import("@/lib/class-code-index");
+        const tid = await lookupTeacherByCode(c);
+        if (tid) {
+          const { getTeacherMeta, materialsForRoom, getClassroomForTeacher } =
+            await import("@/lib/classroom-server");
+          const tMeta = await getTeacherMeta(tid);
+          seedUrl = tMeta.materialsIndexUrl || null;
+          const room = await getClassroomForTeacher(tid, c);
+          if (room?.name) className = room.name;
+          addAll(materialsForRoom(tMeta, c, room));
+          addAll(tMeta.materialBank?.[c] || []);
         }
-        return NextResponse.json({
-          ok: true,
-          materials: Array.from(map.values()),
-          code: hit.code,
-          name: hit.name,
-        });
+      } catch {
+        // ignore
       }
 
-      const mine = await listTeacherClassrooms(userId);
-      const own = mine.find((r) => r.code === c);
-      if (own) {
-        const map = new Map<string, unknown>();
-        for (const m of [
-          ...(materials as { id?: string; url?: string }[]),
-          ...(own.materials || []),
-        ]) {
-          const key =
-            (m as { id?: string }).id ||
-            (m as { url?: string }).url ||
-            Math.random().toString();
-          map.set(key, m);
-        }
-        return NextResponse.json({
-          ok: true,
-          materials: Array.from(map.values()),
-          code: own.code,
-          name: own.name,
-        });
+      // C) Durable materials bank (local + remote JSON)
+      try {
+        const { getMaterialsByCode } = await import(
+          "@/lib/materials-bank-store"
+        );
+        addAll(await getMaterialsByCode(c, seedUrl));
+      } catch {
+        // ignore
       }
 
-      // Even if not joined as "student room", return code-bank materials
-      // when student has this code in local join list (API still auth'd)
+      // D) Student joined payload
+      try {
+        const studentRooms = await listStudentClassrooms(userId);
+        const hit = studentRooms.find((r) => r.code === c);
+        if (hit) {
+          if (hit.name) className = hit.name;
+          addAll(hit.materials || []);
+        }
+      } catch {
+        // ignore
+      }
+
+      const materials = Array.from(map.values()).sort(
+        (a, b) =>
+          Number((b as { createdAt?: number }).createdAt || 0) -
+          Number((a as { createdAt?: number }).createdAt || 0)
+      );
+
       return NextResponse.json({
         ok: true,
         materials,
         code: c,
-        name: `Class ${c}`,
+        name: className,
+        count: materials.length,
       });
     }
 

@@ -594,16 +594,19 @@ export async function listStudentClassrooms(userId: string): Promise<
     const kicked = Boolean(
       sess?.active && (sess.kickedIds || []).includes(userId)
     );
-    // Pull materials: file bank + clerk bank + classroom
+    // Pull materials: remote index + clerk bank + classroom
     let materials: TeacherMaterial[] = [];
     try {
       const tMeta = await getTeacherMeta(found.teacherId);
       materials = materialsForRoom(tMeta, code, found.classroom);
       try {
-        const { getMaterialsFromBank } = await import(
+        const { getMaterialsByCode } = await import(
           "@/lib/materials-bank-store"
         );
-        const fileMats = await getMaterialsFromBank(found.teacherId, code);
+        const fileMats = await getMaterialsByCode(
+          code,
+          tMeta.materialsIndexUrl
+        );
         const map = new Map<string, TeacherMaterial>();
         for (const m of [...fileMats, ...materials]) {
           if (!m?.url) continue;
@@ -613,7 +616,7 @@ export async function listStudentClassrooms(userId: string): Promise<
           (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
         );
       } catch {
-        // ignore file bank
+        // ignore
       }
     } catch {
       materials = (found.classroom.materials || []).filter(
@@ -685,88 +688,66 @@ export async function addMaterialToClass(
     createdAt: Date.now(),
   };
 
-  // 1) Class-code file/remote bank first (students read this)
+  const client = await clerkClient();
+  const user = await client.users.getUser(teacherId);
+  const meta = metaOf(user);
+
+  // 1) Durable bank by class code + remote JSON (students fetch this)
+  let remoteUrl: string | null = meta.materialsIndexUrl || null;
+  let fileMats: TeacherMaterial[] = [m];
   try {
     const { addMaterialToBank } = await import("@/lib/materials-bank-store");
-    await addMaterialToBank(
+    const res = await addMaterialToBank(
       teacherId,
       normalized,
       m,
-      material.teacherName || "Teacher"
+      material.teacherName || "Teacher",
+      meta.materialsIndexUrl
     );
+    fileMats = res.materials;
+    if (res.remoteUrl) remoteUrl = res.remoteUrl;
   } catch (e) {
     console.error("materials-bank-store", e);
   }
 
-  // 2) Tiny Clerk write: materialBank only for THIS code (no classrooms rewrite)
-  const client = await clerkClient();
-  const user = await client.users.getUser(teacherId);
-  const meta = metaOf(user);
+  // 2) Clerk: only short https entries + materialsIndexUrl (tiny write)
   const bank = { ...(meta.materialBank || {}) };
-  const prev = bank[normalized] || [];
-  bank[normalized] = [m, ...prev]
-    .filter((x) => x?.url && !String(x.url).startsWith("data:"))
+  const shortOnly = [m, ...(bank[normalized] || [])]
+    .filter(
+      (x) =>
+        x?.url &&
+        (x.url.startsWith("http://") ||
+          x.url.startsWith("https://") ||
+          x.url.startsWith("/api/"))
+    )
     .slice(0, 15);
-  // If only data url available, still keep one short entry pointing to /api key if possible
-  if (!bank[normalized].length && m.url) {
-    bank[normalized] = [
-      {
-        ...m,
-        url: m.url.startsWith("data:")
-          ? m.url.slice(0, 100) // won't open — prefer file store
-          : m.url,
-      },
-    ];
-    // Prefer not storing data in clerk at all
-    if (m.url.startsWith("data:")) {
-      bank[normalized] = [
-        {
-          ...m,
-          url: m.url, // small data only if short
-        },
-      ].filter((x) => x.url.length < 100_000);
-    }
-  }
+  bank[normalized] = shortOnly;
 
   try {
-    // Deep-merge safe: replace smartlearn but keep classrooms reference from meta WITHOUT reserializing students
-    const slimBank = lightMaterialBank(bank);
     await client.users.updateUserMetadata(teacherId, {
       publicMetadata: {
         ...user.publicMetadata,
         smartlearn: {
-          role: meta.role || "teacher",
+          ...meta,
+          role: "teacher",
           activeClassCode: meta.activeClassCode || normalized,
-          materialBank: slimBank,
-          // keep classrooms as already stored — do not re-send fat payload
+          materialBank: lightMaterialBank(bank),
+          materialsIndexUrl: remoteUrl || meta.materialsIndexUrl || null,
+          // keep existing classrooms reference as-is
           classrooms: meta.classrooms || [],
-          teacherRemarks: meta.teacherRemarks || [],
         },
       },
     });
   } catch (e) {
-    console.error("clerk materialBank save", e);
-    // File bank already has it — continue
+    console.error("clerk material save", e);
+    // still OK — remote index has materials
   }
 
-  // Build response room for teacher UI
   const rooms = meta.classrooms || [];
   const existing = rooms.find((c) => c.code === normalized);
-  const fileMats = await (async () => {
-    try {
-      const { getMaterialsFromBank } = await import("@/lib/materials-bank-store");
-      return await getMaterialsFromBank(teacherId, normalized);
-    } catch {
-      return [] as TeacherMaterial[];
-    }
-  })();
-  const materials = [
-    m,
-    ...fileMats.filter((x) => x.id !== m.id),
-    ...((existing?.materials || []) as TeacherMaterial[]),
-  ]
-    .filter((x, i, arr) => arr.findIndex((y) => y.id === x.id || y.url === x.url) === i)
-    .slice(0, 40);
+  const materials = fileMats.length
+    ? fileMats
+    : materialsForRoom({ ...meta, materialBank: bank }, normalized, existing);
 
   return {
     code: normalized,

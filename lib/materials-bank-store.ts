@@ -1,20 +1,18 @@
 /**
- * Materials by class code — primary store students read from.
- * Survives better than only Clerk / only /tmp.
+ * Materials by class code with durable remote JSON index.
+ * Clerk only stores a short materialsIndexUrl on the teacher.
  */
 import { promises as fs } from "fs";
 import path from "path";
 import type { TeacherMaterial } from "@/lib/classroom-types";
 import { uploadBufferRemote } from "@/lib/remote-upload";
 
-type CodeBank = {
-  /** classCode → materials */
+export type CodeBank = {
   byCode: Record<
     string,
     { teacherId: string; teacherName?: string; materials: TeacherMaterial[] }
   >;
   updatedAt: number;
-  /** last remote mirror URL */
   remoteUrl?: string;
 };
 
@@ -27,46 +25,49 @@ function localPath() {
   return path.join(dir, "smartlearn-class-materials.json");
 }
 
-function pointerPath() {
-  return localPath() + ".remote";
-}
-
 async function readRemote(url: string): Promise<CodeBank | null> {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
     if (!res.ok) return null;
     const j = (await res.json()) as CodeBank;
-    if (j?.byCode) return j;
+    if (j?.byCode && typeof j.byCode === "object") return j;
   } catch {
     // ignore
   }
   return null;
 }
 
-async function loadBank(): Promise<CodeBank> {
-  if (mem.bank) return mem.bank;
+async function loadBank(seedRemoteUrl?: string | null): Promise<CodeBank> {
+  if (mem.bank?.byCode && Object.keys(mem.bank.byCode).length) {
+    return mem.bank;
+  }
 
-  // 1) local file
+  // Prefer teacher-provided remote seed (from Clerk)
+  if (seedRemoteUrl?.startsWith("http")) {
+    const remote = await readRemote(seedRemoteUrl);
+    if (remote) {
+      mem.bank = remote;
+      return remote;
+    }
+  }
+
   try {
     const raw = await fs.readFile(localPath(), "utf8");
     const j = JSON.parse(raw) as CodeBank;
     if (j?.byCode) {
       mem.bank = j;
-      return j;
-    }
-  } catch {
-    // ignore
-  }
-
-  // 2) remote pointer
-  try {
-    const url = (await fs.readFile(pointerPath(), "utf8")).trim();
-    if (url.startsWith("http")) {
-      const remote = await readRemote(url);
-      if (remote) {
-        mem.bank = remote;
-        return remote;
+      // also try its remoteUrl
+      if (j.remoteUrl) {
+        const remote = await readRemote(j.remoteUrl);
+        if (remote) {
+          mem.bank = remote;
+          return remote;
+        }
       }
+      return j;
     }
   } catch {
     // ignore
@@ -77,18 +78,17 @@ async function loadBank(): Promise<CodeBank> {
   return empty;
 }
 
-async function persistBank(bank: CodeBank) {
+async function persistBank(bank: CodeBank): Promise<string | null> {
   bank.updatedAt = Date.now();
   mem.bank = bank;
   const fp = localPath();
   try {
     await fs.mkdir(path.dirname(fp), { recursive: true });
     await fs.writeFile(fp, JSON.stringify(bank), "utf8");
-  } catch (e) {
-    console.error("materials local write", e);
+  } catch {
+    // ignore
   }
 
-  // Mirror whole bank to public host so other serverless instances can read
   try {
     const remote = await uploadBufferRemote(
       Buffer.from(JSON.stringify(bank), "utf8"),
@@ -98,74 +98,71 @@ async function persistBank(bank: CodeBank) {
     if (remote) {
       bank.remoteUrl = remote;
       mem.bank = bank;
-      await fs.writeFile(pointerPath(), remote, "utf8").catch(() => null);
-      await fs.writeFile(fp, JSON.stringify(bank), "utf8").catch(() => null);
+      try {
+        await fs.writeFile(fp, JSON.stringify(bank), "utf8");
+      } catch {
+        // ignore
+      }
+      return remote;
     }
   } catch (e) {
     console.error("materials remote mirror", e);
   }
+  return bank.remoteUrl || null;
 }
 
 export async function addMaterialToBank(
   teacherId: string,
   code: string,
   material: TeacherMaterial,
-  teacherName?: string
-): Promise<TeacherMaterial[]> {
+  teacherName?: string,
+  seedRemoteUrl?: string | null
+): Promise<{ materials: TeacherMaterial[]; remoteUrl: string | null }> {
   const c = code.toUpperCase();
-  const bank = await loadBank();
+  const bank = await loadBank(seedRemoteUrl);
   const cur = bank.byCode[c] || {
     teacherId,
     teacherName,
     materials: [],
   };
   const materials = [material, ...(cur.materials || [])]
-    .filter((m) => m?.url)
+    .filter((m) => m?.url && String(m.url).trim())
+    .filter(
+      (m, i, arr) =>
+        arr.findIndex((x) => x.id === m.id || x.url === m.url) === i
+    )
     .slice(0, 40);
   bank.byCode[c] = {
     teacherId,
     teacherName: teacherName || cur.teacherName,
     materials,
   };
-  await persistBank(bank);
-  return materials;
+  const remoteUrl = await persistBank(bank);
+  return { materials, remoteUrl };
 }
 
 export async function getMaterialsByCode(
-  code: string
+  code: string,
+  seedRemoteUrl?: string | null
 ): Promise<TeacherMaterial[]> {
   const c = code.toUpperCase();
-  let bank = await loadBank();
-
-  // If empty in mem/local, try last remote URL again
-  if (!bank.byCode[c]?.materials?.length && bank.remoteUrl) {
-    const remote = await readRemote(bank.remoteUrl);
-    if (remote?.byCode) {
-      bank = remote;
-      mem.bank = remote;
-    }
-  }
-
+  const bank = await loadBank(seedRemoteUrl);
   return bank.byCode[c]?.materials || [];
 }
 
 export async function getMaterialsFromBank(
   teacherId: string,
-  code: string
+  code: string,
+  seedRemoteUrl?: string | null
 ): Promise<TeacherMaterial[]> {
-  const c = code.toUpperCase();
-  const bank = await loadBank();
-  const entry = bank.byCode[c];
-  if (entry?.teacherId && entry.teacherId !== teacherId) {
-    // still return — same class code
-  }
-  return entry?.materials || [];
+  return getMaterialsByCode(code, seedRemoteUrl);
 }
 
 export async function getMaterialsForTeacher(
-  teacherId: string
+  teacherId: string,
+  seedRemoteUrl?: string | null
 ): Promise<Record<string, TeacherMaterial[]>> {
-  const bank = await loadBank();
+  const bank = await loadBank(seedRemoteUrl);
   const out: Record<string, TeacherMaterial[]> = {};
   for (const [code, entry] of Object.entries(bank.byCode)) {
     if (entry.teacherId === teacherId) {
