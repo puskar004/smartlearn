@@ -1,4 +1,9 @@
-import { resolveNcertUrl, resolveSubjectBookUrl } from "./ncert-books";
+import {
+  ncertCodeToPdf,
+  resolveNcertPdfUrl,
+  resolveNcertUrl,
+  resolveSubjectBookUrl,
+} from "./ncert-books";
 
 export type Grade = "10" | "11" | "12";
 
@@ -27,8 +32,9 @@ export type GradePack = {
   subjects: Subject[];
 };
 
+/** Prefer direct PDF URL so reader never hits textbook.php HTML */
 const ncert = (code: string) =>
-  `https://ncert.nic.in/textbook.php?${code}`;
+  ncertCodeToPdf(code) || `https://ncert.nic.in/textbook.php?${code}`;
 
 function ch(
   grade: string,
@@ -508,11 +514,23 @@ function withNcertLinks(packs: GradePack[]): GradePack[] {
     subjects: g.subjects.map((s) => ({
       ...s,
       bookUrl: resolveSubjectBookUrl(g.grade, s.id),
-      chapters: s.chapters.map((c) => ({
-        ...c,
-        ncertPdf:
-          c.ncertPdf || resolveNcertUrl(g.grade, s.id, c.number) || undefined,
-      })),
+      chapters: s.chapters.map((c) => {
+        // Always prefer direct .pdf over textbook.php
+        let pdf = c.ncertPdf;
+        if (pdf?.includes("textbook.php")) {
+          pdf =
+            resolveNcertPdfUrl(g.grade, s.id, c.number) ||
+            ncertCodeToPdf(pdf.split("?")[1] || "") ||
+            pdf;
+        }
+        if (!pdf) {
+          pdf = resolveNcertPdfUrl(g.grade, s.id, c.number);
+        }
+        if (!pdf) {
+          pdf = resolveNcertUrl(g.grade, s.id, c.number);
+        }
+        return { ...c, ncertPdf: pdf || undefined };
+      }),
     })),
   }));
 }

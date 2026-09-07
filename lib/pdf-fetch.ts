@@ -175,38 +175,59 @@ export function decodeDataUrl(dataUrl: string): Uint8Array | null {
 export async function resolvePdfBytes(url: string): Promise<Uint8Array | null> {
   if (url.startsWith("data:")) return decodeDataUrl(url);
 
-  const primary = candidates(url);
+  const primary = [
+    ...expandArchiveUrl(url),
+    ...candidates(url),
+  ].filter((v, i, a) => a.indexOf(v) === i);
   const isNcert =
-    /ncert\.nic\.in|textbook\.php/i.test(url) ||
+    /ncert\.nic\.in|textbook\.php|web\.archive\.org/i.test(url) ||
     primary.some((c) => /ncert\.nic\.in/i.test(c));
 
-  // 1) Live hosts
-  for (const candidate of primary) {
-    const buf = await fetchBytes(candidate, isNcert ? 12000 : 20000);
-    if (!buf) continue;
-    if (isPdfBytes(buf)) return buf;
+  // Archive-first codes (live NCERT 404, Wayback has files) e.g. iict1 IT/ICT
+  const archiveFirst = /\/(iict|kect|jeit)\d/i.test(url + primary.join(" "));
 
-    const head = new TextDecoder().decode(
-      buf.slice(0, Math.min(buf.length, 12000))
-    );
-    if (/<!DOCTYPE|<html/i.test(head)) {
-      const dl = extractTmpfilesDl(head, candidate);
-      if (dl) {
-        const pdf = await fetchBytes(dl);
-        if (pdf && isPdfBytes(pdf)) return pdf;
-      }
-    }
-  }
-
-  // 2) Wayback for every direct PDF candidate (NCERT often blocks cloud IPs)
   const pdfTargets = primary.filter(
     (c) => /\.pdf(\?|$)/i.test(c) || /ncert\.nic\.in/i.test(c)
   );
-  for (const target of pdfTargets.slice(0, 4)) {
-    const snaps = await waybackSnapshots(target);
-    for (const snap of snaps.slice(0, 6)) {
-      const buf = await fetchBytes(snap, 25000);
-      if (buf && isPdfBytes(buf)) return buf;
+
+  const tryList = async (list: string[], ms: number) => {
+    for (const candidate of list) {
+      const buf = await fetchBytes(candidate, ms);
+      if (!buf) continue;
+      if (isPdfBytes(buf)) return buf;
+      const head = new TextDecoder().decode(
+        buf.slice(0, Math.min(buf.length, 12000))
+      );
+      if (/<!DOCTYPE|<html/i.test(head)) {
+        const dl = extractTmpfilesDl(head, candidate);
+        if (dl) {
+          const pdf = await fetchBytes(dl);
+          if (pdf && isPdfBytes(pdf)) return pdf;
+        }
+      }
+    }
+    return null;
+  };
+
+  // 1) Wayback first for archive-only / blocked IT books
+  if (archiveFirst || isNcert) {
+    for (const target of pdfTargets.slice(0, 4)) {
+      const snaps = await waybackSnapshots(target);
+      const hit = await tryList(snaps.slice(0, 8), 25000);
+      if (hit) return hit;
+    }
+  }
+
+  // 2) Live hosts
+  const live = await tryList(primary, isNcert ? 12000 : 20000);
+  if (live) return live;
+
+  // 3) Wayback fallback for remaining
+  if (!archiveFirst) {
+    for (const target of pdfTargets.slice(0, 4)) {
+      const snaps = await waybackSnapshots(target);
+      const hit = await tryList(snaps.slice(0, 6), 25000);
+      if (hit) return hit;
     }
   }
 
@@ -239,4 +260,29 @@ export function hostAllowed(host: string) {
   if (h.includes("google")) return true;
   if (h.includes("archive.org")) return true;
   return false;
+}
+
+/** Expand wayback + www variants when input is already archive URL */
+export function expandArchiveUrl(url: string): string[] {
+  const list = [url];
+  try {
+    const u = new URL(url);
+    if (u.hostname.includes("web.archive.org")) {
+      // extract original
+      const m = u.pathname.match(/\/web\/[^/]+\/(https?:\/.+)$/);
+      if (m) {
+        const orig = m[1];
+        list.push(orig);
+        list.push(`https://web.archive.org/web/0id_/${orig}`);
+        if (orig.includes("ncert.nic.in")) {
+          list.push(
+            orig.replace("ncert.nic.in", "www.ncert.nic.in")
+          );
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return Array.from(new Set(list));
 }

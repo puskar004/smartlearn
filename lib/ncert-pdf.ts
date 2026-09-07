@@ -58,11 +58,14 @@ export function resolveEmbeddablePdf(ncertLink?: string): string | null {
   const parsed = parseTextbookPhp(u);
   if (parsed) return chapterPdfUrl(parsed.code, parsed.ch);
 
+  // already a direct ncert pdf
   if (/\.pdf(\?|$)/i.test(u)) return u;
 
   if (
     /^https?:\/\//i.test(u) &&
-    /pdf|drive\.google|tmpfiles|catbox|blob\.vercel|0x0\.st|ncert/i.test(u)
+    /pdf|drive\.google|tmpfiles|catbox|blob\.vercel|0x0\.st|ncert|web\.archive/i.test(
+      u
+    )
   )
     return u;
 
