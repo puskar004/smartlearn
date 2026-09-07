@@ -485,21 +485,44 @@ export async function joinClassroomAsStudent(
     };
   }
 
-  const updated = await updateClassroom(
-    found.teacherId,
-    found.classroom.code,
-    (c) => {
-      const others = (c.students || []).filter(
-        (s) => s.studentId !== snapshot.studentId
-      );
-      return {
-        ...c,
-        students: [snapshot, ...others].slice(0, 100),
-      };
-    }
-  );
+  // Light student row (avoid Clerk size blow-ups)
+  const lightSnap: StudentSnapshot = {
+    studentId: snapshot.studentId,
+    name: String(snapshot.name || "Student").slice(0, 80),
+    email: snapshot.email ? String(snapshot.email).slice(0, 80) : undefined,
+    grade: String(snapshot.grade || "12").slice(0, 4),
+    xp: Number(snapshot.xp) || 0,
+    streak: Number(snapshot.streak) || 0,
+    accuracy: snapshot.accuracy ?? null,
+    mistakes: Number(snapshot.mistakes) || 0,
+    weakSubjects: (snapshot.weakSubjects || []).slice(0, 5),
+    chaptersOpened: Number(snapshot.chaptersOpened) || 0,
+    lastActive: Date.now(),
+    recentMistakes: (snapshot.recentMistakes || []).slice(0, 3),
+  };
 
-  if (!updated) return { ok: false, error: "Could not update classroom" };
+  let updated: Classroom | null = null;
+  try {
+    updated = await updateClassroom(
+      found.teacherId,
+      found.classroom.code,
+      (c) => {
+        const others = (c.students || []).filter(
+          (s) => s.studentId !== lightSnap.studentId
+        );
+        return {
+          ...c,
+          students: [lightSnap, ...others].slice(0, 80),
+        };
+      }
+    );
+  } catch (e) {
+    console.error("join updateClassroom", e);
+    // still allow join via student meta even if teacher roster update fails
+    updated = found.classroom;
+  }
+
+  if (!updated) updated = found.classroom;
 
   try {
     const client = await clerkClient();
@@ -516,11 +539,33 @@ export async function joinClassroomAsStudent(
       joinedClassCodes: codes.slice(0, 12),
       joinedClassMap: map,
     });
-  } catch {
-    // non-fatal
+  } catch (e) {
+    console.error("join student meta", e);
   }
 
-  return { ok: true, classroom: updated };
+  // Attach materials so student UI has PDFs immediately
+  let materials = updated.materials || [];
+  try {
+    const tMeta = await getTeacherMeta(found.teacherId);
+    materials = materialsForRoom(tMeta, updated.code, updated);
+    const { getMaterialsByCode } = await import("@/lib/materials-bank-store");
+    const extra = await getMaterialsByCode(
+      updated.code,
+      tMeta.materialsIndexUrl
+    );
+    const map = new Map<string, TeacherMaterial>();
+    for (const x of [...extra, ...materials]) {
+      if (x?.url) map.set(x.id || x.url, x);
+    }
+    materials = Array.from(map.values());
+  } catch {
+    // ignore
+  }
+
+  return {
+    ok: true,
+    classroom: { ...updated, teacherId: found.teacherId, materials },
+  };
 }
 
 /** Load all classrooms a student joined — uses teacherId map when possible */

@@ -167,12 +167,9 @@ export default function JoinClassPage() {
       if (document.visibilityState === "visible") void syncFromLocalAndServer();
     };
     document.addEventListener("visibilitychange", onVis);
-    // poll materials gently
-    const id = window.setInterval(() => void syncFromLocalAndServer(), 60_000);
     return () => {
       window.removeEventListener(ROLE_EVENT, onRole);
       document.removeEventListener("visibilitychange", onVis);
-      window.clearInterval(id);
     };
   }, [userId, syncFromLocalAndServer]);
 

@@ -99,8 +99,10 @@ function TeacherInner() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       // Soft-handle Clerk rate limits
-      if (/too many requests|429|rate/i.test(msg)) {
-        setError("Server busy — wait a few seconds, then refresh.");
+      if (/too many requests|429|rate|busy/i.test(msg)) {
+        // Keep last good data; soft banner only
+        setError("Refreshing… if this stays, click Create/Upload again.");
+        window.setTimeout(() => setError(null), 4000);
       } else {
         setError(msg);
       }
@@ -115,9 +117,7 @@ function TeacherInner() {
       setRole(userId, "teacher");
     }
     void refresh();
-    // Slow poll — avoid Clerk "Too Many Requests"
-    const id = setInterval(() => void refresh(), 60_000);
-    return () => clearInterval(id);
+    // No aggressive polling — refresh on actions only (smooth, no rate limit)
   }, [userId, refresh]);
 
   useEffect(() => {
@@ -456,6 +456,14 @@ function TeacherInner() {
             <GraduationCap className="h-4 w-4" />
           )}
           Create class + code
+        </button>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={busy || loading}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+        >
+          Refresh
         </button>
         {classes.map((c) => (
           <button

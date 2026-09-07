@@ -137,26 +137,50 @@ export function createClassroom(
   throw new Error("Use apiCreateClassroom()");
 }
 
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text) {
+    return {
+      ok: false,
+      error:
+        res.status === 429
+          ? "Server busy. Try again in a moment."
+          : `Empty response (${res.status})`,
+    };
+  }
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {
+      ok: false,
+      error:
+        res.status === 429
+          ? "Server busy. Try again in a moment."
+          : text.slice(0, 120) || `Bad response (${res.status})`,
+    };
+  }
+}
+
 export async function apiCreateClassroom(name: string): Promise<Classroom> {
   const res = await fetch("/api/classroom", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "create", name }),
   });
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok || !data.ok) {
-    throw new Error(data.error || "Could not create class");
+    throw new Error(String(data.error || "Could not create class"));
   }
   return data.classroom as Classroom;
 }
 
 export async function apiListMyClasses(): Promise<Classroom[]> {
   const res = await fetch("/api/classroom?action=mine");
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 429 || /too many requests/i.test(String(data.error || ""))) {
-    throw new Error("Too Many Requests — wait 10s and try again");
+  const data = await readJson(res);
+  if (res.status === 429) {
+    throw new Error("Server busy — try again shortly");
   }
-  if (!res.ok) throw new Error(data.error || "Failed to load classes");
+  if (!res.ok) throw new Error(String(data.error || "Failed to load classes"));
   return (data.classrooms || []) as Classroom[];
 }
 
@@ -164,7 +188,7 @@ export async function apiGetRoom(code: string): Promise<Classroom | null> {
   const res = await fetch(
     `/api/classroom?action=room&code=${encodeURIComponent(code)}`
   );
-  const data = await res.json();
+  const data = await readJson(res);
   if (!res.ok) return null;
   return (data.classroom as Classroom) || null;
 }
@@ -178,8 +202,8 @@ export async function apiJoinClassroom(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "join", code, snapshot }),
   });
-  const data = await res.json();
-  return data;
+  const data = await readJson(res);
+  return data as { ok: boolean; error?: string; classroom?: Classroom };
 }
 
 export async function apiSyncStudent(

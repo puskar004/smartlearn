@@ -276,23 +276,31 @@ export async function POST(req: NextRequest) {
       if (!code || !snapshot) {
         return NextResponse.json(
           { ok: false, error: "Code and student snapshot required" },
-          { status: 400 }
+          { status: 200 }
         );
       }
-      const res = await joinClassroomAsStudent(code, {
-        ...snapshot,
-        studentId: userId,
-        name:
-          snapshot.name ||
-          user?.fullName ||
-          user?.firstName ||
-          "Student",
-        email:
-          snapshot.email ||
-          user?.emailAddresses?.[0]?.emailAddress ||
-          undefined,
-      });
-      return NextResponse.json(res, { status: res.ok ? 200 : 400 });
+      try {
+        const res = await joinClassroomAsStudent(code, {
+          ...snapshot,
+          studentId: userId,
+          name:
+            snapshot.name ||
+            user?.fullName ||
+            user?.firstName ||
+            "Student",
+          email:
+            snapshot.email ||
+            user?.emailAddresses?.[0]?.emailAddress ||
+            undefined,
+        });
+        return NextResponse.json(res, { status: 200 });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Join failed";
+        return NextResponse.json(
+          { ok: false, error: message },
+          { status: 200 }
+        );
+      }
     }
 
     if (action === "sync") {
@@ -411,6 +419,14 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Server error";
     console.error("classroom API", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: /too many|429/i.test(message)
+          ? "Server busy — try again in a few seconds."
+          : message,
+      },
+      { status: 200 }
+    );
   }
 }
