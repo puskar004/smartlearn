@@ -85,6 +85,14 @@ export function getJoinedClass(userId: string): string | null {
   return getJoinedClasses(userId)[0] || null;
 }
 
+function emitJoinedChanged() {
+  try {
+    window.dispatchEvent(new Event("sl-joined-changed"));
+  } catch {
+    // ignore
+  }
+}
+
 export function setJoinedClass(userId: string, code: string | null) {
   const cur = getJoinedClasses(userId);
   let next: string[];
@@ -101,11 +109,8 @@ export function setJoinedClass(userId: string, code: string | null) {
     localStorage.removeItem(JOIN_KEY + userId);
     localStorage.removeItem(JOINS_KEY + userId);
   }
-  try {
-    window.dispatchEvent(new Event("sl-role-changed"));
-  } catch {
-    // ignore
-  }
+  // Do NOT fire role-changed (that re-renders whole shell and shakes the page)
+  emitJoinedChanged();
 }
 
 export function setJoinedClasses(userId: string, codes: string[]) {
@@ -120,8 +125,58 @@ export function setJoinedClasses(userId: string, codes: string[]) {
     localStorage.removeItem(JOIN_KEY + userId);
     localStorage.removeItem(JOINS_KEY + userId);
   }
+  emitJoinedChanged();
+}
+
+const ROOM_META = "sl_joined_room_meta_v1_";
+
+export type JoinedRoomMeta = {
+  code: string;
+  name: string;
+  teacherName?: string;
+};
+
+export function saveJoinedRoomMeta(userId: string, room: JoinedRoomMeta) {
+  if (typeof window === "undefined") return;
   try {
-    window.dispatchEvent(new Event("sl-role-changed"));
+    const key = ROOM_META + userId;
+    const raw = localStorage.getItem(key);
+    const map = raw ? (JSON.parse(raw) as Record<string, JoinedRoomMeta>) : {};
+    map[room.code.toUpperCase()] = {
+      code: room.code.toUpperCase(),
+      name: room.name || room.code,
+      teacherName: room.teacherName || "",
+    };
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+export function readJoinedRoomMeta(
+  userId: string,
+  code: string
+): JoinedRoomMeta | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ROOM_META + userId);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, JoinedRoomMeta>;
+    return map[code.toUpperCase()] || null;
+  } catch {
+    return null;
+  }
+}
+
+export function removeJoinedRoomMeta(userId: string, code: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = ROOM_META + userId;
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const map = JSON.parse(raw) as Record<string, JoinedRoomMeta>;
+    delete map[code.toUpperCase()];
+    localStorage.setItem(key, JSON.stringify(map));
   } catch {
     // ignore
   }

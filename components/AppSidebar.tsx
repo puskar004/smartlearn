@@ -83,7 +83,11 @@ export default function AppSidebar() {
   useEffect(() => {
     refresh();
     window.addEventListener(ROLE_EVENT, refresh);
-    return () => window.removeEventListener(ROLE_EVENT, refresh);
+    window.addEventListener("sl-joined-changed", refresh);
+    return () => {
+      window.removeEventListener(ROLE_EVENT, refresh);
+      window.removeEventListener("sl-joined-changed", refresh);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
