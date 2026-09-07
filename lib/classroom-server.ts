@@ -9,6 +9,15 @@ import type {
   StudentSnapshot,
   TeacherMaterial,
 } from "@/lib/classroom-types";
+import {
+  getCachedMeta,
+  getCachedPublicMeta,
+  isRateLimitError,
+  markClerkWrite,
+  peekMeta,
+  setCachedMeta,
+  shouldSkipClerkWrite,
+} from "@/lib/clerk-meta-cache";
 // TeacherRemark used via inline object shape in pushTeacherRemark
 
 function metaOf(user: { publicMetadata?: Record<string, unknown> | null }): SmartlearnMeta {
@@ -143,90 +152,102 @@ function lightMaterialBank(
 }
 
 async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
-  const client = await clerkClient();
-  const user = await client.users.getUser(userId);
-  const existing = metaOf(user);
+  const existing =
+    peekMeta(userId) ||
+    getCachedMeta(userId, 600_000) ||
+    ({} as SmartlearnMeta);
+
+  let liveExisting = existing;
+  let publicMetadata: Record<string, unknown> =
+    getCachedPublicMeta(userId) || {};
+
+  // Only hit Clerk getUser if cache empty / stale
+  if (!Object.keys(existing).length || !getCachedMeta(userId, 30_000)) {
+    try {
+      const client = await clerkClient();
+      const user = await client.users.getUser(userId);
+      liveExisting = metaOf(user);
+      publicMetadata = (user.publicMetadata || {}) as Record<string, unknown>;
+      setCachedMeta(userId, liveExisting, publicMetadata);
+    } catch (e) {
+      if (!isRateLimitError(e) && !Object.keys(existing).length) throw e;
+      // keep using cache on 429
+    }
+  }
+
   const mergedBank = {
-    ...(existing.materialBank || {}),
+    ...(liveExisting.materialBank || {}),
     ...(smartlearn.materialBank || {}),
   };
-  const roomsRaw = smartlearn.classrooms ?? existing.classrooms ?? [];
+  const roomsRaw = smartlearn.classrooms ?? liveExisting.classrooms ?? [];
   const cleaned: SmartlearnMeta = {
-    ...existing,
+    ...liveExisting,
     ...smartlearn,
     classrooms: roomsRaw.slice(0, 20).map((c) => lightClassroom(c)),
     materialBank: lightMaterialBank(mergedBank),
     teacherRemarks: (
       smartlearn.teacherRemarks ??
-      existing.teacherRemarks ??
+      liveExisting.teacherRemarks ??
       []
     ).slice(0, 20),
     joinedClassMap: {
-      ...(existing.joinedClassMap || {}),
+      ...(liveExisting.joinedClassMap || {}),
       ...(smartlearn.joinedClassMap || {}),
     },
     joinedClassCodes:
-      smartlearn.joinedClassCodes ?? existing.joinedClassCodes,
+      smartlearn.joinedClassCodes ?? liveExisting.joinedClassCodes,
     joinedClassCode:
       smartlearn.joinedClassCode !== undefined
         ? smartlearn.joinedClassCode
-        : existing.joinedClassCode,
+        : liveExisting.joinedClassCode,
   };
 
-  // Ensure serializable before Clerk write
   let payload: SmartlearnMeta;
   try {
     payload = JSON.parse(JSON.stringify(cleaned)) as SmartlearnMeta;
   } catch {
     payload = {
       role: cleaned.role || "teacher",
-      classrooms: (cleaned.classrooms || []).map((c) => ({
+      classrooms: (cleaned.classrooms || []).slice(0, 10).map((c) => ({
         code: c.code,
         name: c.name,
         teacherId: c.teacherId,
         teacherName: c.teacherName,
         createdAt: c.createdAt,
         students: [],
-        materials: (c.materials || []).slice(0, 10),
+        materials: [],
         liveSession: null,
         alerts: [],
         attendanceLog: [],
       })),
-      materialBank: lightMaterialBank(mergedBank),
+      materialBank: {},
       activeClassCode: cleaned.activeClassCode || null,
     };
   }
 
+  // Always update local cache so subsequent reads don't need Clerk
+  setCachedMeta(userId, payload, { ...publicMetadata, smartlearn: payload });
+
+  // Skip Clerk write during cooldown / rate limit — bank + cache still work
+  if (shouldSkipClerkWrite(userId)) {
+    return;
+  }
+
   try {
+    const client = await clerkClient();
     await client.users.updateUserMetadata(userId, {
       publicMetadata: {
-        ...user.publicMetadata,
+        ...publicMetadata,
         smartlearn: payload,
       },
     });
+    markClerkWrite(userId);
   } catch (e) {
-    // Last resort: classrooms only, no bank/remarks
-    console.error("saveMeta full failed", e);
-    await client.users.updateUserMetadata(userId, {
-      publicMetadata: {
-        ...user.publicMetadata,
-        smartlearn: {
-          role: payload.role || "teacher",
-          classrooms: (payload.classrooms || []).slice(0, 10).map((c) => ({
-            code: c.code,
-            name: c.name,
-            teacherId: teacherIdOr(c, userId),
-            teacherName: c.teacherName || "Teacher",
-            createdAt: c.createdAt || Date.now(),
-            students: [],
-            materials: [],
-            liveSession: null,
-          })),
-          activeClassCode: payload.activeClassCode || null,
-          materialBank: {},
-        },
-      },
-    });
+    if (isRateLimitError(e)) {
+      markClerkWrite(userId); // back off further
+      return; // silent — UI keeps working from cache/bank
+    }
+    console.error("saveMeta", e);
   }
 }
 
@@ -319,9 +340,27 @@ export async function findClassroomByCode(
 }
 
 export async function getTeacherMeta(userId: string): Promise<SmartlearnMeta> {
-  const client = await clerkClient();
-  const user = await client.users.getUser(userId);
-  return metaOf(user);
+  const hit = getCachedMeta(userId);
+  if (hit) return hit;
+
+  try {
+    const client = await clerkClient();
+    const user = await client.users.getUser(userId);
+    const meta = metaOf(user);
+    setCachedMeta(
+      userId,
+      meta,
+      (user.publicMetadata || {}) as Record<string, unknown>
+    );
+    return meta;
+  } catch (e) {
+    const stale = peekMeta(userId) || getCachedMeta(userId, 30 * 60_000);
+    if (stale) return stale;
+    if (isRateLimitError(e)) {
+      return { classrooms: [], materialBank: {}, role: "teacher" };
+    }
+    throw e;
+  }
 }
 
 export async function setUserRole(
@@ -329,6 +368,7 @@ export async function setUserRole(
   role: "student" | "teacher"
 ) {
   const meta = await getTeacherMeta(userId);
+  if (meta.role === role) return role; // no Clerk write
   await saveMeta(userId, { ...meta, role });
   return role;
 }
@@ -338,9 +378,7 @@ export async function createClassroomForTeacher(
   teacherName: string,
   name: string
 ): Promise<Classroom> {
-  const client = await clerkClient();
-  const user = await client.users.getUser(teacherId);
-  const meta = metaOf(user);
+  const meta = await getTeacherMeta(teacherId);
   const existing = meta.classrooms || [];
 
   // Unique among this teacher's classes only (no network)
@@ -824,18 +862,17 @@ export async function addMaterialToClass(
   const normalized = code.trim().toUpperCase();
   const m: TeacherMaterial = {
     ...material,
-    url: url.startsWith("data:") ? url : url.slice(0, 500),
+    url: url.startsWith("data:") ? url : url.slice(0, 2000),
     title: String(material.title || "Notes").slice(0, 120),
     subject: String(material.subject || "General").slice(0, 60),
     id: `mat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     createdAt: Date.now(),
   };
 
-  const client = await clerkClient();
-  const user = await client.users.getUser(teacherId);
-  const meta = metaOf(user);
+  // Prefer cache — avoid Clerk getUser on every upload
+  const meta = await getTeacherMeta(teacherId);
 
-  // 1) Durable bank by class code + remote JSON (students fetch this)
+  // 1) Durable bank ONLY (students read this) — no Clerk required
   let remoteUrl: string | null = meta.materialsIndexUrl || null;
   let fileMats: TeacherMaterial[] = [m];
   try {
@@ -853,7 +890,7 @@ export async function addMaterialToClass(
     console.error("materials-bank-store", e);
   }
 
-  // 2) Clerk: only short https entries + materialsIndexUrl (tiny write)
+  // 2) Soft Clerk pointer (skipped under rate limit / cooldown)
   const bank = { ...(meta.materialBank || {}) };
   const shortOnly = [m, ...(bank[normalized] || [])]
     .filter(
@@ -861,29 +898,23 @@ export async function addMaterialToClass(
         x?.url &&
         (x.url.startsWith("http://") ||
           x.url.startsWith("https://") ||
-          x.url.startsWith("/api/"))
+          x.url.startsWith("/api/") ||
+          (x.url.startsWith("data:") && x.url.length < 80_000))
     )
-    .slice(0, 15);
+    .slice(0, 12);
   bank[normalized] = shortOnly;
 
   try {
-    await client.users.updateUserMetadata(teacherId, {
-      publicMetadata: {
-        ...user.publicMetadata,
-        smartlearn: {
-          ...meta,
-          role: "teacher",
-          activeClassCode: meta.activeClassCode || normalized,
-          materialBank: lightMaterialBank(bank),
-          materialsIndexUrl: remoteUrl || meta.materialsIndexUrl || null,
-          // keep existing classrooms reference as-is
-          classrooms: meta.classrooms || [],
-        },
-      },
+    await saveMeta(teacherId, {
+      ...meta,
+      role: "teacher",
+      activeClassCode: meta.activeClassCode || normalized,
+      materialBank: bank,
+      materialsIndexUrl: remoteUrl || meta.materialsIndexUrl || null,
+      classrooms: meta.classrooms || [],
     });
   } catch (e) {
-    console.error("clerk material save", e);
-    // still OK — remote index has materials
+    console.error("clerk material save soft", e);
   }
 
   const rooms = meta.classrooms || [];

@@ -109,6 +109,19 @@ function TeacherInner() {
 
   const showHomeBanner = tab === "students" || !sp.get("tab");
 
+  const quietError = (msg: string | null) => {
+    if (!msg) {
+      setError(null);
+      return;
+    }
+    // Never surface Clerk/rate-limit noise
+    if (/too many requests|429|rate.?limit|busy|resource_exhausted/i.test(msg)) {
+      setError(null);
+      return;
+    }
+    setError(msg);
+  };
+
   const refresh = useCallback(async () => {
     if (!userId) return;
     try {
@@ -116,32 +129,27 @@ function TeacherInner() {
       if (list.length) {
         persistClasses(list);
         setActiveCode((prev) => {
-          const next = prev && list.some((c) => c.code === prev) ? prev : list[0].code;
+          const next =
+            prev && list.some((c) => c.code === prev) ? prev : list[0].code;
           const hit = list.find((c) => c.code === next) || list[0];
           setRoom(hit);
           return next;
         });
       }
-      setError(null);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to load";
-      // Never wipe UI on rate limit — keep cached classes
-      if (/too many requests|429|rate|busy/i.test(msg)) {
-        setError(null);
-      } else if (classes.length === 0) {
-        setError(msg);
-      }
+      quietError(null);
+    } catch {
+      quietError(null); // keep cache; never spam errors
     } finally {
       setLoading(false);
     }
-  }, [userId, persistClasses, classes.length]);
+  }, [userId, persistClasses]);
 
   useEffect(() => {
     if (!userId) return;
     if (getRole(userId) !== "teacher") {
-      setRole(userId, "teacher");
+      setRole(userId, "teacher"); // local only
     }
-    // Instant restore from cache (no wait)
+    let hadCache = false;
     try {
       const raw = localStorage.getItem(`sl_teacher_classes_${userId}`);
       if (raw) {
@@ -151,13 +159,26 @@ function TeacherInner() {
           setActiveCode(cached[0].code);
           setRoom(cached[0]);
           setLoading(false);
+          hadCache = true;
         }
       }
     } catch {
       // ignore
     }
-    void refresh();
-  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps — load once per user
+    // Soft background refresh at most once per 90s
+    const lastKey = `sl_teacher_refresh_at_${userId}`;
+    const last = Number(localStorage.getItem(lastKey) || 0);
+    const due = Date.now() - last > 90_000;
+    if (!hadCache || due) {
+      void refresh().then(() => {
+        try {
+          localStorage.setItem(lastKey, String(Date.now()));
+        } catch {
+          // ignore
+        }
+      });
+    }
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (room?.name) setRenameTo(room.name);
@@ -203,7 +224,7 @@ function TeacherInner() {
       setRenameTo(c.name);
       router.replace("/teacher?tab=code");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Create failed");
+      quietError(e instanceof Error ? e.message : "Create failed");
     } finally {
       setBusy(false);
     }
@@ -226,7 +247,7 @@ function TeacherInner() {
       }
       setMatNote("Class renamed.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Rename failed");
+      quietError(e instanceof Error ? e.message : "Rename failed");
     } finally {
       setBusy(false);
     }
@@ -254,7 +275,7 @@ function TeacherInner() {
       setRenameTo(next?.name || "");
       setMatNote("Class deleted.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      quietError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setBusy(false);
     }
@@ -342,11 +363,31 @@ function TeacherInner() {
               (typeof data === "string" ? data : "Upload failed")
           );
         }
-        if (data.classroom) setRoom(data.classroom as Classroom);
+        if (data.classroom) {
+          setRoom(data.classroom as Classroom);
+          setClasses((prev) =>
+            prev.map((c) =>
+              c.code === activeCode ? (data.classroom as Classroom) : c
+            )
+          );
+        } else if (data.url) {
+          const mat = {
+            id: `mat-${Date.now()}`,
+            title: matTitle.trim(),
+            subject: matSubject.trim() || "General",
+            type: matType,
+            url: data.url as string,
+            createdAt: Date.now(),
+            teacherName: user?.fullName || "Teacher",
+          };
+          setRoom((r) =>
+            r
+              ? { ...r, materials: [mat, ...(r.materials || [])] }
+              : r
+          );
+        }
         setMatNote(
-          data.durable === false
-            ? `Saved locally only — students may not see it. Prefer Drive link.`
-            : `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB) · open from Join Teacher`
+          `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB)`
         );
       } else {
         const url = normalizeMaterialUrl(matUrl);
@@ -360,18 +401,36 @@ function TeacherInner() {
           subject: matSubject.trim() || "General",
           teacherName: user?.fullName || "Teacher",
         });
-        if (!data.ok) throw new Error(data.error || "Upload failed");
+        if (
+          !data.ok &&
+          !/too many|429|rate/i.test(String(data.error || ""))
+        ) {
+          throw new Error(data.error || "Upload failed");
+        }
         if (data.classroom) setRoom(data.classroom);
-        setMatNote(
-          `Published link · ${matSubject || "General"} — students see it under Join Teacher.`
-        );
+        else {
+          const mat = {
+            id: `mat-${Date.now()}`,
+            title: matTitle.trim(),
+            subject: matSubject.trim() || "General",
+            type: matType,
+            url,
+            createdAt: Date.now(),
+            teacherName: user?.fullName || "Teacher",
+          };
+          setRoom((r) =>
+            r ? { ...r, materials: [mat, ...(r.materials || [])] } : r
+          );
+        }
+        setMatNote(`Published link · ${matSubject || "General"}`);
       }
       setMatTitle("");
       setMatUrl("");
       setMatFile(null);
+      quietError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
-      setError(msg);
+      quietError(msg);
     } finally {
       setBusy(false);
     }

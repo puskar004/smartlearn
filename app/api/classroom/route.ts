@@ -500,12 +500,14 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Server error";
     console.error("classroom API", message);
+    // Never return 429-looking errors to UI — soft fail
     return NextResponse.json(
       {
         ok: false,
-        error: /too many|429/i.test(message)
-          ? "Server busy — try again in a few seconds."
+        error: /too many|429|rate/i.test(message)
+          ? "Temporarily delayed — your data is kept locally. Retry in a moment."
           : message,
+        rateLimited: /too many|429|rate/i.test(message),
       },
       { status: 200 }
     );

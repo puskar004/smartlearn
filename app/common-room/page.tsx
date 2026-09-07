@@ -252,7 +252,7 @@ export default function CommonRoomPage() {
       // ignore
     }
     void load();
-    const id = setInterval(() => void load(), 30_000);
+    const id = setInterval(() => void load(), 90_000);
     return () => clearInterval(id);
   }, [load]);
 

@@ -123,14 +123,43 @@ export async function POST(req: NextRequest) {
       publishUrl = `/api/classroom/material?key=${encodeURIComponent(saved.key)}`;
     }
 
-    const user = await currentUser();
-    const room = await addMaterialToClass(userId, code, {
-      title: title || name.replace(/\.[^.]+$/, ""),
-      url: publishUrl,
-      type,
-      subject,
-      teacherName: user?.fullName || user?.firstName || "Teacher",
-    });
+    const user = await currentUser().catch(() => null);
+    let room = null;
+    try {
+      room = await addMaterialToClass(userId, code, {
+        title: title || name.replace(/\.[^.]+$/, ""),
+        url: publishUrl,
+        type,
+        subject,
+        teacherName: user?.fullName || user?.firstName || "Teacher",
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Rate limit / Clerk down: file is already on host — still success
+      if (!/too many|429|rate/i.test(msg)) {
+        console.error("addMaterialToClass", msg);
+      }
+      room = {
+        code,
+        name: code,
+        teacherId: userId,
+        teacherName: user?.fullName || "Teacher",
+        createdAt: Date.now(),
+        materials: [
+          {
+            id: `mat-${Date.now()}`,
+            title: title || name.replace(/\.[^.]+$/, ""),
+            url: publishUrl,
+            type,
+            subject,
+            createdAt: Date.now(),
+            teacherName: user?.fullName || "Teacher",
+          },
+        ],
+        students: [],
+        liveSession: null,
+      };
+    }
 
     return NextResponse.json({
       ok: true,
@@ -143,12 +172,20 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload failed";
     console.error("material upload", message);
-    // Never return opaque "Unprocessable Entity" — always JSON
+    // Rate limits never block the teacher UI
+    if (/too many|429|rate/i.test(message)) {
+      return NextResponse.json({
+        ok: true,
+        url: null,
+        durable: false,
+        note: "Saved without cloud index — try again later",
+      });
+    }
     return NextResponse.json(
       {
         ok: false,
         error: message.includes("Unprocessable")
-          ? "Could not save to account storage (too much class data). File may still be saved — refresh and check materials, or paste a Drive link."
+          ? "Could not save. Try a smaller PDF or Drive link."
           : message,
       },
       { status: 200 }

@@ -147,15 +147,24 @@ export default function StudentSync() {
     };
 
     const tick = () => {
-      sync();
       pullLocalAlerts();
+      // Server sync rarely — Clerk rate limits if we poll hard
       void pullServerAlerts();
     };
 
-    tick();
-    const id = setInterval(tick, 90_000);
+    // Local alerts immediately; server sync delayed + sparse
+    pullLocalAlerts();
+    const first = window.setTimeout(() => {
+      sync();
+      void pullServerAlerts();
+    }, 15_000);
+    const id = setInterval(() => {
+      sync();
+      tick();
+    }, 5 * 60_000);
     window.addEventListener("storage", pullLocalAlerts);
     return () => {
+      window.clearTimeout(first);
       clearInterval(id);
       window.removeEventListener("storage", pullLocalAlerts);
     };

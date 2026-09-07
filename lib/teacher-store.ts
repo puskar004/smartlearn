@@ -36,7 +36,14 @@ export function setRole(userId: string, role: "student" | "teacher") {
   } catch {
     // ignore
   }
-  // fire-and-forget server sync
+  // Sync to Clerk at most once per role per browser session (avoids 429)
+  try {
+    const k = `sl_role_synced_${userId}`;
+    if (sessionStorage.getItem(k) === role) return;
+    sessionStorage.setItem(k, role);
+  } catch {
+    // ignore
+  }
   void fetch("/api/classroom", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -322,6 +329,15 @@ export async function apiUploadMaterialFile(opts: {
   }
   if (!res.ok && !data.error) {
     data.error = `Upload failed (${res.status}). ${text.slice(0, 80)}`;
+  }
+  // Rate limit: if server still returned url, treat as success
+  if (
+    !data.ok &&
+    data.url &&
+    /too many|429|rate/i.test(String(data.error || text))
+  ) {
+    data.ok = true;
+    data.error = undefined;
   }
   // Always cache locally so student on same browser sees instantly
   if (data.ok && data.classroom) {
