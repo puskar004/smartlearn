@@ -16,41 +16,97 @@ function metaOf(user: { publicMetadata?: Record<string, unknown> | null }): Smar
   return (m.smartlearn as SmartlearnMeta) || {};
 }
 
-/** Keep Clerk metadata small — no data: URLs, trim fat fields */
+/** Keep Clerk metadata small — never throw on bad data */
 function lightClassroom(c: Classroom): Classroom {
-  return {
-    ...c,
-    materials: (c.materials || [])
-      .filter((m) => m.url && !m.url.startsWith("data:"))
-      .map((m) => ({
-        ...m,
-        url: String(m.url).slice(0, 500),
-        title: String(m.title || "").slice(0, 120),
-        subject: String(m.subject || "").slice(0, 60),
-      }))
-      .slice(0, 40),
-    alerts: (c.alerts || []).slice(0, 12),
-    attendanceLog: (c.attendanceLog || []).slice(0, 20).map((r) => ({
-      ...r,
-      attendees: (r.attendees || []).slice(0, 40),
-    })),
-    students: (c.students || []).slice(0, 80).map((s) => ({
-      ...s,
-      recentMistakes: (s.recentMistakes || []).slice(0, 3),
-      weakSubjects: (s.weakSubjects || []).slice(0, 5),
-      email: s.email ? String(s.email).slice(0, 80) : undefined,
-    })),
-    liveSession: c.liveSession
-      ? {
-          ...c.liveSession,
-          messages: (c.liveSession.messages || []).slice(-40),
-          attendees: (c.liveSession.attendees || []).slice(0, 80),
-          meetUrl: c.liveSession.meetUrl
-            ? String(c.liveSession.meetUrl).slice(0, 300)
-            : undefined,
-        }
-      : null,
-  };
+  try {
+    const mats = Array.isArray(c?.materials) ? c.materials : [];
+    const students = Array.isArray(c?.students) ? c.students : [];
+    const alerts = Array.isArray(c?.alerts) ? c.alerts : [];
+    const attendanceLog = Array.isArray(c?.attendanceLog) ? c.attendanceLog : [];
+    const sess = c?.liveSession;
+    return {
+      code: String(c?.code || "").toUpperCase(),
+      name: String(c?.name || c?.code || "Class").slice(0, 80),
+      teacherId: String(c?.teacherId || ""),
+      teacherName: String(c?.teacherName || "Teacher").slice(0, 80),
+      createdAt: Number(c?.createdAt) || Date.now(),
+      materials: mats
+        .filter((m) => m && m.url && !String(m.url).startsWith("data:"))
+        .map((m) => ({
+          id: String(m.id || `mat-${Date.now()}`),
+          title: String(m.title || "Notes").slice(0, 120),
+          type: (m.type === "video" || m.type === "link"
+            ? m.type
+            : "notes") as "notes" | "video" | "link",
+          url: String(m.url).slice(0, 500),
+          subject: String(m.subject || "General").slice(0, 60),
+          createdAt: Number(m.createdAt) || Date.now(),
+          teacherName: String(m.teacherName || "").slice(0, 80),
+        }))
+        .slice(0, 20),
+      alerts: alerts.slice(0, 10),
+      attendanceLog: attendanceLog.slice(0, 10).map((r) => ({
+        ...r,
+        attendees: Array.isArray(r.attendees) ? r.attendees.slice(0, 30) : [],
+      })),
+      students: students.slice(0, 60).map((s) => ({
+        studentId: String(s.studentId || ""),
+        name: String(s.name || "Student").slice(0, 80),
+        email: s.email ? String(s.email).slice(0, 80) : undefined,
+        grade: String(s.grade || "12").slice(0, 4),
+        xp: Number(s.xp) || 0,
+        streak: Number(s.streak) || 0,
+        accuracy: s.accuracy ?? null,
+        mistakes: Number(s.mistakes) || 0,
+        weakSubjects: Array.isArray(s.weakSubjects)
+          ? s.weakSubjects.slice(0, 5).map(String)
+          : [],
+        chaptersOpened: Number(s.chaptersOpened) || 0,
+        lastActive: Number(s.lastActive) || Date.now(),
+        recentMistakes: Array.isArray(s.recentMistakes)
+          ? s.recentMistakes.slice(0, 2)
+          : [],
+      })),
+      liveSession: sess
+        ? {
+            id: String(sess.id || ""),
+            title: String(sess.title || "Live").slice(0, 120),
+            subject: String(sess.subject || "").slice(0, 60),
+            startedAt: Number(sess.startedAt) || Date.now(),
+            endsAt: Number(sess.endsAt) || Date.now(),
+            active: Boolean(sess.active),
+            joinCode: String(sess.joinCode || "").slice(0, 12),
+            meetUrl: sess.meetUrl
+              ? String(sess.meetUrl).slice(0, 300)
+              : undefined,
+            scheduledAt: sess.scheduledAt,
+            messages: Array.isArray(sess.messages)
+              ? sess.messages.slice(-30)
+              : [],
+            attendees: Array.isArray(sess.attendees)
+              ? sess.attendees.slice(0, 60)
+              : [],
+            kickedIds: Array.isArray(sess.kickedIds)
+              ? sess.kickedIds.slice(0, 40)
+              : [],
+            kickReasons: sess.kickReasons || {},
+          }
+        : null,
+    };
+  } catch {
+    return {
+      code: String(c?.code || "X"),
+      name: String(c?.name || "Class"),
+      teacherId: String(c?.teacherId || ""),
+      teacherName: "Teacher",
+      createdAt: Date.now(),
+      materials: [],
+      students: [],
+      alerts: [],
+      attendanceLog: [],
+      liveSession: null,
+    };
+  }
 }
 
 function lightMaterialBank(
@@ -90,22 +146,21 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
   const existing = metaOf(user);
-  // NEVER wipe materialBank if caller omitted it
   const mergedBank = {
     ...(existing.materialBank || {}),
     ...(smartlearn.materialBank || {}),
   };
+  const roomsRaw = smartlearn.classrooms ?? existing.classrooms ?? [];
   const cleaned: SmartlearnMeta = {
     ...existing,
     ...smartlearn,
-    classrooms: (smartlearn.classrooms ?? existing.classrooms ?? [])
-      .slice(0, 20)
-      .map(lightClassroom),
+    classrooms: roomsRaw.slice(0, 20).map((c) => lightClassroom(c)),
     materialBank: lightMaterialBank(mergedBank),
-    teacherRemarks: (smartlearn.teacherRemarks ?? existing.teacherRemarks ?? []).slice(
-      0,
-      20
-    ),
+    teacherRemarks: (
+      smartlearn.teacherRemarks ??
+      existing.teacherRemarks ??
+      []
+    ).slice(0, 20),
     joinedClassMap: {
       ...(existing.joinedClassMap || {}),
       ...(smartlearn.joinedClassMap || {}),
@@ -117,12 +172,66 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
         ? smartlearn.joinedClassCode
         : existing.joinedClassCode,
   };
-  await client.users.updateUserMetadata(userId, {
-    publicMetadata: {
-      ...user.publicMetadata,
-      smartlearn: cleaned,
-    },
-  });
+
+  // Ensure serializable before Clerk write
+  let payload: SmartlearnMeta;
+  try {
+    payload = JSON.parse(JSON.stringify(cleaned)) as SmartlearnMeta;
+  } catch {
+    payload = {
+      role: cleaned.role || "teacher",
+      classrooms: (cleaned.classrooms || []).map((c) => ({
+        code: c.code,
+        name: c.name,
+        teacherId: c.teacherId,
+        teacherName: c.teacherName,
+        createdAt: c.createdAt,
+        students: [],
+        materials: (c.materials || []).slice(0, 10),
+        liveSession: null,
+        alerts: [],
+        attendanceLog: [],
+      })),
+      materialBank: lightMaterialBank(mergedBank),
+      activeClassCode: cleaned.activeClassCode || null,
+    };
+  }
+
+  try {
+    await client.users.updateUserMetadata(userId, {
+      publicMetadata: {
+        ...user.publicMetadata,
+        smartlearn: payload,
+      },
+    });
+  } catch (e) {
+    // Last resort: classrooms only, no bank/remarks
+    console.error("saveMeta full failed", e);
+    await client.users.updateUserMetadata(userId, {
+      publicMetadata: {
+        ...user.publicMetadata,
+        smartlearn: {
+          role: payload.role || "teacher",
+          classrooms: (payload.classrooms || []).slice(0, 10).map((c) => ({
+            code: c.code,
+            name: c.name,
+            teacherId: teacherIdOr(c, userId),
+            teacherName: c.teacherName || "Teacher",
+            createdAt: c.createdAt || Date.now(),
+            students: [],
+            materials: [],
+            liveSession: null,
+          })),
+          activeClassCode: payload.activeClassCode || null,
+          materialBank: {},
+        },
+      },
+    });
+  }
+}
+
+function teacherIdOr(c: Classroom, fallback: string) {
+  return c.teacherId || fallback;
 }
 
 function makeCode(len = 6) {
@@ -234,18 +343,13 @@ export async function createClassroomForTeacher(
   const meta = metaOf(user);
   const existing = meta.classrooms || [];
 
-  // Unique among this teacher's classes only (no global Clerk scan)
-  const used = new Set((existing || []).map((c) => c.code));
+  // Unique among this teacher's classes only (no network)
+  const used = new Set(
+    (existing || []).map((c) => String(c.code || "").toUpperCase())
+  );
   let code = makeCode(6);
-  for (let i = 0; i < 20; i++) {
-    if (!used.has(code)) {
-      try {
-        const { isCodeTaken } = await import("@/lib/class-code-index");
-        if (!(await isCodeTaken(code))) break;
-      } catch {
-        break;
-      }
-    }
+  for (let i = 0; i < 30; i++) {
+    if (!used.has(code)) break;
     code = makeCode(6);
   }
 
@@ -283,13 +387,26 @@ export async function createClassroomForTeacher(
 export async function listTeacherClassrooms(
   teacherId: string
 ): Promise<Classroom[]> {
-  // Single Clerk getUser — no remote scans (avoids rate limits)
-  const meta = await getTeacherMeta(teacherId);
-  const rooms = meta.classrooms || [];
-  return rooms.map((r) => ({
-    ...r,
-    materials: materialsForRoom(meta, r.code, r),
-  }));
+  try {
+    const meta = await getTeacherMeta(teacherId);
+    const rooms = Array.isArray(meta.classrooms) ? meta.classrooms : [];
+    return rooms
+      .filter((r) => r && r.code)
+      .map((r) => {
+        try {
+          return {
+            ...r,
+            code: String(r.code).toUpperCase(),
+            materials: materialsForRoom(meta, r.code, r),
+          };
+        } catch {
+          return { ...r, code: String(r.code || "").toUpperCase(), materials: [] };
+        }
+      });
+  } catch (e) {
+    console.error("listTeacherClassrooms", e);
+    return [];
+  }
 }
 
 export async function getClassroomForTeacher(

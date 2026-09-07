@@ -242,11 +242,11 @@ function TeacherInner() {
       const data = await apiDeleteClassroom(activeCode);
       if (!data.ok) throw new Error(data.error || "Delete failed");
       const list = (data.classrooms || []) as Classroom[];
-      setClasses(list);
-      const next = list[0]?.code || null;
-      setActiveCode(next);
-      setRoom(next ? (await apiGetRoom(next)) : null);
-      setRenameTo(list[0]?.name || "");
+      persistClasses(list);
+      const next = list[0] || null;
+      setActiveCode(next?.code || null);
+      setRoom(next);
+      setRenameTo(next?.name || "");
       setMatNote("Class deleted.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");

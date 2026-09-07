@@ -168,7 +168,7 @@ export async function apiCreateClassroom(name: string): Promise<Classroom> {
     body: JSON.stringify({ action: "create", name }),
   });
   const data = await readJson(res);
-  if (!res.ok || !data.ok) {
+  if (!data.ok || !data.classroom) {
     throw new Error(String(data.error || "Could not create class"));
   }
   return data.classroom as Classroom;
@@ -177,10 +177,9 @@ export async function apiCreateClassroom(name: string): Promise<Classroom> {
 export async function apiListMyClasses(): Promise<Classroom[]> {
   const res = await fetch("/api/classroom?action=mine");
   const data = await readJson(res);
-  if (res.status === 429) {
-    throw new Error("Server busy — try again shortly");
-  }
-  if (!res.ok) throw new Error(String(data.error || "Failed to load classes"));
+  // Soft-fail: never throw hard empty — caller keeps cache
+  if (res.status === 429) return [];
+  if (!res.ok && !Array.isArray(data.classrooms)) return [];
   return (data.classrooms || []) as Classroom[];
 }
 

@@ -25,37 +25,105 @@ import {
 import type { StudentSnapshot } from "@/lib/classroom-types";
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
-  }
-
-  const sp = req.nextUrl.searchParams;
-  const action = sp.get("action") || "list";
-  const code = sp.get("code") || "";
-
   try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { ok: false, error: "Sign in required" },
+        { status: 401 }
+      );
+    }
+
+    const sp = req.nextUrl.searchParams;
+    const action = sp.get("action") || "list";
+    const code = sp.get("code") || "";
+
     if (action === "lookup" && code) {
-      const found = await findClassroomByCode(code);
-      if (!found) {
+      try {
+        const found = await findClassroomByCode(code);
+        if (!found) {
+          return NextResponse.json({
+            ok: false,
+            error: "Invalid class code",
+          });
+        }
+        return NextResponse.json({
+          ok: true,
+          classroom: {
+            code: found.classroom.code,
+            name: found.classroom.name,
+            teacherName: found.classroom.teacherName,
+          },
+        });
+      } catch (e) {
         return NextResponse.json({
           ok: false,
-          error: "Invalid class code",
+          error: e instanceof Error ? e.message : "Lookup failed",
         });
       }
-      return NextResponse.json({
-        ok: true,
-        classroom: {
-          code: found.classroom.code,
-          name: found.classroom.name,
-          teacherName: found.classroom.teacherName,
-        },
-      });
     }
 
     if (action === "mine") {
-      const rooms = await listTeacherClassrooms(userId);
-      return NextResponse.json({ ok: true, classrooms: rooms });
+      try {
+        const rooms = await listTeacherClassrooms(userId);
+        // Slim payload — avoid huge student/log blobs crashing the response
+        const safe = (rooms || []).map((r) => ({
+          code: r.code,
+          name: r.name,
+          teacherId: r.teacherId,
+          teacherName: r.teacherName,
+          createdAt: r.createdAt,
+          materials: (r.materials || []).slice(0, 30).map((m) => ({
+            id: m.id,
+            title: m.title,
+            type: m.type,
+            url: String(m.url || "").slice(0, 400),
+            subject: m.subject,
+            createdAt: m.createdAt,
+            teacherName: m.teacherName,
+          })),
+          students: (r.students || []).slice(0, 50).map((s) => ({
+            studentId: s.studentId,
+            name: s.name,
+            email: s.email,
+            grade: s.grade,
+            xp: s.xp,
+            streak: s.streak,
+            accuracy: s.accuracy,
+            mistakes: s.mistakes,
+            weakSubjects: (s.weakSubjects || []).slice(0, 5),
+            chaptersOpened: s.chaptersOpened,
+            lastActive: s.lastActive,
+            recentMistakes: (s.recentMistakes || []).slice(0, 2),
+          })),
+          liveSession: r.liveSession
+            ? {
+                id: r.liveSession.id,
+                title: r.liveSession.title,
+                subject: r.liveSession.subject,
+                startedAt: r.liveSession.startedAt,
+                endsAt: r.liveSession.endsAt,
+                active: r.liveSession.active,
+                joinCode: r.liveSession.joinCode,
+                meetUrl: r.liveSession.meetUrl,
+                scheduledAt: r.liveSession.scheduledAt,
+                messages: (r.liveSession.messages || []).slice(-20),
+                attendees: (r.liveSession.attendees || []).slice(0, 40),
+                kickedIds: (r.liveSession.kickedIds || []).slice(0, 30),
+              }
+            : null,
+          alerts: (r.alerts || []).slice(0, 8),
+          attendanceLog: (r.attendanceLog || []).slice(0, 8),
+        }));
+        return NextResponse.json({ ok: true, classrooms: safe });
+      } catch (e) {
+        console.error("mine", e);
+        return NextResponse.json({
+          ok: true,
+          classrooms: [],
+          error: e instanceof Error ? e.message : "Load failed",
+        });
+      }
     }
 
     if (action === "joined") {
@@ -187,16 +255,18 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
-  }
-
-  const user = await currentUser();
-  const body = await req.json().catch(() => ({}));
-  const action = String(body.action || "");
-
   try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { ok: false, error: "Sign in required" },
+        { status: 401 }
+      );
+    }
+
+    const user = await currentUser();
+    const body = await req.json().catch(() => ({}));
+    const action = String(body.action || "");
     if (action === "setRole") {
       const role = body.role === "teacher" ? "teacher" : "student";
       await setUserRole(userId, role);
@@ -204,13 +274,24 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "create") {
-      await setUserRole(userId, "teacher");
-      const room = await createClassroomForTeacher(
-        userId,
-        user?.fullName || user?.firstName || "Teacher",
-        String(body.name || "My Class")
-      );
-      return NextResponse.json({ ok: true, classroom: room });
+      try {
+        const room = await createClassroomForTeacher(
+          userId,
+          user?.fullName || user?.firstName || "Teacher",
+          String(body.name || "My Class")
+        );
+        return NextResponse.json({ ok: true, classroom: room });
+      } catch (e) {
+        console.error("create classroom", e);
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              e instanceof Error ? e.message : "Could not create class",
+          },
+          { status: 200 }
+        );
+      }
     }
 
     if (action === "rename") {
