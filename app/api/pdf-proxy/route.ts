@@ -27,11 +27,14 @@ export async function GET(req: NextRequest) {
 
   const bytes = await resolvePdfBytes(url);
   if (!bytes) {
+    const ncert = /ncert|textbook\.php/i.test(url);
     return NextResponse.json(
       {
         error: "fetch failed",
-        detail:
-          "Could not download PDF (expired link or blocked host). Re-upload or try another source.",
+        detail: ncert
+          ? "NCERT server blocked this request. Use Viewer tab or open Source."
+          : "Could not download PDF (expired link or blocked host).",
+        ncert,
       },
       { status: 502 }
     );

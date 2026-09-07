@@ -12,6 +12,7 @@ import {
 type Props = {
   src: string;
   title?: string;
+  onFail?: () => void;
 };
 
 function isPdfMagic(data: Uint8Array) {
@@ -61,7 +62,7 @@ async function bytesFromSrc(
 }
 
 /** Stable PDF viewer — no retry loops (those caused shake + endless loading). */
-export default function PdfJsViewer({ src, title }: Props) {
+export default function PdfJsViewer({ src, title, onFail }: Props) {
   const [pages, setPages] = useState(0);
   const [page, setPage] = useState(1);
   const [scale, setScale] = useState(1.15);
@@ -72,6 +73,8 @@ export default function PdfJsViewer({ src, title }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfRef = useRef<{ doc: any } | null>(null);
   const srcRef = useRef(src);
+  const failRef = useRef(onFail);
+  failRef.current = onFail;
 
   useEffect(() => {
     srcRef.current = src;
@@ -131,14 +134,20 @@ export default function PdfJsViewer({ src, title }: Props) {
       } catch (e) {
         if (cancelled) return;
         const name = e instanceof Error ? e.name : "";
-        setError(
+        const msg =
           name === "AbortError"
-            ? "PDF timed out. Tap Reload or ask teacher to re-upload."
+            ? "PDF timed out. Tap Reload or try Viewer tab."
             : e instanceof Error
               ? e.message
-              : "Failed to open PDF"
-        );
+              : "Failed to open PDF";
+        setError(msg);
         setLoading(false);
+        // Let parent switch to Google Viewer for NCERT etc.
+        try {
+          failRef.current?.();
+        } catch {
+          // ignore
+        }
       } finally {
         window.clearTimeout(hardTimeout);
       }
@@ -196,20 +205,11 @@ export default function PdfJsViewer({ src, title }: Props) {
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-slate-50 px-6 text-center">
-        <p className="text-sm font-semibold text-rose-600">{error}</p>
-        <p className="max-w-sm text-xs text-slate-500">
-          Ask teacher to re-upload this PDF, then Refresh materials.
+        <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+        <p className="text-sm font-semibold text-slate-700">
+          Opening alternate viewer…
         </p>
-        {blobUrl && (
-          <a
-            href={blobUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white"
-          >
-            Open in new tab
-          </a>
-        )}
+        <p className="max-w-sm text-xs text-slate-500">{error}</p>
       </div>
     );
   }

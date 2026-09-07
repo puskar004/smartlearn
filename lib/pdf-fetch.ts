@@ -26,6 +26,78 @@ function extractTmpfilesDl(html: string, base: string): string | null {
   }
 }
 
+/** NCERT textbook.php → direct pdf path candidates */
+export function ncertDirectPdfCandidates(url: string): string[] {
+  const out: string[] = [];
+  try {
+    const u = new URL(url);
+    // Already a pdf
+    if (/\.pdf$/i.test(u.pathname)) {
+      out.push(url);
+      if (u.hostname === "ncert.nic.in") {
+        out.push(url.replace("://ncert.nic.in", "://www.ncert.nic.in"));
+      }
+      if (u.hostname === "www.ncert.nic.in") {
+        out.push(url.replace("://www.ncert.nic.in", "://ncert.nic.in"));
+      }
+      return out;
+    }
+    // textbook.php?jess2=1-7 → jess201.pdf
+    for (const [k, v] of u.searchParams.entries()) {
+      if (/^[a-z]+\d+$/i.test(k) && /^\d+/.test(v)) {
+        const ch = parseInt(v.split("-")[0], 10);
+        if (!Number.isNaN(ch) && ch > 0) {
+          const code = k.toLowerCase();
+          const n = String(ch).padStart(2, "0");
+          out.push(`https://ncert.nic.in/textbook/pdf/${code}${n}.pdf`);
+          out.push(`https://www.ncert.nic.in/textbook/pdf/${code}${n}.pdf`);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
+async function waybackSnapshots(originalUrl: string): Promise<string[]> {
+  const urls: string[] = [];
+  // Fast identity replay (often works when live NCERT blocks cloud IPs)
+  urls.push(`https://web.archive.org/web/0id_/${originalUrl}`);
+  urls.push(`https://web.archive.org/web/2024id_/${originalUrl}`);
+  urls.push(`https://web.archive.org/web/2023id_/${originalUrl}`);
+  urls.push(`https://web.archive.org/web/2022id_/${originalUrl}`);
+
+  try {
+    const cdx = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(
+      originalUrl
+    )}&output=json&fl=timestamp,statuscode&filter=statuscode:200&limit=6&rel=0`;
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(cdx, {
+      signal: controller.signal,
+      headers: { "User-Agent": UA, Accept: "application/json" },
+      cache: "no-store",
+    });
+    clearTimeout(t);
+    if (res.ok) {
+      const rows = (await res.json()) as string[][];
+      // first row is header
+      for (let i = 1; i < rows.length; i++) {
+        const ts = rows[i]?.[0];
+        if (ts) {
+          urls.push(
+            `https://web.archive.org/web/${ts}id_/${originalUrl}`
+          );
+        }
+      }
+    }
+  } catch {
+    // ignore CDX failures
+  }
+  return Array.from(new Set(urls));
+}
+
 function candidates(url: string): string[] {
   const list = [url];
   try {
@@ -42,14 +114,14 @@ function candidates(url: string): string[] {
         );
       }
     }
+    if (u.hostname.includes("ncert") || /textbook\.php/i.test(url)) {
+      list.push(...ncertDirectPdfCandidates(url));
+    }
     if (u.hostname === "ncert.nic.in") {
       list.push(url.replace("://ncert.nic.in", "://www.ncert.nic.in"));
     }
     if (u.hostname === "www.ncert.nic.in") {
       list.push(url.replace("://www.ncert.nic.in", "://ncert.nic.in"));
-    }
-    if (u.hostname.includes("ncert") || u.hostname.includes("cbse")) {
-      list.push(`https://web.archive.org/web/0id_/${url}`);
     }
   } catch {
     // ignore
@@ -57,7 +129,7 @@ function candidates(url: string): string[] {
   return Array.from(new Set(list));
 }
 
-async function fetchBytes(url: string, ms = 20000): Promise<Uint8Array | null> {
+async function fetchBytes(url: string, ms = 22000): Promise<Uint8Array | null> {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), ms);
@@ -68,6 +140,8 @@ async function fetchBytes(url: string, ms = 20000): Promise<Uint8Array | null> {
       headers: {
         "User-Agent": UA,
         Accept: "application/pdf,application/octet-stream,*/*",
+        "Accept-Language": "en-IN,en;q=0.9",
+        Referer: "https://ncert.nic.in/",
         "Cache-Control": "no-cache",
       },
       cache: "no-store",
@@ -97,12 +171,18 @@ export function decodeDataUrl(dataUrl: string): Uint8Array | null {
   }
 }
 
-/** Download PDF bytes from http(s) hosts (handles tmpfiles HTML pages). */
+/** Download PDF bytes from http(s) hosts (NCERT via Wayback when blocked). */
 export async function resolvePdfBytes(url: string): Promise<Uint8Array | null> {
   if (url.startsWith("data:")) return decodeDataUrl(url);
 
-  for (const candidate of candidates(url)) {
-    const buf = await fetchBytes(candidate);
+  const primary = candidates(url);
+  const isNcert =
+    /ncert\.nic\.in|textbook\.php/i.test(url) ||
+    primary.some((c) => /ncert\.nic\.in/i.test(c));
+
+  // 1) Live hosts
+  for (const candidate of primary) {
+    const buf = await fetchBytes(candidate, isNcert ? 12000 : 20000);
     if (!buf) continue;
     if (isPdfBytes(buf)) return buf;
 
@@ -117,6 +197,19 @@ export async function resolvePdfBytes(url: string): Promise<Uint8Array | null> {
       }
     }
   }
+
+  // 2) Wayback for every direct PDF candidate (NCERT often blocks cloud IPs)
+  const pdfTargets = primary.filter(
+    (c) => /\.pdf(\?|$)/i.test(c) || /ncert\.nic\.in/i.test(c)
+  );
+  for (const target of pdfTargets.slice(0, 4)) {
+    const snaps = await waybackSnapshots(target);
+    for (const snap of snaps.slice(0, 6)) {
+      const buf = await fetchBytes(snap, 25000);
+      if (buf && isPdfBytes(buf)) return buf;
+    }
+  }
+
   return null;
 }
 
@@ -144,5 +237,6 @@ export function hostAllowed(host: string) {
   if (h.includes("tmpfiles.org")) return true;
   if (h.includes("catbox.moe")) return true;
   if (h.includes("google")) return true;
+  if (h.includes("archive.org")) return true;
   return false;
 }
