@@ -26,6 +26,8 @@ export type TeacherMaterial = {
   subject: string;
   createdAt: number;
   teacherName: string;
+  /** Visible to students until this time (default createdAt + 48h) */
+  expiresAt?: number;
 };
 
 export type ClassAlert = {

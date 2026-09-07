@@ -47,26 +47,7 @@ export async function uploadBufferRemote(
 
   const bytes = new Uint8Array(buf);
 
-  // catbox.moe — direct file URL (best for in-app PDF)
-  try {
-    const form = new FormData();
-    form.append("reqtype", "fileupload");
-    form.append(
-      "fileToUpload",
-      new Blob([bytes], { type: contentType }),
-      filename
-    );
-    const res = await fetch("https://catbox.moe/user/api.php", {
-      method: "POST",
-      body: form,
-    });
-    const text = (await res.text()).trim();
-    if (/^https?:\/\//i.test(text)) return text;
-  } catch (e) {
-    console.error("catbox", e);
-  }
-
-  // litterbox 72h
+  // litterbox 72h — covers student 48h window
   try {
     const form = new FormData();
     form.append("reqtype", "fileupload");
@@ -84,6 +65,25 @@ export async function uploadBufferRemote(
     if (/^https?:\/\//i.test(text)) return text;
   } catch (e) {
     console.error("litterbox", e);
+  }
+
+  // catbox.moe — permanent direct file URL
+  try {
+    const form = new FormData();
+    form.append("reqtype", "fileupload");
+    form.append(
+      "fileToUpload",
+      new Blob([bytes], { type: contentType }),
+      filename
+    );
+    const res = await fetch("https://catbox.moe/user/api.php", {
+      method: "POST",
+      body: form,
+    });
+    const text = (await res.text()).trim();
+    if (/^https?:\/\//i.test(text)) return text;
+  } catch (e) {
+    console.error("catbox", e);
   }
 
   // 0x0.st

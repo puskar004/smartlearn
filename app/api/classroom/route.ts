@@ -171,28 +171,53 @@ export async function GET(req: NextRequest) {
 
     if (action === "materials" && code) {
       const c = code.toUpperCase();
-      const map = new Map<string, { id?: string; url?: string; title?: string }>();
+      const map = new Map<
+        string,
+        {
+          id?: string;
+          url?: string;
+          title?: string;
+          createdAt?: number;
+          expiresAt?: number;
+          teacherName?: string;
+          subject?: string;
+          type?: string;
+        }
+      >();
+      const ttl = 48 * 60 * 60 * 1000;
+      const now = Date.now();
 
       const addAll = (list: unknown[]) => {
         for (const raw of list) {
-          const m = raw as { id?: string; url?: string };
+          const m = raw as {
+            id?: string;
+            url?: string;
+            createdAt?: number;
+            expiresAt?: number;
+          };
           if (!m?.url) continue;
+          const exp = m.expiresAt || (m.createdAt || 0) + ttl;
+          // Keep items without createdAt for a bit; drop clearly expired
+          if (m.createdAt && exp < now) continue;
           map.set(m.id || m.url, m);
         }
       };
 
-      // A) Teacher own classes + their materialsIndexUrl
+      let seedUrl: string | null = null;
+      let className = `Class ${c}`;
+      let teacherName = "";
+
+      // A) Durable materials bank FIRST (per-code remote JSON — works across instances)
       try {
-        const mine = await listTeacherClassrooms(userId);
-        const own = mine.find((r) => r.code === c);
-        if (own) addAll(own.materials || []);
+        const { getMaterialsByCode } = await import(
+          "@/lib/materials-bank-store"
+        );
+        addAll(await getMaterialsByCode(c, null));
       } catch {
         // ignore
       }
 
-      // B) Resolve teacher via code index → seed remote materials JSON
-      let seedUrl: string | null = null;
-      let className = `Class ${c}`;
+      // B) Teacher via code index
       try {
         const { lookupTeacherByCode } = await import("@/lib/class-code-index");
         const tid = await lookupTeacherByCode(c);
@@ -203,19 +228,29 @@ export async function GET(req: NextRequest) {
           seedUrl = tMeta.materialsIndexUrl || null;
           const room = await getClassroomForTeacher(tid, c);
           if (room?.name) className = room.name;
+          teacherName = room?.teacherName || "";
           addAll(materialsForRoom(tMeta, c, room));
           addAll(tMeta.materialBank?.[c] || []);
+          if (seedUrl) {
+            const { getMaterialsByCode } = await import(
+              "@/lib/materials-bank-store"
+            );
+            addAll(await getMaterialsByCode(c, seedUrl));
+          }
         }
       } catch {
         // ignore
       }
 
-      // C) Durable materials bank (local + remote JSON)
+      // C) Teacher viewing own class
       try {
-        const { getMaterialsByCode } = await import(
-          "@/lib/materials-bank-store"
-        );
-        addAll(await getMaterialsByCode(c, seedUrl));
+        const mine = await listTeacherClassrooms(userId);
+        const own = mine.find((r) => r.code === c);
+        if (own) {
+          if (own.name) className = own.name;
+          if (own.teacherName) teacherName = own.teacherName;
+          addAll(own.materials || []);
+        }
       } catch {
         // ignore
       }
@@ -226,6 +261,7 @@ export async function GET(req: NextRequest) {
         const hit = studentRooms.find((r) => r.code === c);
         if (hit) {
           if (hit.name) className = hit.name;
+          if (hit.teacherName) teacherName = hit.teacherName;
           addAll(hit.materials || []);
         }
       } catch {
@@ -234,8 +270,7 @@ export async function GET(req: NextRequest) {
 
       const materials = Array.from(map.values()).sort(
         (a, b) =>
-          Number((b as { createdAt?: number }).createdAt || 0) -
-          Number((a as { createdAt?: number }).createdAt || 0)
+          Number(b.createdAt || 0) - Number(a.createdAt || 0)
       );
 
       return NextResponse.json({
@@ -243,7 +278,9 @@ export async function GET(req: NextRequest) {
         materials,
         code: c,
         name: className,
+        teacherName,
         count: materials.length,
+        ttlHours: 48,
       });
     }
 

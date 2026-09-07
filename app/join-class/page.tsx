@@ -433,7 +433,8 @@ export default function JoinClassPage() {
                     {r.showMats && (
                       <div className="mt-2 rounded-2xl border border-slate-100 bg-slate-50 p-3">
                         <p className="mb-2 text-[11px] font-semibold text-slate-500">
-                          Tap a file — opens inside SmartLearn (no new tab)
+                          Notes stay available for 48 hours · open inside
+                          SmartLearn (no new tab)
                         </p>
                         {mats.length === 0 ? (
                           <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-xs text-slate-500">

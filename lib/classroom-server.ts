@@ -679,21 +679,25 @@ export async function joinClassroomAsStudent(
     console.error("join student meta", e);
   }
 
-  // Attach materials so student UI has PDFs immediately
+  // Attach materials so student UI has PDFs immediately (48h bank)
   let materials = updated.materials || [];
   try {
     const tMeta = await getTeacherMeta(found.teacherId);
-    materials = materialsForRoom(tMeta, updated.code, updated);
-    const { getMaterialsByCode } = await import("@/lib/materials-bank-store");
+    const { getMaterialsByCode, isMaterialActive } = await import(
+      "@/lib/materials-bank-store"
+    );
     const extra = await getMaterialsByCode(
       updated.code,
       tMeta.materialsIndexUrl
     );
-    const map = new Map<string, TeacherMaterial>();
-    for (const x of [...extra, ...materials]) {
-      if (x?.url) map.set(x.id || x.url, x);
+    const fromMeta = materialsForRoom(tMeta, updated.code, updated);
+    const matMap = new Map<string, TeacherMaterial>();
+    for (const x of [...extra, ...fromMeta, ...materials]) {
+      if (x?.url && isMaterialActive(x)) matMap.set(x.id || x.url, x);
     }
-    materials = Array.from(map.values());
+    materials = Array.from(matMap.values()).sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
   } catch {
     // ignore
   }
@@ -860,13 +864,16 @@ export async function addMaterialToClass(
   }
 
   const normalized = code.trim().toUpperCase();
+  const now = Date.now();
   const m: TeacherMaterial = {
     ...material,
-    url: url.startsWith("data:") ? url : url.slice(0, 2000),
+    // Keep full data URLs / https for student bank (48h visibility)
+    url: url.startsWith("data:") ? url : url.slice(0, 4000),
     title: String(material.title || "Notes").slice(0, 120),
     subject: String(material.subject || "General").slice(0, 60),
-    id: `mat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    createdAt: Date.now(),
+    id: `mat-${now}-${Math.random().toString(36).slice(2, 6)}`,
+    createdAt: now,
+    expiresAt: now + 48 * 60 * 60 * 1000,
   };
 
   // Prefer cache — avoid Clerk getUser on every upload
@@ -937,7 +944,7 @@ export async function addMaterialToClass(
   } as Classroom;
 }
 
-/** Materials for a class: bank first, then classroom.materials */
+/** Materials for a class: bank first, then classroom.materials (48h window) */
 export function materialsForRoom(
   meta: SmartlearnMeta,
   code: string,
@@ -947,10 +954,14 @@ export function materialsForRoom(
   const fromBank = meta.materialBank?.[c] || [];
   const fromRoom = room?.materials || [];
   const map = new Map<string, TeacherMaterial>();
+  const ttl = 48 * 60 * 60 * 1000;
+  const now = Date.now();
   for (const m of [...fromBank, ...fromRoom]) {
-    if (!m?.id && !m?.url) continue;
+    if (!m?.url) continue;
+    const exp = m.expiresAt || (m.createdAt || 0) + ttl;
+    if (exp && exp < now) continue;
     const key = m.id || m.url;
-    if (!map.has(key) && m.url) map.set(key, m);
+    if (!map.has(key)) map.set(key, m);
   }
   return Array.from(map.values()).sort(
     (a, b) => (b.createdAt || 0) - (a.createdAt || 0)

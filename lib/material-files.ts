@@ -47,8 +47,14 @@ export async function saveMaterialFile(
     // ignore
   }
 
-  // 1) Small PDFs: data URL always works in-app (no host HTML traps)
-  if (buf.length <= 380_000 && mime === "application/pdf") {
+  // 1) Public host first (catbox / litterbox 72h covers 48h student window)
+  const remote = await uploadBufferRemote(buf, key, mime);
+  if (remote) {
+    return { key, url: remote, durable: true };
+  }
+
+  // 2) Embed small PDFs so students always get bytes via materials JSON
+  if (buf.length <= 900_000 && mime === "application/pdf") {
     const b64 = buf.toString("base64");
     return {
       key,
@@ -57,13 +63,7 @@ export async function saveMaterialFile(
     };
   }
 
-  // 2) Public durable host (catbox preferred)
-  const remote = await uploadBufferRemote(buf, key, mime);
-  if (remote) {
-    return { key, url: remote, durable: true };
-  }
-
-  // 3) Serve via our API
+  // 3) Same-origin API (best-effort on same instance)
   return {
     key,
     url: `/api/classroom/material?key=${encodeURIComponent(key)}`,

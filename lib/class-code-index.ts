@@ -8,6 +8,8 @@ import { uploadBufferRemote } from "@/lib/remote-upload";
 
 type Index = {
   codes: Record<string, string>; // CODE -> teacherId
+  /** CODE -> remote JSON of materials (48h student visibility) */
+  matsUrls?: Record<string, string>;
   updatedAt: number;
   remoteUrl?: string;
 };
@@ -131,4 +133,28 @@ export async function lookupTeacherByCode(
 export async function isCodeTaken(code: string): Promise<boolean> {
   const tid = await lookupTeacherByCode(code);
   return Boolean(tid);
+}
+
+export async function setClassMaterialsUrl(code: string, matsUrl: string) {
+  const c = code.toUpperCase();
+  if (!matsUrl?.startsWith("http")) return;
+  const idx = await loadIndex();
+  if (!idx.matsUrls) idx.matsUrls = {};
+  idx.matsUrls[c] = matsUrl;
+  await persist(idx);
+}
+
+export async function getClassMaterialsUrl(
+  code: string
+): Promise<string | null> {
+  const c = code.toUpperCase();
+  let idx = await loadIndex();
+  if (!idx.matsUrls?.[c] && idx.remoteUrl) {
+    const remote = await readRemote(idx.remoteUrl);
+    if (remote) {
+      idx = remote;
+      mem.idx = remote;
+    }
+  }
+  return idx.matsUrls?.[c] || null;
 }

@@ -387,7 +387,7 @@ function TeacherInner() {
           );
         }
         setMatNote(
-          `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB)`
+          `Published PDF (${((data.size || matFile.size) / (1024 * 1024)).toFixed(2)} MB) · students can view for 48 hours`
         );
       } else {
         const url = normalizeMaterialUrl(matUrl);
