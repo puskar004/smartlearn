@@ -115,7 +115,11 @@ function TeacherInner() {
       return;
     }
     // Never surface Clerk/rate-limit noise
-    if (/too many requests|429|rate.?limit|busy|resource_exhausted/i.test(msg)) {
+    if (
+      /too many requests|too many|429|rate.?limit|busy|resource_exhausted|temporarily delayed/i.test(
+        msg
+      )
+    ) {
       setError(null);
       return;
     }
@@ -126,6 +130,7 @@ function TeacherInner() {
     if (!userId) return;
     try {
       const list = await apiListMyClasses();
+      // NEVER wipe existing classes on empty/rate-limit response
       if (list.length) {
         persistClasses(list);
         setActiveCode((prev) => {
@@ -136,9 +141,10 @@ function TeacherInner() {
           return next;
         });
       }
-      quietError(null);
+      setError(null);
     } catch {
-      quietError(null); // keep cache; never spam errors
+      // keep local cache; never show rate-limit banner
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -165,10 +171,10 @@ function TeacherInner() {
     } catch {
       // ignore
     }
-    // Soft background refresh at most once per 90s
+    // Soft background refresh at most once per 3 min (Clerk rate limits)
     const lastKey = `sl_teacher_refresh_at_${userId}`;
     const last = Number(localStorage.getItem(lastKey) || 0);
-    const due = Date.now() - last > 90_000;
+    const due = Date.now() - last > 180_000;
     if (!hadCache || due) {
       void refresh().then(() => {
         try {
@@ -177,6 +183,8 @@ function TeacherInner() {
           // ignore
         }
       });
+    } else {
+      setLoading(false);
     }
   }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -194,13 +202,13 @@ function TeacherInner() {
     }
   }, [userId]);
 
-  // Live attendance: poll while on live/attendance so students show up in real time
+  // Live attendance: gentle poll (Clerk-friendly) while on live/attendance
   useEffect(() => {
     if (!userId) return;
     if (tab !== "live" && tab !== "attendance") return;
     const id = setInterval(() => {
       void refresh();
-    }, 5_000);
+    }, 25_000);
     return () => clearInterval(id);
   }, [userId, tab, refresh]);
 
@@ -526,7 +534,7 @@ function TeacherInner() {
       }
       router.replace("/teacher?tab=live");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Live start failed");
+      quietError(err instanceof Error ? err.message : "Live start failed");
     } finally {
       setBusy(false);
     }
@@ -1251,7 +1259,7 @@ function TeacherInner() {
                                       );
                                       setPenaltyNote("");
                                     } catch (e) {
-                                      setError(
+                                      quietError(
                                         e instanceof Error
                                           ? e.message
                                           : "Could not kick student"
@@ -1425,7 +1433,7 @@ function TeacherInner() {
                               `Remark sent to ${selected.name} (saved here + student Remarks)`
                             );
                           } catch (e) {
-                            setError(
+                            quietError(
                               e instanceof Error
                                 ? e.message
                                 : "Could not send feedback"

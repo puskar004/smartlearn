@@ -528,12 +528,22 @@ export async function createClassroomForTeacher(
   };
 
   const classrooms = [room, ...existing].slice(0, 20);
-  await saveMeta(teacherId, {
-    ...meta,
-    role: "teacher",
-    classrooms,
-    activeClassCode: code,
-  });
+  clearClerkWriteCooldown(teacherId);
+  try {
+    await saveMeta(
+      teacherId,
+      {
+        ...meta,
+        role: "teacher",
+        classrooms,
+        activeClassCode: code,
+      },
+      { force: true }
+    );
+  } catch (e) {
+    // Still return room so teacher UI works; cache already holds it via setCachedMeta
+    if (!isRateLimitError(e)) console.error("createClassroom saveMeta", e);
+  }
 
   try {
     const { registerClassCode } = await import("@/lib/class-code-index");
@@ -561,11 +571,20 @@ export async function listTeacherClassrooms(
             materials: materialsForRoom(meta, r.code, r),
           };
         } catch {
-          return { ...r, code: String(r.code || "").toUpperCase(), materials: [] };
+          return {
+            ...r,
+            code: String(r.code || "").toUpperCase(),
+            materials: [] as TeacherMaterial[],
+          };
         }
       });
   } catch (e) {
     console.error("listTeacherClassrooms", e);
+    // Stale cache if Clerk rate-limited
+    const stale = peekMeta(teacherId);
+    if (stale?.classrooms?.length) {
+      return stale.classrooms.filter((r) => r && r.code);
+    }
     return [];
   }
 }

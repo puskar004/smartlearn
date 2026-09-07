@@ -124,10 +124,13 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ok: true, classrooms: safe });
       } catch (e) {
         console.error("mine", e);
+        const msg = e instanceof Error ? e.message : "Load failed";
+        const rate = /too many|429|rate/i.test(msg);
+        // Never push rate-limit text to UI — empty list + ok keeps client cache
         return NextResponse.json({
           ok: true,
           classrooms: [],
-          error: e instanceof Error ? e.message : "Load failed",
+          rateLimited: rate,
         });
       }
     }
@@ -259,11 +262,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, classroom: room });
       } catch (e) {
         console.error("create classroom", e);
+        const msg = e instanceof Error ? e.message : "Could not create class";
+        const rate = /too many|429|rate/i.test(msg);
         return NextResponse.json(
           {
             ok: false,
-            error:
-              e instanceof Error ? e.message : "Could not create class",
+            error: rate
+              ? "Server busy — wait 30s and try Create again. Your other data is safe."
+              : msg,
+            rateLimited: rate,
           },
           { status: 200 }
         );

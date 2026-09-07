@@ -17,6 +17,8 @@ import {
   ClipboardList,
   Target,
   GraduationCap,
+  Users,
+  Upload,
   Radio,
   Link2,
   MessageSquare,
@@ -43,10 +45,14 @@ const studentNav = [
   { href: "/common-room", label: "Common Room", icon: MessageSquare },
 ];
 
-// Primary teacher nav only — in-page tabs cover students/upload/live/attendance/code
 const teacherNav = [
   { href: "/teacher", label: "Teacher Home", icon: Home },
+  { href: "/teacher?tab=students", label: "My Students", icon: Users },
   { href: "/teacher/test", label: "Live Tests", icon: ClipboardList },
+  { href: "/teacher?tab=materials", label: "Upload Notes/Videos", icon: Upload },
+  { href: "/teacher?tab=live", label: "Live Sessions", icon: Radio },
+  { href: "/teacher?tab=attendance", label: "Attendance", icon: ClipboardList },
+  { href: "/teacher?tab=code", label: "Class Code", icon: GraduationCap },
 ];
 
 const bottomStudent = [
