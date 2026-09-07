@@ -207,7 +207,30 @@ export async function GET(req: NextRequest) {
       let className = `Class ${c}`;
       let teacherName = "";
 
-      // A) Shared class-code index FIRST (all instances)
+      // A) Same path as join: find class by code → teacher Clerk materials
+      try {
+        const found = await findClassroomByCode(c);
+        if (found) {
+          className = found.classroom.name || className;
+          teacherName = found.classroom.teacherName || teacherName;
+          addAll(found.classroom.materials || []);
+          try {
+            const { getTeacherMeta, materialsForRoom } = await import(
+              "@/lib/classroom-server"
+            );
+            const tMeta = await getTeacherMeta(found.teacherId);
+            seedUrl = tMeta.materialsIndexUrl || null;
+            addAll(materialsForRoom(tMeta, c, found.classroom));
+            addAll(tMeta.materialBank?.[c] || []);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      // B) Shared class-code index
       try {
         const { getClassMaterials } = await import("@/lib/class-code-index");
         addAll(await getClassMaterials(c));
@@ -215,37 +238,12 @@ export async function GET(req: NextRequest) {
         // ignore
       }
 
-      // A2) Materials bank
+      // C) Materials bank
       try {
         const { getMaterialsByCode } = await import(
           "@/lib/materials-bank-store"
         );
-        addAll(await getMaterialsByCode(c, null));
-      } catch {
-        // ignore
-      }
-
-      // B) Teacher via code index
-      try {
-        const { lookupTeacherByCode } = await import("@/lib/class-code-index");
-        const tid = await lookupTeacherByCode(c);
-        if (tid) {
-          const { getTeacherMeta, materialsForRoom, getClassroomForTeacher } =
-            await import("@/lib/classroom-server");
-          const tMeta = await getTeacherMeta(tid);
-          seedUrl = tMeta.materialsIndexUrl || null;
-          const room = await getClassroomForTeacher(tid, c);
-          if (room?.name) className = room.name;
-          teacherName = room?.teacherName || "";
-          addAll(materialsForRoom(tMeta, c, room));
-          addAll(tMeta.materialBank?.[c] || []);
-          if (seedUrl) {
-            const { getMaterialsByCode } = await import(
-              "@/lib/materials-bank-store"
-            );
-            addAll(await getMaterialsByCode(c, seedUrl));
-          }
-        }
+        addAll(await getMaterialsByCode(c, seedUrl));
       } catch {
         // ignore
       }

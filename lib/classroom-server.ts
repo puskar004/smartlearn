@@ -10,6 +10,7 @@ import type {
   TeacherMaterial,
 } from "@/lib/classroom-types";
 import {
+  clearClerkWriteCooldown,
   getCachedMeta,
   getCachedPublicMeta,
   isRateLimitError,
@@ -122,18 +123,24 @@ function lightMaterialBank(
   bank: Record<string, TeacherMaterial[]> | undefined
 ): Record<string, TeacherMaterial[]> {
   const out: Record<string, TeacherMaterial[]> = {};
+  const ttl = 48 * 60 * 60 * 1000;
+  const now = Date.now();
   for (const [code, list] of Object.entries(bank || {})) {
     out[code] = (list || [])
       .filter((m) => m?.url)
+      .filter((m) => {
+        const exp = m.expiresAt || (m.createdAt || 0) + ttl;
+        return !m.createdAt || exp > now;
+      })
       .map((m) => {
         const url = String(m.url);
-        // Allow small data URLs (inline PDF); cap huge ones
+        // Prefer https for cross-device students; keep small data URLs
         const safeUrl =
-          url.startsWith("data:") && url.length > 280_000
+          url.startsWith("data:") && url.length > 100_000
             ? ""
             : url.startsWith("data:")
               ? url
-              : url.slice(0, 500);
+              : url.slice(0, 800);
         return {
           ...m,
           url: safeUrl,
@@ -143,6 +150,7 @@ function lightMaterialBank(
           type: m.type || "notes",
           id: m.id || `mat-${Date.now()}`,
           createdAt: m.createdAt || Date.now(),
+          expiresAt: m.expiresAt || (m.createdAt || Date.now()) + ttl,
         };
       })
       .filter((m) => m.url)
@@ -151,7 +159,11 @@ function lightMaterialBank(
   return out;
 }
 
-async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
+async function saveMeta(
+  userId: string,
+  smartlearn: SmartlearnMeta,
+  opts?: { force?: boolean }
+) {
   const existing =
     peekMeta(userId) ||
     getCachedMeta(userId, 600_000) ||
@@ -161,8 +173,12 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
   let publicMetadata: Record<string, unknown> =
     getCachedPublicMeta(userId) || {};
 
-  // Only hit Clerk getUser if cache empty / stale
-  if (!Object.keys(existing).length || !getCachedMeta(userId, 30_000)) {
+  // Always refresh from Clerk on force (materials must merge with live data)
+  if (
+    opts?.force ||
+    !Object.keys(existing).length ||
+    !getCachedMeta(userId, 30_000)
+  ) {
     try {
       const client = await clerkClient();
       const user = await client.users.getUser(userId);
@@ -171,14 +187,17 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
       setCachedMeta(userId, liveExisting, publicMetadata);
     } catch (e) {
       if (!isRateLimitError(e) && !Object.keys(existing).length) throw e;
-      // keep using cache on 429
     }
   }
 
-  const mergedBank = {
+  const mergedBank: Record<string, TeacherMaterial[]> = {
     ...(liveExisting.materialBank || {}),
-    ...(smartlearn.materialBank || {}),
   };
+  // Per-code replace when caller sends bank entries (don't drop other codes)
+  for (const [k, list] of Object.entries(smartlearn.materialBank || {})) {
+    mergedBank[k] = list;
+  }
+
   const roomsRaw = smartlearn.classrooms ?? liveExisting.classrooms ?? [];
   const cleaned: SmartlearnMeta = {
     ...liveExisting,
@@ -200,6 +219,10 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
       smartlearn.joinedClassCode !== undefined
         ? smartlearn.joinedClassCode
         : liveExisting.joinedClassCode,
+    materialsIndexUrl:
+      smartlearn.materialsIndexUrl !== undefined
+        ? smartlearn.materialsIndexUrl
+        : liveExisting.materialsIndexUrl,
   };
 
   let payload: SmartlearnMeta;
@@ -215,21 +238,20 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
         teacherName: c.teacherName,
         createdAt: c.createdAt,
         students: [],
-        materials: [],
+        materials: (c.materials || []).slice(0, 15),
         liveSession: null,
         alerts: [],
         attendanceLog: [],
       })),
-      materialBank: {},
+      materialBank: lightMaterialBank(mergedBank),
       activeClassCode: cleaned.activeClassCode || null,
+      materialsIndexUrl: cleaned.materialsIndexUrl || null,
     };
   }
 
-  // Always update local cache so subsequent reads don't need Clerk
   setCachedMeta(userId, payload, { ...publicMetadata, smartlearn: payload });
 
-  // Skip Clerk write during cooldown / rate limit — bank + cache still work
-  if (shouldSkipClerkWrite(userId)) {
+  if (!opts?.force && shouldSkipClerkWrite(userId)) {
     return;
   }
 
@@ -244,8 +266,8 @@ async function saveMeta(userId: string, smartlearn: SmartlearnMeta) {
     markClerkWrite(userId);
   } catch (e) {
     if (isRateLimitError(e)) {
-      markClerkWrite(userId); // back off further
-      return; // silent — UI keeps working from cache/bank
+      markClerkWrite(userId);
+      return;
     }
     console.error("saveMeta", e);
   }
@@ -876,10 +898,11 @@ export async function addMaterialToClass(
     expiresAt: now + 48 * 60 * 60 * 1000,
   };
 
-  // Prefer cache — avoid Clerk getUser on every upload
+  // Fresh meta from Clerk when possible
+  clearClerkWriteCooldown(teacherId);
   const meta = await getTeacherMeta(teacherId);
 
-  // 1) Durable bank ONLY (students read this) — no Clerk required
+  // 1) Shared banks (best-effort)
   let remoteUrl: string | null = meta.materialsIndexUrl || null;
   let fileMats: TeacherMaterial[] = [m];
   try {
@@ -897,38 +920,94 @@ export async function addMaterialToClass(
     console.error("materials-bank-store", e);
   }
 
-  // 2) Soft Clerk pointer (skipped under rate limit / cooldown)
-  const bank = { ...(meta.materialBank || {}) };
-  const shortOnly = [m, ...(bank[normalized] || [])]
-    .filter(
-      (x) =>
-        x?.url &&
-        (x.url.startsWith("http://") ||
-          x.url.startsWith("https://") ||
-          x.url.startsWith("/api/") ||
-          (x.url.startsWith("data:") && x.url.length < 80_000))
-    )
-    .slice(0, 12);
-  bank[normalized] = shortOnly;
+  // 2) Clerk is source of truth for students (same path as join finds class)
+  //    Only store https (or small data) so metadata stays small
+  const clerkMat: TeacherMaterial = {
+    ...m,
+    url:
+      m.url.startsWith("https://") || m.url.startsWith("http://")
+        ? m.url.slice(0, 800)
+        : m.url.startsWith("data:") && m.url.length < 80_000
+          ? m.url
+          : m.url.startsWith("/api/")
+            ? m.url
+            : m.url.slice(0, 800),
+  };
 
-  try {
-    await saveMeta(teacherId, {
-      ...meta,
-      role: "teacher",
-      activeClassCode: meta.activeClassCode || normalized,
-      materialBank: bank,
-      materialsIndexUrl: remoteUrl || meta.materialsIndexUrl || null,
-      classrooms: meta.classrooms || [],
+  const bank = { ...(meta.materialBank || {}) };
+  const prevBank = bank[normalized] || [];
+  bank[normalized] = [clerkMat, ...prevBank.filter((x) => x.id !== clerkMat.id)]
+    .filter((x) => x?.url)
+    .slice(0, 15);
+
+  const rooms = [...(meta.classrooms || [])];
+  const idx = rooms.findIndex((c) => c.code === normalized);
+  const existing = idx >= 0 ? rooms[idx] : null;
+  const roomMats = [
+    clerkMat,
+    ...((existing?.materials || []).filter((x) => x.id !== clerkMat.id) || []),
+  ]
+    .filter((x) => x?.url && !String(x.url).startsWith("data:"))
+    .slice(0, 15);
+
+  if (idx >= 0) {
+    rooms[idx] = { ...rooms[idx], materials: roomMats };
+  } else {
+    rooms.unshift({
+      code: normalized,
+      name: normalized,
+      teacherId,
+      teacherName: material.teacherName || "Teacher",
+      createdAt: now,
+      students: [],
+      materials: roomMats,
+      liveSession: null,
+      alerts: [],
+      attendanceLog: [],
     });
-  } catch (e) {
-    console.error("clerk material save soft", e);
   }
 
-  const rooms = meta.classrooms || [];
-  const existing = rooms.find((c) => c.code === normalized);
+  try {
+    await saveMeta(
+      teacherId,
+      {
+        ...meta,
+        role: "teacher",
+        activeClassCode: meta.activeClassCode || normalized,
+        materialBank: bank,
+        materialsIndexUrl: remoteUrl || meta.materialsIndexUrl || null,
+        classrooms: rooms,
+      },
+      { force: true }
+    );
+  } catch (e) {
+    console.error("clerk material save", e);
+  }
+
+  // Ensure code maps to this teacher for student lookup
+  try {
+    const { registerClassCode } = await import("@/lib/class-code-index");
+    await registerClassCode(normalized, teacherId);
+  } catch {
+    // ignore
+  }
+
   const materials = fileMats.length
     ? fileMats
-    : materialsForRoom({ ...meta, materialBank: bank }, normalized, existing);
+    : materialsForRoom({ ...meta, materialBank: bank }, normalized, {
+        ...(existing || {
+          code: normalized,
+          name: normalized,
+          teacherId,
+          teacherName: material.teacherName || "Teacher",
+          createdAt: now,
+          students: [],
+          liveSession: null,
+          alerts: [],
+          attendanceLog: [],
+        }),
+        materials: roomMats,
+      });
 
   return {
     code: normalized,

@@ -55,6 +55,11 @@ export function markClerkWrite(userId: string) {
   lastWrite.set(userId, Date.now());
 }
 
+/** Clear cooldown so critical writes (materials) always attempt Clerk */
+export function clearClerkWriteCooldown(userId: string) {
+  lastWrite.delete(userId);
+}
+
 export function isRateLimitError(e: unknown): boolean {
   const msg =
     e instanceof Error
