@@ -72,7 +72,13 @@ export type LiveSession = {
   title: string;
   subject: string;
   startedAt: number;
+  /** Planned session end (soft) — Meet stays open while active until teacher ends */
   endsAt: number;
+  /**
+   * Students may join until this time (at least startedAt + 15 min,
+   * and covers full session while teacher keeps live active).
+   */
+  joinUntil?: number;
   active: boolean;
   joinCode: string;
   /** Google Meet / Zoom link */

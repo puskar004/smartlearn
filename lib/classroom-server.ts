@@ -86,6 +86,9 @@ function lightClassroom(c: Classroom): Classroom {
             subject: String(sess.subject || "").slice(0, 60),
             startedAt: Number(sess.startedAt) || Date.now(),
             endsAt: Number(sess.endsAt) || Date.now(),
+            joinUntil: sess.joinUntil
+              ? Number(sess.joinUntil)
+              : Number(sess.endsAt) || Date.now(),
             active: Boolean(sess.active),
             joinCode: String(sess.joinCode || "").slice(0, 12),
             meetUrl: sess.meetUrl
@@ -949,6 +952,7 @@ export async function listStudentClassrooms(userId: string): Promise<
           active: shared.active,
           startedAt: shared.startedAt,
           endsAt: shared.endsAt,
+          joinUntil: shared.joinUntil || shared.endsAt,
           scheduledAt: shared.scheduledAt,
           messages: sess?.messages || [],
           attendees: sess?.attendees || [],
@@ -1253,6 +1257,10 @@ export function materialsForRoom(
   );
 }
 
+/** Min student join window + session length (minutes) */
+export const LIVE_MIN_JOIN_MINUTES = 15;
+export const LIVE_DEFAULT_MINUTES = 60;
+
 export async function startLive(
   teacherId: string,
   code: string,
@@ -1266,12 +1274,21 @@ export async function startLive(
     const now = Date.now();
     const start = scheduledAt && scheduledAt > now ? scheduledAt : now;
     const isScheduled = !!(scheduledAt && scheduledAt > now);
+    // At least 15 min so late students can still join; default 60 if unset
+    const mins = Math.max(
+      LIVE_MIN_JOIN_MINUTES,
+      Number(minutes) > 0 ? Number(minutes) : LIVE_DEFAULT_MINUTES
+    );
+    const endsAt = start + mins * 60_000;
+    // Join open for full planned session (and never less than 15 min)
+    const joinUntil = endsAt;
     const live: LiveSession = {
       id: `live-${now}`,
       title,
       subject,
       startedAt: start,
-      endsAt: start + minutes * 60_000,
+      endsAt,
+      joinUntil,
       active: !isScheduled,
       joinCode: makeCode(4),
       meetUrl: meetUrl?.trim() || undefined,
@@ -1314,6 +1331,7 @@ export async function startLive(
             active: sess.active,
             startedAt: sess.startedAt,
             endsAt: sess.endsAt,
+            joinUntil: sess.joinUntil || sess.endsAt,
             scheduledAt: sess.scheduledAt,
             teacherName: room.teacherName,
             className: room.name,

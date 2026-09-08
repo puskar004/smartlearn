@@ -28,6 +28,7 @@ type LiveInfo = {
   joinCode: string;
   active: boolean;
   endsAt: number;
+  joinUntil?: number;
   messages: Msg[];
   scheduledAt?: number;
 };
@@ -89,6 +90,11 @@ export default function LiveClassPage() {
       setKicked(false);
       const sess = room.liveSession;
       if (sess?.active) {
+        const joinUntil =
+          sess.joinUntil ||
+          sess.endsAt ||
+          Date.now() + 15 * 60_000;
+        // Soft clock: still show Meet while active (teacher controls End)
         setLive({
           id: sess.id,
           title: sess.title,
@@ -96,7 +102,8 @@ export default function LiveClassPage() {
           meetUrl: sess.meetUrl,
           joinCode: sess.joinCode,
           active: true,
-          endsAt: sess.endsAt,
+          endsAt: sess.endsAt || joinUntil,
+          joinUntil,
           messages: sess.messages || [],
           scheduledAt: sess.scheduledAt,
         });
@@ -434,13 +441,21 @@ export default function LiveClassPage() {
                 LIVE · {live.title} · {live.subject}
               </span>
               <span className="inline-flex items-center gap-1">
-                <Shield className="h-3.5 w-3.5" /> In session
+                <Shield className="h-3.5 w-3.5" /> Join open until{" "}
+                {new Date(
+                  live.joinUntil || live.endsAt || Date.now()
+                ).toLocaleTimeString()}
               </span>
             </div>
             <MeetFrame
               meetUrl={live.meetUrl || ""}
               title={`${live.title} · Meet`}
             />
+            <p className="text-[11px] text-slate-500">
+              Meet link stays available for the full class session (at least 15
+              minutes from start). Tap the green Join button if the window was
+              closed.
+            </p>
           </div>
 
           <div className="flex min-h-[320px] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">

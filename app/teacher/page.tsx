@@ -89,7 +89,7 @@ function TeacherInner() {
   const [matSubject, setMatSubject] = useState("Physics");
   const [liveTitle, setLiveTitle] = useState("Doubt clearing hour");
   const [liveSubject, setLiveSubject] = useState("Physics");
-  const [liveMins, setLiveMins] = useState(40);
+  const [liveMins, setLiveMins] = useState(60);
   const [meetUrl, setMeetUrl] = useState("https://meet.google.com/");
   const [scheduleLocal, setScheduleLocal] = useState("");
   const [msg, setMsg] = useState("");
@@ -1064,13 +1064,17 @@ function TeacherInner() {
                       />
                       <input
                         type="number"
-                        min={10}
+                        min={15}
+                        max={240}
                         value={liveMins}
                         onChange={(e) =>
-                          setLiveMins(Number(e.target.value) || 40)
+                          setLiveMins(
+                            Math.max(15, Number(e.target.value) || 60)
+                          )
                         }
-                        placeholder="Minutes"
+                        placeholder="Minutes (min 15)"
                         className={field}
+                        title="Session length — students can join for the full session (min 15 min)"
                       />
                       <input
                         value={liveSubject}
@@ -1121,7 +1125,10 @@ function TeacherInner() {
                         meet.google.com/new
                       </a>{" "}
                       → paste link. Students open{" "}
-                      <strong>Live Class</strong> to join + chat.
+                      <strong>Live Class</strong> to join + chat. Join stays
+                      open for the <strong>full session</strong> (at least{" "}
+                      <strong>15 minutes</strong>); your Meet link stays until
+                      you click End session.
                     </p>
                   </div>
                 ) : (
@@ -1133,6 +1140,14 @@ function TeacherInner() {
                         </div>
                         <div className="text-xs text-rose-600">
                           Room {room.liveSession.joinCode}
+                          {" · "}
+                          Students can join until{" "}
+                          {new Date(
+                            room.liveSession.joinUntil ||
+                              room.liveSession.endsAt
+                          ).toLocaleTimeString()}
+                          {" · "}
+                          Meet stays open until you End session
                         </div>
                       </div>
                       <button
@@ -1154,9 +1169,10 @@ function TeacherInner() {
                           title="Teacher · Google Meet"
                         />
                         <p className="mt-2 text-[11px] text-slate-500">
-                          To remove someone from Google Meet, use Meet’s own
-                          controls (people → remove). Below: SmartLearn penalty
-                          + kick from live attendance.
+                          Your Meet link stays for the whole session. Students
+                          have at least 15 minutes (full duration) to join.
+                          Remove someone inside Google Meet if needed; below =
+                          SmartLearn kick from attendance.
                         </p>
                       </div>
                     )}

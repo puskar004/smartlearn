@@ -19,6 +19,8 @@ export type SharedLive = {
   active: boolean;
   startedAt: number;
   endsAt: number;
+  /** Students may open Meet until this time (≥ 15 min from start, full session) */
+  joinUntil?: number;
   scheduledAt?: number;
   teacherName?: string;
   className?: string;
@@ -204,14 +206,23 @@ function liveLocalPath(code: string) {
 function liveStillValid(live: SharedLive | null): live is SharedLive {
   if (!live) return false;
   const now = Date.now();
-  if (live.active && live.endsAt && live.endsAt < now - 30 * 60_000) return false;
+  // Active session: keep Meet joinable for full session + 15 min grace
+  // (teacher ends session explicitly; clock alone must not cut students off early)
+  if (live.active) {
+    const joinUntil =
+      live.joinUntil ||
+      live.endsAt ||
+      live.startedAt + 15 * 60_000;
+    const grace = 15 * 60_000;
+    return now <= joinUntil + grace;
+  }
+  if (live.scheduledAt && live.scheduledAt > now) return true;
   if (
-    !live.active &&
     live.scheduledAt &&
     live.scheduledAt < now - 60 * 60_000
   )
     return false;
-  return Boolean(live.active || (live.scheduledAt && live.scheduledAt > now));
+  return false;
 }
 
 /** Teacher starts/ends live → students see it on any server */
@@ -234,6 +245,10 @@ export async function publishClassLive(
           active: Boolean(live.active),
           startedAt: live.startedAt,
           endsAt: live.endsAt,
+          joinUntil:
+            live.joinUntil ||
+            live.endsAt ||
+            live.startedAt + 15 * 60_000,
           scheduledAt: live.scheduledAt,
           teacherName: live.teacherName,
           className: live.className,

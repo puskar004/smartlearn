@@ -106,6 +106,8 @@ export async function GET(req: NextRequest) {
                 subject: r.liveSession.subject,
                 startedAt: r.liveSession.startedAt,
                 endsAt: r.liveSession.endsAt,
+                joinUntil:
+                  r.liveSession.joinUntil || r.liveSession.endsAt,
                 active: r.liveSession.active,
                 joinCode: r.liveSession.joinCode,
                 meetUrl: r.liveSession.meetUrl,
@@ -172,6 +174,7 @@ export async function GET(req: NextRequest) {
                   active: live.active,
                   startedAt: live.startedAt,
                   endsAt: live.endsAt,
+                  joinUntil: live.joinUntil || live.endsAt,
                   scheduledAt: live.scheduledAt,
                   messages: [],
                   attendees: [],
@@ -193,12 +196,13 @@ export async function GET(req: NextRequest) {
                 joinCode: live.joinCode,
                 active: live.active,
                 startedAt: live.startedAt,
-                endsAt: live.endsAt,
-                scheduledAt: live.scheduledAt,
-                messages: found.classroom.liveSession?.messages || [],
-                attendees: found.classroom.liveSession?.attendees || [],
-              }
-            : found.classroom.liveSession;
+                  endsAt: live.endsAt,
+                  joinUntil: live.joinUntil || live.endsAt,
+                  scheduledAt: live.scheduledAt,
+                  messages: found.classroom.liveSession?.messages || [],
+                  attendees: found.classroom.liveSession?.attendees || [],
+                }
+              : found.classroom.liveSession;
           classrooms.push({
             code: found.classroom.code,
             name: found.classroom.name || `Class ${c}`,
@@ -233,6 +237,7 @@ export async function GET(req: NextRequest) {
                 active: live.active,
                 startedAt: live.startedAt,
                 endsAt: live.endsAt,
+                joinUntil: live.joinUntil || live.endsAt,
                 scheduledAt: live.scheduledAt,
                 messages: room.liveSession?.messages || [],
                 attendees: room.liveSession?.attendees || [],
@@ -531,7 +536,7 @@ export async function POST(req: NextRequest) {
         String(body.code || ""),
         String(body.title || "Live session"),
         String(body.subject || "General"),
-        Number(body.minutes) || 40,
+        Number(body.minutes) || 60,
         body.meetUrl ? String(body.meetUrl) : undefined,
         scheduledAt
       );
