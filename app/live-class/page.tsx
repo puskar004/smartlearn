@@ -24,6 +24,7 @@ type LiveInfo = {
   joinCode: string;
   active: boolean;
   endsAt: number;
+  startedAt?: number;
   joinUntil?: number;
   scheduledAt?: number;
 };
@@ -106,11 +107,83 @@ export default function LiveClassPage() {
     if (!userId) return;
     try {
       const localCodes = getJoinedClasses(userId);
-      const q = new URLSearchParams({ action: "joined" });
-      if (localCodes.length) q.set("codes", localCodes.join(","));
-      q.set("_", String(Date.now()));
+      if (!localCodes.length) {
+        setLive(null);
+        setSections([]);
+        setError("Join a teacher class first (Class & Notes).");
+        setLoading(false);
+        return;
+      }
 
-      const res = await fetch(`/api/classroom?${q.toString()}`, {
+      // 1) Fast liveStatus first (shared index + Clerk by code)
+      const qs = new URLSearchParams({
+        action: "liveStatus",
+        codes: localCodes.join(","),
+        _: String(Date.now()),
+      });
+      const liveRes = await fetch(`/api/classroom?${qs}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const liveData = await liveRes.json().catch(() => ({}));
+      const sessions = (liveData.sessions || []) as {
+        code: string;
+        active?: boolean;
+        title?: string;
+        subject?: string;
+        meetUrl?: string;
+        className?: string;
+        teacherName?: string;
+        startedAt?: number;
+        endsAt?: number;
+      }[];
+
+      setSections(
+        localCodes.map((c) => {
+          const s = sessions.find((x) => x.code === c && x.active);
+          return {
+            code: c,
+            name: s?.className || `Class ${c}`,
+            live: Boolean(s),
+          };
+        })
+      );
+
+      const preferred =
+        (preferredCode.current &&
+          sessions.find((s) => s.code === preferredCode.current && s.active)) ||
+        sessions.find((s) => s.active) ||
+        null;
+
+      if (preferred?.active) {
+        applyRoom(
+          {
+            code: preferred.code,
+            name: preferred.className || `Class ${preferred.code}`,
+            liveSession: {
+              id: `live-${preferred.code}`,
+              title: preferred.title || "Live class",
+              subject: preferred.subject || "General",
+              meetUrl: preferred.meetUrl,
+              joinCode: "",
+              active: true,
+              endsAt: preferred.endsAt || Date.now() + 12 * 60 * 60_000,
+              startedAt: preferred.startedAt || Date.now(),
+            },
+          },
+          preferred.code
+        );
+        setLoading(false);
+        return;
+      }
+
+      // 2) Full joined payload fallback
+      const q = new URLSearchParams({
+        action: "joined",
+        codes: localCodes.join(","),
+        _: String(Date.now()),
+      });
+      const res = await fetch(`/api/classroom?${q}`, {
         cache: "no-store",
         credentials: "same-origin",
       });
@@ -132,32 +205,12 @@ export default function LiveClassPage() {
         | null
         | undefined;
 
-      if (!room && !list.length) {
-        if (localCodes.length) {
-          setSections(
-            localCodes.map((c) => ({ code: c, name: `Class ${c}`, live: false }))
-          );
-          setClassCode(localCodes[0]);
-          setClassName(`Class ${localCodes[0]}`);
-          setLive(null);
-          setError(
-            `Joined ${localCodes[0]}. Waiting for teacher to go live — tap Refresh.`
-          );
-        } else {
-          setLive(null);
-          setSections([]);
-          setError("Join a teacher class first (Class & Notes).");
-        }
-        setLoading(false);
-        return;
-      }
-
       const sec = (list.length ? list : room ? [room] : []).map((r) => ({
         code: String(r.code || ""),
         name: r.name || String(r.code || ""),
         live: Boolean(r.liveSession?.active),
       }));
-      setSections(sec.filter((s) => s.code));
+      if (sec.length) setSections(sec.filter((s) => s.code));
 
       const pick =
         (preferredCode.current &&
@@ -168,8 +221,12 @@ export default function LiveClassPage() {
         list[0];
 
       if (!pick) {
+        setClassCode(localCodes[0]);
+        setClassName(`Class ${localCodes[0]}`);
         setLive(null);
-        setError("Join a teacher class first (Class & Notes).");
+        setError(
+          `Joined ${localCodes[0]}. Waiting for teacher to go live — tap Refresh.`
+        );
         setLoading(false);
         return;
       }

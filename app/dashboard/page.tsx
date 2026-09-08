@@ -122,19 +122,54 @@ export default function DashboardPage() {
     const pull = async () => {
       try {
         const codes = getJoinedClasses(userId);
-        const q = new URLSearchParams({ action: "joined" });
-        if (codes.length) q.set("codes", codes.join(","));
-        q.set("_", String(Date.now()));
+        if (!codes.length) {
+          setLiveBanner(null);
+          return;
+        }
+        // Fast path: dedicated liveStatus (shared index + Clerk fallback)
+        const q = new URLSearchParams({
+          action: "liveStatus",
+          codes: codes.join(","),
+          _: String(Date.now()),
+        });
         const res = await fetch(`/api/classroom?${q}`, {
           cache: "no-store",
           credentials: "same-origin",
         });
         const data = await res.json();
-        if (Array.isArray(data.deleted) && data.deleted.length) {
-          dropJoinedClasses(userId, data.deleted as string[]);
+        const live = (data.live || data.sessions?.[0]) as
+          | {
+              code: string;
+              active?: boolean;
+              title?: string;
+              subject?: string;
+            }
+          | null
+          | undefined;
+        if (live?.active && live.code) {
+          setLiveBanner({
+            title: live.title || "Live class",
+            code: live.code,
+            subject: live.subject,
+          });
+          return;
         }
-        const rooms = (data.classrooms ||
-          (data.classroom ? [data.classroom] : [])) as {
+        // Fallback full joined payload
+        const q2 = new URLSearchParams({
+          action: "joined",
+          codes: codes.join(","),
+          _: String(Date.now()),
+        });
+        const res2 = await fetch(`/api/classroom?${q2}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        const data2 = await res2.json();
+        if (Array.isArray(data2.deleted) && data2.deleted.length) {
+          dropJoinedClasses(userId, data2.deleted as string[]);
+        }
+        const rooms = (data2.classrooms ||
+          (data2.classroom ? [data2.classroom] : [])) as {
           code: string;
           liveSession?: {
             active?: boolean;
@@ -142,14 +177,12 @@ export default function DashboardPage() {
             subject?: string;
           } | null;
         }[];
-        const live = rooms.find(
-          (r) => r.liveSession?.active && r.liveSession
-        );
-        if (live?.liveSession?.active) {
+        const hit = rooms.find((r) => r.liveSession?.active);
+        if (hit?.liveSession?.active) {
           setLiveBanner({
-            title: live.liveSession.title || "Live class",
-            code: live.code,
-            subject: live.liveSession.subject,
+            title: hit.liveSession.title || "Live class",
+            code: hit.code,
+            subject: hit.liveSession.subject,
           });
         } else {
           setLiveBanner(null);
@@ -160,7 +193,7 @@ export default function DashboardPage() {
     };
 
     void pull();
-    const id = setInterval(() => void pull(), 12_000);
+    const id = setInterval(() => void pull(), 5_000);
     return () => clearInterval(id);
   }, [userId, isSignedIn]);
 

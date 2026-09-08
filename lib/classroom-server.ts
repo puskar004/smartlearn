@@ -1021,16 +1021,18 @@ export async function listStudentClassrooms(userId: string): Promise<
       }
     }
 
-    // Shared live is source of truth for active Meet (end clears it)
+    // Clerk room live + shared live index (ended only clears)
     let sess = found.classroom.liveSession?.active
       ? found.classroom.liveSession
-      : null;
-    let sharedChecked = false;
+      : found.classroom.liveSession?.scheduledAt &&
+          found.classroom.liveSession.scheduledAt > Date.now()
+        ? found.classroom.liveSession
+        : null;
     try {
-      const { getClassLive } = await import("@/lib/class-code-index");
-      const shared = await getClassLive(code);
-      sharedChecked = true;
-      if (shared?.active) {
+      const { lookupClassLive } = await import("@/lib/class-code-index");
+      const looked = await lookupClassLive(code);
+      if (looked.status === "active") {
+        const shared = looked.live;
         sess = {
           id: shared.id,
           title: shared.title,
@@ -1045,31 +1047,17 @@ export async function listStudentClassrooms(userId: string): Promise<
           messages: found.classroom.liveSession?.messages || [],
           attendees: found.classroom.liveSession?.attendees || [],
         };
-      } else if (shared === null) {
-        // Ended / no live — do not show Meet from stale Clerk
+      } else if (looked.status === "ended") {
         sess = null;
-      } else if (shared.scheduledAt && shared.scheduledAt > Date.now()) {
-        sess = {
-          id: shared.id,
-          title: shared.title,
-          subject: shared.subject,
-          meetUrl: shared.meetUrl,
-          joinCode: shared.joinCode,
-          active: false,
-          startedAt: shared.startedAt,
-          endsAt: shared.endsAt,
-          scheduledAt: shared.scheduledAt,
-          messages: [],
-          attendees: [],
-        };
       }
+      // status "none" → keep Clerk sess (do NOT clear active live)
     } catch {
       // keep clerk sess
     }
     const kicked = Boolean(
       sess?.active && (sess.kickedIds || []).includes(userId)
     );
-    // Pull materials: remote index + clerk bank + classroom
+    // Pull materials + fresh teacher room (live + attendees)
     let materials: TeacherMaterial[] = [];
     try {
       const tMeta = await getTeacherMeta(found.teacherId, { fresh: true });
@@ -1077,22 +1065,14 @@ export async function listStudentClassrooms(userId: string): Promise<
         (tMeta.classrooms || []).find(
           (r) => r.code === code.toUpperCase()
         ) || found.classroom;
-      // Only trust Clerk active live if shared index was not available
-      if (
-        !sharedChecked &&
-        roomFresh.liveSession?.active &&
-        !sess?.active
-      ) {
+      if (roomFresh.liveSession?.active && !sess?.active) {
         sess = roomFresh.liveSession;
       }
-      if (sharedChecked && !sess && roomFresh.liveSession?.active) {
-        // shared says ended — keep sess null
-      }
-      // Merge attendees from fresh clerk room for attendance display path
       if (sess?.active && roomFresh.liveSession?.attendees?.length) {
         sess = {
           ...sess,
           attendees: roomFresh.liveSession.attendees,
+          meetUrl: sess.meetUrl || roomFresh.liveSession.meetUrl,
         };
       }
       materials = materialsForRoom(tMeta, code, roomFresh);
@@ -1430,7 +1410,10 @@ export async function startLive(
     // Share live so students on other servers see it immediately
     if (room) {
       try {
-        const { publishClassLive } = await import("@/lib/class-code-index");
+        const { publishClassLive, registerClassCode } = await import(
+          "@/lib/class-code-index"
+        );
+        await registerClassCode(code, teacherId);
         const sess = room.liveSession;
         if (sess) {
           await publishClassLive(code, teacherId, {

@@ -208,13 +208,21 @@ function liveStillValid(live: SharedLive | null): live is SharedLive {
   if (!live) return false;
   if (live.ended === true || live.active === false) return false;
   const now = Date.now();
-  // Active only — banner/Meet while teacher has not ended
   if (live.active) {
     const softMax = (live.startedAt || now) + 12 * 60 * 60 * 1000;
     return now <= softMax;
   }
   if (live.scheduledAt && live.scheduledAt > now) return true;
   return false;
+}
+
+export type LiveLookup =
+  | { status: "active"; live: SharedLive }
+  | { status: "ended" }
+  | { status: "none" };
+
+function isEndedPayload(j: SharedLive | null | undefined): boolean {
+  return Boolean(j && (j.ended === true || j.active === false));
 }
 
 /** Teacher starts/ends live → students see it on any server */
@@ -284,40 +292,75 @@ export async function publishClassLive(
     }
   }
 
-  // 3) Shared index — clear active live; keep ended pointer so readers see tombstone
-  const idx = await loadIndex(true);
+  // 3) Shared index — always store payload (active or ended)
+  // Prefer mem merge so we don't lose live when remote load is stale
+  let idx = mem.idx;
+  try {
+    idx = await loadIndex(true);
+  } catch {
+    idx = mem.idx;
+  }
+  if (!idx) {
+    idx = {
+      codes: {},
+      materials: {},
+      matsUrls: {},
+      live: {},
+      liveUrls: {},
+      updatedAt: Date.now(),
+    };
+  }
+  // Re-apply mem live entries that are newer (instance that just published)
+  if (mem.idx?.live) {
+    idx.live = { ...(idx.live || {}), ...mem.idx.live };
+  }
+  if (mem.idx?.liveUrls) {
+    idx.liveUrls = { ...(idx.liveUrls || {}), ...mem.idx.liveUrls };
+  }
+
   idx.codes[c] = teacherId || idx.codes[c] || "";
   if (!idx.live) idx.live = {};
   if (!idx.liveUrls) idx.liveUrls = {};
-  if (ending || !payload || payload.ended || !payload.active) {
-    delete idx.live[c];
-    if (liveUrl) idx.liveUrls[c] = liveUrl;
-    else delete idx.liveUrls[c];
-  } else {
-    idx.live[c] = payload;
+  if (payload) {
+    if (payload.ended || !payload.active) {
+      // Keep ended marker in live map so other instances know it ended
+      idx.live[c] = payload;
+    } else {
+      idx.live[c] = payload;
+    }
     if (liveUrl) idx.liveUrls[c] = liveUrl;
   }
-  // Bust in-memory so next read does not serve old active session
   mem.idx = idx;
   await persist(idx, true);
 }
 
-export async function getClassLive(code: string): Promise<SharedLive | null> {
+export async function lookupClassLive(code: string): Promise<LiveLookup> {
   const c = code.toUpperCase();
 
-  // A) Local file first
+  // A) Local file
   try {
     const raw = await fs.readFile(liveLocalPath(c), "utf8");
     const j = JSON.parse(raw) as SharedLive;
-    if (j?.ended || j?.active === false) return null;
-    if (liveStillValid(j)) return j;
+    if (isEndedPayload(j)) return { status: "ended" };
+    if (liveStillValid(j)) return { status: "active", live: j };
   } catch {
     // ignore
   }
 
-  // B) Dedicated remote URL / index
+  // B) In-memory index (same instance as teacher start — critical on Vercel)
+  if (mem.idx?.live?.[c]) {
+    const j = mem.idx.live[c];
+    if (isEndedPayload(j)) return { status: "ended" };
+    if (liveStillValid(j)) return { status: "active", live: j };
+  }
+
+  // C) Remote URL + disk index
   try {
     const idx = await loadIndex(true);
+    // Merge mem again after load (load may overwrite)
+    if (mem.idx?.live?.[c] && liveStillValid(mem.idx.live[c])) {
+      return { status: "active", live: mem.idx.live[c]! };
+    }
     const url = idx.liveUrls?.[c];
     if (url?.startsWith("http")) {
       const res = await fetch(
@@ -326,13 +369,13 @@ export async function getClassLive(code: string): Promise<SharedLive | null> {
       );
       if (res.ok) {
         const j = (await res.json()) as SharedLive;
-        if (j?.ended || j?.active === false) {
+        if (isEndedPayload(j)) {
           try {
             await fs.writeFile(liveLocalPath(c), JSON.stringify(j), "utf8");
           } catch {
             // ignore
           }
-          return null;
+          return { status: "ended" };
         }
         if (liveStillValid(j)) {
           try {
@@ -340,18 +383,23 @@ export async function getClassLive(code: string): Promise<SharedLive | null> {
           } catch {
             // ignore
           }
-          return j;
+          return { status: "active", live: j };
         }
       }
     }
     const live = idx.live?.[c] || null;
-    if (live?.ended || live?.active === false) return null;
-    if (liveStillValid(live)) return live;
+    if (isEndedPayload(live)) return { status: "ended" };
+    if (liveStillValid(live)) return { status: "active", live: live! };
   } catch {
     // ignore
   }
 
-  return null;
+  return { status: "none" };
+}
+
+export async function getClassLive(code: string): Promise<SharedLive | null> {
+  const r = await lookupClassLive(code);
+  return r.status === "active" ? r.live : null;
 }
 
 /** Mark class deleted so students drop it on next poll */

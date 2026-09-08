@@ -136,6 +136,70 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Lightweight live check by class codes (student banner / live page)
+    if (action === "liveStatus") {
+      const codes = (sp.get("codes") || "")
+        .split(",")
+        .map((c) => c.trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 12);
+      const { lookupClassLive } = await import("@/lib/class-code-index");
+      const sessions: {
+        code: string;
+        active: boolean;
+        title?: string;
+        subject?: string;
+        meetUrl?: string;
+        className?: string;
+        teacherName?: string;
+        startedAt?: number;
+        endsAt?: number;
+      }[] = [];
+      for (const c of codes) {
+        const looked = await lookupClassLive(c);
+        if (looked.status === "active") {
+          sessions.push({
+            code: c,
+            active: true,
+            title: looked.live.title,
+            subject: looked.live.subject,
+            meetUrl: looked.live.meetUrl,
+            className: looked.live.className,
+            teacherName: looked.live.teacherName,
+            startedAt: looked.live.startedAt,
+            endsAt: looked.live.endsAt,
+          });
+          continue;
+        }
+        // Fallback: teacher Clerk room by code index
+        try {
+          const found = await findClassroomByCode(c);
+          if (!found) continue;
+          const sess = found.classroom.liveSession;
+          if (sess?.active) {
+            sessions.push({
+              code: c,
+              active: true,
+              title: sess.title,
+              subject: sess.subject,
+              meetUrl: sess.meetUrl,
+              className: found.classroom.name,
+              teacherName: found.classroom.teacherName,
+              startedAt: sess.startedAt,
+              endsAt: sess.endsAt,
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return NextResponse.json({
+        ok: true,
+        sessions,
+        live: sessions[0] || null,
+      });
+    }
+
     if (action === "joined") {
       // Client may pass localStorage codes so live works even if Clerk join meta lagged
       const extraCodes = (sp.get("codes") || "")
@@ -154,10 +218,10 @@ export async function GET(req: NextRequest) {
         try {
           const found = await findClassroomByCode(c);
           if (!found) {
-            // Still try shared live index alone
-            const { getClassLive } = await import("@/lib/class-code-index");
-            const live = await getClassLive(c);
-            if (live) {
+            const { lookupClassLive } = await import("@/lib/class-code-index");
+            const looked = await lookupClassLive(c);
+            if (looked.status === "active") {
+              const live = looked.live;
               classrooms.push({
                 code: c,
                 name: live.className || `Class ${c}`,
@@ -169,7 +233,7 @@ export async function GET(req: NextRequest) {
                   subject: live.subject,
                   meetUrl: live.meetUrl,
                   joinCode: live.joinCode,
-                  active: live.active,
+                  active: true,
                   startedAt: live.startedAt,
                   endsAt: live.endsAt,
                   joinUntil: live.joinUntil || live.endsAt,
@@ -183,24 +247,30 @@ export async function GET(req: NextRequest) {
             }
             continue;
           }
-          const { getClassLive } = await import("@/lib/class-code-index");
-          const live = await getClassLive(c);
-          const sess = live
-            ? {
-                id: live.id,
-                title: live.title,
-                subject: live.subject,
-                meetUrl: live.meetUrl,
-                joinCode: live.joinCode,
-                active: live.active,
-                startedAt: live.startedAt,
-                  endsAt: live.endsAt,
-                  joinUntil: live.joinUntil || live.endsAt,
-                  scheduledAt: live.scheduledAt,
-                  messages: found.classroom.liveSession?.messages || [],
-                  attendees: found.classroom.liveSession?.attendees || [],
-                }
-              : found.classroom.liveSession;
+          const { lookupClassLive } = await import("@/lib/class-code-index");
+          const looked = await lookupClassLive(c);
+          let sess = found.classroom.liveSession?.active
+            ? found.classroom.liveSession
+            : found.classroom.liveSession;
+          if (looked.status === "active") {
+            const live = looked.live;
+            sess = {
+              id: live.id,
+              title: live.title,
+              subject: live.subject,
+              meetUrl: live.meetUrl,
+              joinCode: live.joinCode,
+              active: true,
+              startedAt: live.startedAt,
+              endsAt: live.endsAt,
+              joinUntil: live.joinUntil || live.endsAt,
+              scheduledAt: live.scheduledAt,
+              messages: found.classroom.liveSession?.messages || [],
+              attendees: found.classroom.liveSession?.attendees || [],
+            };
+          } else if (looked.status === "ended") {
+            sess = null;
+          }
           classrooms.push({
             code: found.classroom.code,
             name: found.classroom.name || `Class ${c}`,
@@ -215,49 +285,39 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Overlay shared live — or clear stale Meet if shared says ended
+      // Overlay shared live — ONLY clear on explicit "ended", never on miss
       try {
-        const { getClassLive } = await import("@/lib/class-code-index");
+        const { lookupClassLive } = await import("@/lib/class-code-index");
         classrooms = await Promise.all(
           classrooms.map(async (room) => {
-            const live = await getClassLive(room.code);
-            if (!live) {
-              // Shared index has no active live → hide Meet even if Clerk lag
-              if (room.liveSession?.active) {
-                return {
-                  ...room,
-                  liveSession: room.liveSession
-                    ? { ...room.liveSession, active: false, meetUrl: undefined }
-                    : null,
-                };
-              }
-              return room;
+            const looked = await lookupClassLive(room.code);
+            if (looked.status === "ended") {
+              return { ...room, liveSession: null };
             }
-            if (!live.active) {
+            if (looked.status === "active") {
+              const live = looked.live;
               return {
                 ...room,
-                liveSession: null,
+                name: live.className || room.name,
+                teacherName: live.teacherName || room.teacherName,
+                liveSession: {
+                  id: live.id,
+                  title: live.title,
+                  subject: live.subject,
+                  meetUrl: live.meetUrl,
+                  joinCode: live.joinCode,
+                  active: true,
+                  startedAt: live.startedAt,
+                  endsAt: live.endsAt,
+                  joinUntil: live.joinUntil || live.endsAt,
+                  scheduledAt: live.scheduledAt,
+                  messages: room.liveSession?.messages || [],
+                  attendees: room.liveSession?.attendees || [],
+                },
               };
             }
-            return {
-              ...room,
-              name: live.className || room.name,
-              teacherName: live.teacherName || room.teacherName,
-              liveSession: {
-                id: live.id,
-                title: live.title,
-                subject: live.subject,
-                meetUrl: live.meetUrl,
-                joinCode: live.joinCode,
-                active: true,
-                startedAt: live.startedAt,
-                endsAt: live.endsAt,
-                joinUntil: live.joinUntil || live.endsAt,
-                scheduledAt: live.scheduledAt,
-                messages: room.liveSession?.messages || [],
-                attendees: room.liveSession?.attendees || [],
-              },
-            };
+            // none — keep Clerk/room liveSession as-is
+            return room;
           })
         );
       } catch {
