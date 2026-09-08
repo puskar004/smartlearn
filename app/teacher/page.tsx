@@ -851,7 +851,15 @@ function TeacherInner() {
                       <div>
                         <div className="font-bold text-slate-900">{s.name}</div>
                         <div className="text-[11px] text-slate-400">
-                          Class {s.grade} · {s.email || "no email"} ·{" "}
+                          Class {s.grade} · {s.email || "no email"}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          Joined{" "}
+                          {new Date(
+                            s.joinedAt || s.lastActive
+                          ).toLocaleString()}
+                          {" · "}
+                          Active{" "}
                           {new Date(s.lastActive).toLocaleString()}
                         </div>
                       </div>

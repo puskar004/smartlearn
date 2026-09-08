@@ -349,6 +349,18 @@ export default function StudentTestPage() {
     setResult(null);
     setLoading(true);
     try {
+      // Camera/mic BEFORE fullscreen (prevents FS drop on permission prompt)
+      try {
+        const pre = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: true,
+        });
+        pre.getTracks().forEach((t) => t.stop());
+      } catch {
+        throw new Error(
+          "Allow camera + microphone first, then join the test again."
+        );
+      }
       const res = await fetch(
         `/api/tests?code=${encodeURIComponent(code.trim())}`
       );
@@ -506,7 +518,7 @@ export default function StudentTestPage() {
               </div>
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-white drop-shadow-sm">
-                  SmartLearn Exam
+                  CurioSphere Exam
                 </div>
                 <div className="text-[10px] font-semibold text-amber-50/95">
                   National Testing Agency style · Computer Based Test
@@ -567,9 +579,9 @@ export default function StudentTestPage() {
               <p className="text-[12px] font-medium text-amber-950">
                 {setupError || (
                   <>
-                    Allow <strong>camera + mic</strong>, then share{" "}
-                    <strong>This tab / Chrome Tab</strong> → this SmartLearn
-                    page. Then enter <strong>fullscreen</strong> to attempt.
+                    Allow <strong>camera + mic</strong> first, then share{" "}
+                    <strong>This tab / Chrome Tab</strong>. Fullscreen locks only
+                    after permissions are granted.
                   </>
                 )}
               </p>
@@ -659,25 +671,9 @@ export default function StudentTestPage() {
               </div>
             </div>
 
-            {/* NTA action buttons */}
+            {/* Streamlined exam actions (no redundant Save&Next / Mark&Next pair) */}
             <div className="shrink-0 border-t border-[#bdbdbd] bg-[#fafafa] px-2 py-2 sm:px-3">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <button
-                  type="button"
-                  disabled={!canAttempt}
-                  onClick={saveAndNext}
-                  className="rounded border border-[#2e7d32] bg-[#43a047] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#388e3c] disabled:opacity-50"
-                >
-                  Save &amp; Next
-                </button>
-                <button
-                  type="button"
-                  disabled={!canAttempt}
-                  onClick={saveAndMark}
-                  className="rounded border border-[#e65100] bg-[#fb8c00] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#f57c00] disabled:opacity-50"
-                >
-                  Save &amp; Mark for Review
-                </button>
                 <button
                   type="button"
                   disabled={!canAttempt}
@@ -689,10 +685,10 @@ export default function StudentTestPage() {
                 <button
                   type="button"
                   disabled={!canAttempt}
-                  onClick={markAndNext}
-                  className="rounded border border-[#0d47a1] bg-[#1976d2] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#1565c0] disabled:opacity-50"
+                  onClick={saveAndMark}
+                  className="rounded border border-[#e65100] bg-[#fb8c00] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#f57c00] disabled:opacity-50"
                 >
-                  Mark for Review &amp; Next
+                  Mark for Review
                 </button>
                 <div className="ml-auto flex flex-wrap gap-1.5">
                   <button
@@ -710,7 +706,7 @@ export default function StudentTestPage() {
                       markVisited();
                       goTo(qi + 1);
                     }}
-                    className="rounded border border-[#546e7a] bg-[#607d8b] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#546e7a] disabled:opacity-40"
+                    className="rounded border border-[#2e7d32] bg-[#43a047] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#388e3c] disabled:opacity-40"
                   >
                     Next »
                   </button>
@@ -727,9 +723,9 @@ export default function StudentTestPage() {
             </div>
           </div>
 
-          {/* RIGHT: palette */}
-          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#eceff1] lg:w-[300px] lg:border-t-0">
-            <div className="border-b border-[#cfd8dc] bg-[#1a237e] px-3 py-2 text-center text-[12px] font-bold uppercase tracking-wide text-white">
+          {/* RIGHT: palette — always visible, sticky on desktop */}
+          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#eceff1] lg:sticky lg:top-0 lg:h-[calc(100vh-8rem)] lg:w-[300px] lg:border-t-0 lg:self-start">
+            <div className="shrink-0 border-b border-[#cfd8dc] bg-[#1a237e] px-3 py-2 text-center text-[12px] font-bold uppercase tracking-wide text-white">
               Question Palette
             </div>
 

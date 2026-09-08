@@ -75,6 +75,7 @@ function lightClassroom(c: Classroom): Classroom {
           : [],
         chaptersOpened: Number(s.chaptersOpened) || 0,
         lastActive: Number(s.lastActive) || Date.now(),
+        joinedAt: Number(s.joinedAt) || Number(s.lastActive) || Date.now(),
         recentMistakes: Array.isArray(s.recentMistakes)
           ? s.recentMistakes.slice(0, 2)
           : [],
@@ -867,6 +868,7 @@ export async function joinClassroomAsStudent(
     };
   }
 
+  const nowJoin = Date.now();
   // Light student row (avoid Clerk size blow-ups)
   const lightSnap: StudentSnapshot = {
     studentId: snapshot.studentId,
@@ -879,7 +881,8 @@ export async function joinClassroomAsStudent(
     mistakes: Number(snapshot.mistakes) || 0,
     weakSubjects: (snapshot.weakSubjects || []).slice(0, 5),
     chaptersOpened: Number(snapshot.chaptersOpened) || 0,
-    lastActive: Date.now(),
+    lastActive: nowJoin,
+    joinedAt: snapshot.joinedAt || nowJoin,
     recentMistakes: (snapshot.recentMistakes || []).slice(0, 3),
   };
 
@@ -889,12 +892,21 @@ export async function joinClassroomAsStudent(
       found.teacherId,
       found.classroom.code,
       (c) => {
+        const prev = (c.students || []).find(
+          (s) => s.studentId === lightSnap.studentId
+        );
         const others = (c.students || []).filter(
           (s) => s.studentId !== lightSnap.studentId
         );
+        // Preserve first join time forever
+        const row: StudentSnapshot = {
+          ...lightSnap,
+          joinedAt: prev?.joinedAt || lightSnap.joinedAt || nowJoin,
+          lastActive: nowJoin,
+        };
         return {
           ...c,
-          students: [lightSnap, ...others].slice(0, 80),
+          students: [row, ...others].slice(0, 80),
         };
       }
     );

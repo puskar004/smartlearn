@@ -95,6 +95,7 @@ export async function GET(req: NextRequest) {
             weakSubjects: (s.weakSubjects || []).slice(0, 5),
             chaptersOpened: s.chaptersOpened,
             lastActive: s.lastActive,
+            joinedAt: s.joinedAt || s.lastActive,
             recentMistakes: (s.recentMistakes || []).slice(0, 2),
           })),
           liveSession: r.liveSession

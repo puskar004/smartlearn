@@ -91,13 +91,13 @@ export default function SiteHeader() {
         <Link href="/" className="flex shrink-0 items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/smartlearn-logo.svg"
-            alt="SmartLearn"
+            src="/curiosphere-logo.svg"
+            alt="CurioSphere"
             className="h-10 w-10 rounded-xl shadow-lg shadow-violet-500/25"
           />
           <div className="leading-tight">
             <div className="text-lg font-extrabold tracking-tight text-slate-900">
-              Smart<span className="text-violet-600">Learn</span>
+              Curio<span className="text-violet-600">Sphere</span>
             </div>
             <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-400">
               Learning, Personalized

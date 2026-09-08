@@ -103,13 +103,13 @@ export default function AppSidebar() {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/smartlearn-logo.svg"
-          alt=""
+          src="/curiosphere-logo.svg"
+          alt="CurioSphere"
           className="h-10 w-10 rounded-xl shadow-md shadow-indigo-500/20"
         />
         <div className="hidden leading-tight lg:block">
           <div className="text-base font-extrabold tracking-tight text-slate-900">
-            Smart<span className="text-violet-600">Learn</span>
+            Curio<span className="text-violet-600">Sphere</span>
           </div>
           <div className="text-[10px] font-medium text-slate-400">
             {isTeacher ? "Teacher console" : "Learn. Grow. Achieve."}

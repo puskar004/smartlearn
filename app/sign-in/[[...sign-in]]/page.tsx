@@ -40,8 +40,8 @@ function SignInInner() {
       <div className="mb-6 text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/smartlearn-logo.svg"
-          alt="SmartLearn"
+          src="/curiosphere-logo.svg"
+          alt="CurioSphere"
           className="mx-auto h-14 w-14 rounded-2xl shadow-lg shadow-violet-500/25"
         />
         <h1 className="mt-4 text-2xl font-extrabold text-slate-900">
@@ -49,8 +49,8 @@ function SignInInner() {
         </h1>
         <p className="mt-2 max-w-md text-sm text-slate-500">
           {isTeacher
-            ? "Welcome, Teacher. Enter your email — SmartLearn will send a secure OTP. After login you’ll get a fresh private class code for your students."
-            : "Welcome, Student. Enter your email — SmartLearn will send a secure OTP so you can continue learning."}
+            ? "Welcome, Teacher. Enter your email — CurioSphere will send a secure OTP. After login you’ll get a fresh private class code for your students."
+            : "Welcome, Student. Enter your email — CurioSphere will send a secure OTP so you can continue learning."}
         </p>
         <div
           className={`mt-3 inline-flex rounded-full px-3 py-1 text-[11px] font-bold ${
@@ -73,7 +73,7 @@ function SignInInner() {
       />
 
       <p className="mt-6 text-center text-xs text-slate-400">
-        OTP email is from <strong>SmartLearn</strong>. Wrong role?{" "}
+        OTP email is from <strong>CurioSphere</strong>. Wrong role?{" "}
         <Link href="/login" className="font-semibold text-violet-600 underline">
           Choose again
         </Link>

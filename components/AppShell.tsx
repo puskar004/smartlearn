@@ -58,8 +58,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isTeacher = role === "teacher";
   // Fullscreen + tab-switch only during live test (not whole site)
   const onTest = path === "/test" || path.startsWith("/test/");
-  // Hide sidebar/topbar for entire student test page (clean exam UI)
-  const hideChrome = (!isTeacher && onTest) || (locked && !isTeacher);
+  // Exam shell has its own NTA chrome; hide app sidebar only mid-test
+  // Pre-test join screen keeps app nav so layout is not blank
+  const hideChrome =
+    (!isTeacher && onTest && locked) || (locked && !isTeacher && onTest);
 
   return (
     <div

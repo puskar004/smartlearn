@@ -61,12 +61,12 @@ export default function LoginChooserPage() {
         <div className="mb-8 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/smartlearn-logo.svg"
-            alt="SmartLearn"
+            src="/curiosphere-logo.svg"
+            alt="CurioSphere"
             className="mx-auto h-14 w-14 rounded-2xl shadow-lg shadow-violet-500/30"
           />
           <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
-            Welcome to SmartLearn
+            Welcome to CurioSphere
           </h1>
           <p className="mt-2 text-sm text-slate-500">
             {step === "role"
@@ -161,7 +161,7 @@ export default function LoginChooserPage() {
 
         <p className="mt-8 flex items-center justify-center gap-2 text-center text-xs text-slate-400">
           <Shield className="h-3.5 w-3.5" />
-          Email OTP from SmartLearn. Class filters your NCERT & quizzes.
+          Email OTP from CurioSphere. Class filters your NCERT & quizzes.
         </p>
 
         <p className="mt-4 text-center text-xs text-slate-400">

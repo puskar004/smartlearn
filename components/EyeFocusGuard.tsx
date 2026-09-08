@@ -203,24 +203,29 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       }
 
       const base = baseline.current!;
+      // More sensitive: catch looking away / eyes closed sooner
       const faceAway =
-        s.contrast < 12 || s.faceMean < 18 || s.faceMean > 240;
+        s.contrast < 18 || s.faceMean < 22 || s.faceMean > 230;
       const eyesClosed =
         faceAway ||
-        s.eyeMean < base.eye * 0.78 ||
-        s.eyeMean < base.mean * 0.65 ||
-        (s.eyeMean < 55 && s.faceMean > 70);
+        s.eyeMean < base.eye * 0.88 ||
+        s.eyeMean < base.mean * 0.72 ||
+        (s.eyeMean < 70 && s.faceMean > 60);
 
-      const dt = 1000 / 30;
+      const now = performance.now();
+      const last = (loop as { _t?: number })._t || now;
+      (loop as { _t?: number })._t = now;
+      const dt = Math.min(100, Math.max(16, now - last));
+
       if (eyesClosed) closedMs.current += dt;
-      else closedMs.current = Math.max(0, closedMs.current - dt * 2);
+      else closedMs.current = Math.max(0, closedMs.current - dt * 1.5);
 
       const secs = Math.floor(closedMs.current / 1000);
-      if (secs >= 30) {
+      if (secs >= 28) {
         alarm(
           faceAway
             ? "Face not in frame ~30s — sit in front of camera!"
-            : "Eyes closed / looking down ~30s — ALARM"
+            : "Eyes closed / looking away ~30s — ALARM"
         );
         closedMs.current = 0;
       } else if (secs > 0) {

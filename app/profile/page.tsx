@@ -24,6 +24,7 @@ export default function ProfilePage() {
   const { user, isSignedIn } = useUser();
   const { userId } = useAuth();
   const [phone, setPhone] = useState("");
+  const [phoneErr, setPhoneErr] = useState<string | null>(null);
   const [grade, setGrade] = useState<Grade>("12");
   const [focusOn, setFocusOn] = useState(true);
   const [eyeGuard, setEyeGuard] = useState(false);
@@ -32,6 +33,16 @@ export default function ProfilePage() {
   const [joined, setJoined] = useState<string | null>(null);
   const [classMsg] = useState<string | null>(null);
   const [role, setRoleUi] = useState<"student" | "teacher">("student");
+  const [teacherSubject, setTeacherSubject] = useState("");
+  const [teacherQual, setTeacherQual] = useState("");
+  const [teacherDept, setTeacherDept] = useState("");
+  const [staffId, setStaffId] = useState("");
+
+  const normalizePhone = (raw: string) => raw.replace(/\D/g, "").slice(0, 15);
+  const isValidPhone = (raw: string) => {
+    const d = normalizePhone(raw);
+    return d.length === 10 || (d.length >= 11 && d.length <= 13);
+  };
 
   useEffect(() => {
     setPhone(getParentPhone(userId));
@@ -42,11 +53,34 @@ export default function ProfilePage() {
       setGrade(p.grade);
       setJoined(getJoinedClass(userId));
       setRoleUi(getRole(userId));
+      try {
+        const t = localStorage.getItem(`sl_teacher_profile_${userId}`);
+        if (t) {
+          const j = JSON.parse(t) as {
+            subject?: string;
+            qualification?: string;
+            department?: string;
+            staffId?: string;
+          };
+          setTeacherSubject(j.subject || "");
+          setTeacherQual(j.qualification || "");
+          setTeacherDept(j.department || "");
+          setStaffId(j.staffId || "");
+        }
+      } catch {
+        // ignore
+      }
     }
   }, [userId]);
 
   const save = () => {
-    setParentPhone(phone, userId);
+    const digits = normalizePhone(phone);
+    if (phone.trim() && !isValidPhone(phone)) {
+      setPhoneErr("Enter a valid 10-digit mobile number (digits only).");
+      return;
+    }
+    setPhoneErr(null);
+    setParentPhone(digits, userId);
     setFocusLockEnabled(focusOn);
     if (userId) {
       const p = loadProgress(userId);
@@ -54,6 +88,21 @@ export default function ProfilePage() {
       p.gradeChosen = true;
       saveProgress(p);
       setProgress(p);
+      if (role === "teacher") {
+        try {
+          localStorage.setItem(
+            `sl_teacher_profile_${userId}`,
+            JSON.stringify({
+              subject: teacherSubject.trim(),
+              qualification: teacherQual.trim(),
+              department: teacherDept.trim(),
+              staffId: staffId.trim(),
+            })
+          );
+        } catch {
+          // ignore
+        }
+      }
       try {
         window.dispatchEvent(new Event("sl-grade-changed"));
       } catch {
@@ -102,28 +151,85 @@ export default function ProfilePage() {
           )}
         </div>
 
-        <label className="mt-5 block text-sm font-semibold text-slate-700">
-          Class
-          <select
-            value={grade}
-            onChange={(e) => setGrade(e.target.value as Grade)}
-            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="10">Class 10</option>
-            <option value="11">Class 11</option>
-            <option value="12">Class 12</option>
-          </select>
-        </label>
+        {role === "student" ? (
+          <>
+            <label className="mt-5 block text-sm font-semibold text-slate-700">
+              Class
+              <select
+                value={grade}
+                onChange={(e) => setGrade(e.target.value as Grade)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="10">Class 10</option>
+                <option value="11">Class 11</option>
+                <option value="12">Class 12</option>
+              </select>
+            </label>
 
-        <label className="mt-4 block text-sm font-semibold text-slate-700">
-          Parent WhatsApp number
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            placeholder="9876543210"
-          />
-        </label>
+            <label className="mt-4 block text-sm font-semibold text-slate-700">
+              Parent WhatsApp number
+              <input
+                value={phone}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^\d+\s-]/g, "");
+                  setPhone(v);
+                  setPhoneErr(null);
+                }}
+                inputMode="numeric"
+                maxLength={15}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                placeholder="9876543210"
+              />
+              {phoneErr && (
+                <span className="mt-1 block text-xs font-semibold text-rose-600">
+                  {phoneErr}
+                </span>
+              )}
+              <span className="mt-1 block text-[10px] text-slate-400">
+                10-digit Indian mobile (digits only)
+              </span>
+            </label>
+          </>
+        ) : (
+          <div className="mt-5 space-y-3">
+            <label className="block text-sm font-semibold text-slate-700">
+              Subject / specialization
+              <input
+                value={teacherSubject}
+                onChange={(e) => setTeacherSubject(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                placeholder="e.g. Physics, Mathematics"
+              />
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">
+              Qualification
+              <input
+                value={teacherQual}
+                onChange={(e) => setTeacherQual(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                placeholder="e.g. M.Sc., B.Ed."
+              />
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">
+              Department
+              <input
+                value={teacherDept}
+                onChange={(e) => setTeacherDept(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                placeholder="e.g. Science"
+              />
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">
+              Staff ID
+              <input
+                value={staffId}
+                onChange={(e) => setStaffId(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                placeholder="Optional staff / employee ID"
+              />
+            </label>
+          </div>
+        )}
 
         <div className="mt-5 rounded-2xl border border-violet-100 bg-violet-50/50 p-4">
           <div className="text-sm font-bold text-violet-900">Who are you?</div>

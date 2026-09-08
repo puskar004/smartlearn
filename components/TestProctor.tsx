@@ -20,8 +20,8 @@ type Props = {
   onMoment?: (m: MomentPayload) => void;
 };
 
-/** 2–3 screenshots every 5 minutes (~one snap every ~2 min) */
-const INTERVAL_MS = 120_000;
+/** 2–3 screenshots every 5 minutes (~every 2–2.5 min) */
+const INTERVAL_MS = 150_000;
 
 export default function TestProctor({
   active,

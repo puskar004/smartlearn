@@ -1,6 +1,6 @@
 export const smartLearnAppearance = {
   layout: {
-    logoImageUrl: "/smartlearn-logo.svg",
+    logoImageUrl: "/curiosphere-logo.svg",
     logoLinkUrl: "/",
     logoPlacement: "inside",
     socialButtonsPlacement: "bottom",

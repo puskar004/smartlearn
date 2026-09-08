@@ -10,6 +10,8 @@ export type StudentSnapshot = {
   weakSubjects: string[];
   chaptersOpened: number;
   lastActive: number;
+  /** First time student joined this class (stable; never overwrite with now) */
+  joinedAt?: number;
   recentMistakes: {
     subjectName: string;
     chapterTitle: string;
