@@ -9,13 +9,11 @@ import {
   getStudentJoinedCode,
   getStudentRemarks,
   joinClassroomAsStudent,
-  kickFromLive,
   leaveAttendance,
   leaveClassroomAsStudent,
   listStudentClassrooms,
   listTeacherClassrooms,
   markAttendance,
-  postMessage,
   pushStudentToClass,
   pushTeacherRemark,
   renameClassroom,
@@ -574,45 +572,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "Code required" }, { status: 400 });
       }
       const room = await leaveAttendance(code, userId);
-      return NextResponse.json({ ok: true, classroom: room });
-    }
-
-    if (action === "kickLive") {
-      const code = String(body.code || "").trim().toUpperCase();
-      const studentId = String(body.studentId || "");
-      const reason = body.reason ? String(body.reason).slice(0, 200) : undefined;
-      if (!code || !studentId) {
-        return NextResponse.json(
-          { ok: false, error: "Code and student required" },
-          { status: 400 }
-        );
-      }
-      const room = await kickFromLive(userId, code, studentId, reason);
-      if (!room) {
-        return NextResponse.json(
-          { ok: false, error: "Class not found or no live session" },
-          { status: 404 }
-        );
-      }
-      return NextResponse.json({ ok: true, classroom: room });
-    }
-
-    if (action === "message") {
-      const code = String(body.code || "").trim().toUpperCase();
-      const text = String(body.text || "").trim();
-      if (!text) {
-        return NextResponse.json({ ok: false, error: "Empty message" }, { status: 400 });
-      }
-      const found = await findClassroomByCode(code);
-      if (!found) {
-        return NextResponse.json({ ok: false, error: "Invalid code" }, { status: 404 });
-      }
-      const author =
-        String(body.author || "") ||
-        user?.fullName ||
-        user?.firstName ||
-        "User";
-      const room = await postMessage(found.teacherId, code, author, text);
       return NextResponse.json({ ok: true, classroom: room });
     }
 

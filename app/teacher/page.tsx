@@ -25,8 +25,6 @@ import {
   apiDeleteClassroom,
   apiEndLive,
   apiListMyClasses,
-  apiPostMessage,
-  apiKickLive,
   apiRenameClassroom,
   apiSendRemark,
   apiStartLive,
@@ -92,7 +90,6 @@ function TeacherInner() {
   const [liveMins, setLiveMins] = useState(60);
   const [meetUrl, setMeetUrl] = useState("https://meet.google.com/");
   const [scheduleLocal, setScheduleLocal] = useState("");
-  const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState("");
@@ -100,7 +97,6 @@ function TeacherInner() {
   const [sentRemarks, setSentRemarks] = useState<
     { studentId: string; name: string; text: string; at: number }[]
   >([]);
-  const [penaltyNote, setPenaltyNote] = useState("");
   const [pdfViewer, setPdfViewer] = useState<{
     title: string;
     url: string;
@@ -1125,8 +1121,8 @@ function TeacherInner() {
                         meet.google.com/new
                       </a>{" "}
                       → paste link. Students open{" "}
-                      <strong>Live Class</strong> to join + chat. Join stays
-                      open for the <strong>full session</strong> (at least{" "}
+                      <strong>Live Class</strong> to join Meet. Join stays open
+                      for the <strong>full session</strong> (at least{" "}
                       <strong>15 minutes</strong>); your Meet link stays until
                       you click End session.
                     </p>
@@ -1139,8 +1135,6 @@ function TeacherInner() {
                           LIVE · {room.liveSession.title}
                         </div>
                         <div className="text-xs text-rose-600">
-                          Room {room.liveSession.joinCode}
-                          {" · "}
                           Students can join until{" "}
                           {new Date(
                             room.liveSession.joinUntil ||
@@ -1169,184 +1163,37 @@ function TeacherInner() {
                           title="Teacher · Google Meet"
                         />
                         <p className="mt-2 text-[11px] text-slate-500">
-                          Your Meet link stays for the whole session. Students
-                          have at least 15 minutes (full duration) to join.
-                          Remove someone inside Google Meet if needed; below =
-                          SmartLearn kick from attendance.
+                          Meet link stays for the whole session. Use Google
+                          Meet’s own people controls to remove someone if
+                          needed.
                         </p>
                       </div>
                     )}
-                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                      <div className="text-xs font-bold text-amber-900">
-                        Kick from live class
-                      </div>
-                      <p className="mt-1 text-[10px] text-amber-800/80">
-                        Student is blocked from this live session (Meet link
-                        hidden). Also remove them inside Google Meet if needed.
-                      </p>
-                      <input
-                        value={penaltyNote}
-                        onChange={(e) => setPenaltyNote(e.target.value)}
-                        placeholder="Reason (misconduct, noise…)"
-                        className="mt-2 w-full rounded-lg border border-amber-200 px-2 py-1.5 text-xs"
-                      />
-                      <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
-                        {(() => {
-                          const kicked = new Set(
-                            room.liveSession.kickedIds || []
-                          );
-                          const present = (room.liveSession.attendees || [])
-                            .filter((a) => !a.leftAt && !kicked.has(a.studentId))
-                            .map((a) => ({
-                              id: a.studentId,
-                              name: a.name,
-                              tag: "in live",
-                            }));
-                          const roster = (room.students || [])
-                            .filter(
-                              (s) =>
-                                !kicked.has(s.studentId) &&
-                                !present.some((p) => p.id === s.studentId)
-                            )
-                            .map((s) => ({
-                              id: s.studentId,
-                              name: s.name,
-                              tag: "in class",
-                            }));
-                          const list = [...present, ...roster];
-                          if (!list.length) {
-                            return (
-                              <li className="text-[11px] text-amber-800/70">
-                                No students to kick (none joined / all kicked).
-                              </li>
-                            );
-                          }
-                          return list.map((s) => (
+                    {(room.liveSession.attendees || []).length > 0 && (
+                      <div className="mt-3 rounded-xl border border-white bg-white/80 p-3">
+                        <div className="text-xs font-bold text-slate-800">
+                          Joined this session
+                        </div>
+                        <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                          {(room.liveSession.attendees || []).map((a) => (
                             <li
-                              key={s.id}
-                              className="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5 text-xs"
+                              key={a.studentId + a.joinedAt}
+                              className="flex justify-between text-xs text-slate-600"
                             >
-                              <span>
-                                <span className="font-semibold text-slate-800">
-                                  {s.name}
-                                </span>
-                                <span className="ml-1 text-[10px] text-slate-400">
-                                  · {s.tag}
-                                </span>
+                              <span className="font-semibold text-slate-800">
+                                {a.name}
                               </span>
-                              <button
-                                type="button"
-                                disabled={busy}
-                                className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white disabled:opacity-50"
-                                onClick={() => {
-                                  void (async () => {
-                                    const reason =
-                                      penaltyNote.trim() ||
-                                      "Misconduct in live class";
-                                    setBusy(true);
-                                    setError(null);
-                                    try {
-                                      const data = await apiKickLive(
-                                        room.code,
-                                        s.id,
-                                        reason
-                                      );
-                                      if (!data.ok) {
-                                        throw new Error(
-                                          data.error || "Kick failed"
-                                        );
-                                      }
-                                      if (data.classroom) {
-                                        // Merge kick into room WITHOUT dropping meetUrl / ending session
-                                        setRoom((prev) => {
-                                          const next = data.classroom as Classroom;
-                                          if (!prev?.liveSession) return next;
-                                          return {
-                                            ...next,
-                                            liveSession: {
-                                              ...next.liveSession!,
-                                              meetUrl:
-                                                next.liveSession?.meetUrl ||
-                                                prev.liveSession.meetUrl,
-                                              active: true,
-                                              messages:
-                                                next.liveSession?.messages ||
-                                                prev.liveSession.messages,
-                                            },
-                                          };
-                                        });
-                                        setClasses((prev) =>
-                                          prev.map((c) =>
-                                            c.code === room.code
-                                              ? (data.classroom as Classroom)
-                                              : c
-                                          )
-                                        );
-                                      }
-                                      setMatNote(
-                                        `Kicked ${s.name} from live · they cannot rejoin this session`
-                                      );
-                                      setPenaltyNote("");
-                                    } catch (e) {
-                                      quietError(
-                                        e instanceof Error
-                                          ? e.message
-                                          : "Could not kick student"
-                                      );
-                                    } finally {
-                                      setBusy(false);
-                                    }
-                                  })();
-                                }}
-                              >
-                                Kick out
-                              </button>
+                              <span className="text-slate-400">
+                                {new Date(a.joinedAt).toLocaleTimeString()}
+                                {a.leftAt
+                                  ? ` · left ${new Date(a.leftAt).toLocaleTimeString()}`
+                                  : " · in"}
+                              </span>
                             </li>
-                          ));
-                        })()}
-                      </ul>
-                      {(room.liveSession.kickedIds || []).length > 0 && (
-                        <div className="mt-2 border-t border-amber-200 pt-2 text-[10px] text-rose-700">
-                          Kicked this session:{" "}
-                          {(room.liveSession.kickedIds || []).length} student(s)
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-3 max-h-48 space-y-2 overflow-y-auto rounded-xl bg-white p-3">
-                      {(room.liveSession.messages || []).map((m) => (
-                        <div key={m.id} className="text-xs">
-                          <strong>{m.author}:</strong> {m.text}
-                        </div>
-                      ))}
-                    </div>
-                    <form
-                      className="mt-2 flex gap-2"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        if (!msg.trim()) return;
-                        void apiPostMessage(
-                          room.code,
-                          user?.fullName || "Teacher",
-                          msg.trim()
-                        ).then((d) => {
-                          if (d.classroom) setRoom(d.classroom);
-                          setMsg("");
-                        });
-                      }}
-                    >
-                      <input
-                        value={msg}
-                        onChange={(e) => setMsg(e.target.value)}
-                        placeholder="Message the room…"
-                        className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white"
-                      >
-                        Send
-                      </button>
-                    </form>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

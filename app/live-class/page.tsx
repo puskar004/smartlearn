@@ -1,24 +1,20 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { Loader2, Radio, Send, Shield, Ban, RefreshCw } from "lucide-react";
+import { Loader2, Radio, Shield, RefreshCw } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
 import {
   dropJoinedClasses,
   getJoinedClass,
   getJoinedClasses,
   getRole,
-  apiPostMessage,
   apiMarkAttendance,
   apiLeaveAttendance,
 } from "@/lib/teacher-store";
 import { displayName } from "@/lib/display-name";
 import { useRouter } from "next/navigation";
-import { pushNotification } from "@/lib/notifications";
-
-type Msg = { id: string; author: string; text: string; at: number };
 
 type LiveInfo = {
   id?: string;
@@ -29,7 +25,6 @@ type LiveInfo = {
   active: boolean;
   endsAt: number;
   joinUntil?: number;
-  messages: Msg[];
   scheduledAt?: number;
 };
 
@@ -45,12 +40,7 @@ export default function LiveClassPage() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [msg, setMsg] = useState("");
-  const [sending, setSending] = useState(false);
-  const [kicked, setKicked] = useState(false);
-  const [kickReason, setKickReason] = useState("");
   const lastAttended = useRef<string | null>(null);
-  const kickNotified = useRef(false);
   const preferredCode = useRef<string | null>(null);
 
   const applyRoom = useCallback(
@@ -58,12 +48,7 @@ export default function LiveClassPage() {
       room: {
         code?: string;
         name?: string;
-        liveSession?: LiveInfo & {
-          kickedIds?: string[];
-          active?: boolean;
-        } | null;
-        kicked?: boolean;
-        kickReason?: string;
+        liveSession?: LiveInfo & { active?: boolean } | null;
       },
       joinedFallback?: string
     ) => {
@@ -71,30 +56,10 @@ export default function LiveClassPage() {
       setClassName(room.name || "");
       setClassCode(code);
 
-      if (room.kicked) {
-        setKicked(true);
-        setKickReason(room.kickReason || "Removed by teacher");
-        setLive(null);
-        if (!kickNotified.current && userId) {
-          kickNotified.current = true;
-          pushNotification(userId, {
-            title: "Kicked from live class",
-            body: room.kickReason || "Teacher removed you",
-            href: "/remarks",
-          });
-        }
-        setError(null);
-        return;
-      }
-
-      setKicked(false);
       const sess = room.liveSession;
       if (sess?.active) {
         const joinUntil =
-          sess.joinUntil ||
-          sess.endsAt ||
-          Date.now() + 15 * 60_000;
-        // Soft clock: still show Meet while active (teacher controls End)
+          sess.joinUntil || sess.endsAt || Date.now() + 15 * 60_000;
         setLive({
           id: sess.id,
           title: sess.title,
@@ -104,7 +69,6 @@ export default function LiveClassPage() {
           active: true,
           endsAt: sess.endsAt || joinUntil,
           joinUntil,
-          messages: sess.messages || [],
           scheduledAt: sess.scheduledAt,
         });
         setError(null);
@@ -123,7 +87,7 @@ export default function LiveClassPage() {
           joinCode: sess.joinCode || "",
           active: false,
           endsAt: sess.endsAt || sess.scheduledAt,
-          messages: [],
+          joinUntil: sess.joinUntil,
           scheduledAt: sess.scheduledAt,
         });
         setError(null);
@@ -136,7 +100,7 @@ export default function LiveClassPage() {
         );
       }
     },
-    [user, userId]
+    [user]
   );
 
   const load = useCallback(async () => {
@@ -159,21 +123,16 @@ export default function LiveClassPage() {
         code: string;
         name: string;
         liveSession?: LiveInfo & { active?: boolean } | null;
-        kicked?: boolean;
-        kickReason?: string;
       }[];
       const room = data.classroom as
         | {
             code?: string;
             name?: string;
             liveSession?: LiveInfo | null;
-            kicked?: boolean;
-            kickReason?: string;
           }
         | null
         | undefined;
 
-      // If API empty but local join exists, still show waiting state for that code
       if (!room && !list.length) {
         if (localCodes.length) {
           setSections(
@@ -204,7 +163,7 @@ export default function LiveClassPage() {
       const pick =
         (preferredCode.current &&
           list.find((x) => x.code === preferredCode.current)) ||
-        list.find((x) => x.liveSession?.active && !x.kicked) ||
+        list.find((x) => x.liveSession?.active) ||
         list.find((x) => x.code === data.joined) ||
         room ||
         list[0];
@@ -228,7 +187,6 @@ export default function LiveClassPage() {
     if (!userId) return;
     if (getRole(userId) === "teacher") return;
     void load();
-    // Poll often so live appears soon after teacher starts
     const id = setInterval(() => void load(), 6_000);
     const onVis = () => {
       if (document.visibilityState === "visible") void load();
@@ -253,23 +211,6 @@ export default function LiveClassPage() {
     router.push("/dashboard");
   };
 
-  const send = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!msg.trim() || !classCode || kicked) return;
-    setSending(true);
-    try {
-      await apiPostMessage(
-        classCode,
-        displayName(user) || "Student",
-        msg.trim()
-      );
-      setMsg("");
-      await load();
-    } finally {
-      setSending(false);
-    }
-  };
-
   if (!isSignedIn) {
     return (
       <div className="p-10 text-center text-sm text-slate-500">
@@ -292,38 +233,8 @@ export default function LiveClassPage() {
     );
   }
 
-  if (kicked) {
-    return (
-      <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 shadow-sm">
-          <Ban className="mx-auto h-12 w-12 text-rose-600" />
-          <h1 className="mt-4 text-2xl font-extrabold text-rose-900">
-            Removed from live class
-          </h1>
-          <p className="mt-2 text-sm text-rose-800">
-            {kickReason || "Your teacher kicked you from this session."}
-          </p>
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
-            <Link
-              href="/remarks"
-              className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white"
-            >
-              Open Remarks
-            </Link>
-            <Link
-              href="/dashboard"
-              className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-bold text-rose-800"
-            >
-              Dashboard
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-3xl px-3 py-4 sm:px-6 sm:py-8">
       <div className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">
         <Radio className="h-3.5 w-3.5" /> Live class
       </div>
@@ -349,8 +260,6 @@ export default function LiveClassPage() {
                   onClick={() => {
                     preferredCode.current = s.code;
                     lastAttended.current = null;
-                    kickNotified.current = false;
-                    setKicked(false);
                     void load();
                   }}
                   className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold transition ${
@@ -434,72 +343,26 @@ export default function LiveClassPage() {
       )}
 
       {live?.active && (
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-800">
-              <span>
-                LIVE · {live.title} · {live.subject}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Shield className="h-3.5 w-3.5" /> Join open until{" "}
-                {new Date(
-                  live.joinUntil || live.endsAt || Date.now()
-                ).toLocaleTimeString()}
-              </span>
-            </div>
-            <MeetFrame
-              meetUrl={live.meetUrl || ""}
-              title={`${live.title} · Meet`}
-            />
-            <p className="text-[11px] text-slate-500">
-              Meet link stays available for the full class session (at least 15
-              minutes from start). Tap the green Join button if the window was
-              closed.
-            </p>
+        <div className="mt-6 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-800">
+            <span>
+              LIVE · {live.title} · {live.subject}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Shield className="h-3.5 w-3.5" /> Join open until{" "}
+              {new Date(
+                live.joinUntil || live.endsAt || Date.now()
+              ).toLocaleTimeString()}
+            </span>
           </div>
-
-          <div className="flex min-h-[320px] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 px-3 py-2 text-xs font-bold text-slate-800">
-              Class chat
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto p-3">
-              {(live.messages || []).length === 0 && (
-                <p className="text-center text-[11px] text-slate-400">
-                  No messages yet
-                </p>
-              )}
-              {(live.messages || []).map((m) => (
-                <div
-                  key={m.id}
-                  className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs"
-                >
-                  <div className="font-bold text-slate-800">{m.author}</div>
-                  <div className="text-slate-600">{m.text}</div>
-                  <div className="text-[10px] text-slate-400">
-                    {new Date(m.at).toLocaleTimeString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <form
-              onSubmit={(e) => void send(e)}
-              className="flex gap-2 border-t border-slate-100 p-2"
-            >
-              <input
-                value={msg}
-                onChange={(e) => setMsg(e.target.value)}
-                placeholder="Message the class…"
-                className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-900 placeholder:text-slate-400"
-              />
-              <button
-                type="submit"
-                disabled={sending || !msg.trim()}
-                className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
-              >
-                <Send className="h-3 w-3" /> Send
-              </button>
-            </form>
-          </div>
+          <MeetFrame
+            meetUrl={live.meetUrl || ""}
+            title={`${live.title} · Meet`}
+          />
+          <p className="text-[11px] text-slate-500">
+            Meet link stays available for the full class session (at least 15
+            minutes from start). Use the Join button above to open Google Meet.
+          </p>
         </div>
       )}
     </div>
