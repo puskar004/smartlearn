@@ -206,22 +206,14 @@ function liveLocalPath(code: string) {
 function liveStillValid(live: SharedLive | null): live is SharedLive {
   if (!live) return false;
   const now = Date.now();
-  // Active session: keep Meet joinable for full session + 15 min grace
-  // (teacher ends session explicitly; clock alone must not cut students off early)
+  // Active = teacher still in session → banner + Meet stay visible (no planned end)
   if (live.active) {
-    const joinUntil =
-      live.joinUntil ||
-      live.endsAt ||
-      live.startedAt + 15 * 60_000;
-    const grace = 15 * 60_000;
-    return now <= joinUntil + grace;
+    // Soft safety only if End never clicked (12h from start)
+    const softMax = live.startedAt + 12 * 60 * 60 * 1000;
+    return now <= softMax;
   }
   if (live.scheduledAt && live.scheduledAt > now) return true;
-  if (
-    live.scheduledAt &&
-    live.scheduledAt < now - 60 * 60_000
-  )
-    return false;
+  if (live.scheduledAt && live.scheduledAt < now - 60 * 60_000) return false;
   return false;
 }
 

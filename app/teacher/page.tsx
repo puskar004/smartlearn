@@ -87,7 +87,6 @@ function TeacherInner() {
   const [matSubject, setMatSubject] = useState("Physics");
   const [liveTitle, setLiveTitle] = useState("Doubt clearing hour");
   const [liveSubject, setLiveSubject] = useState("Physics");
-  const [liveMins, setLiveMins] = useState(60);
   const [meetUrl, setMeetUrl] = useState("https://meet.google.com/");
   const [scheduleLocal, setScheduleLocal] = useState("");
   const [copied, setCopied] = useState(false);
@@ -518,7 +517,7 @@ function TeacherInner() {
         activeCode,
         liveTitle,
         liveSubject,
-        liveMins,
+        0,
         meetUrl.trim(),
         scheduledAt
       );
@@ -1051,40 +1050,26 @@ function TeacherInner() {
                       <Radio className="h-4 w-4 text-rose-500" /> Start Google
                       Meet live
                     </h3>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       <input
                         value={liveTitle}
                         onChange={(e) => setLiveTitle(e.target.value)}
                         placeholder="Session title"
-                        className={`${field} sm:col-span-2`}
-                      />
-                      <input
-                        type="number"
-                        min={15}
-                        max={240}
-                        value={liveMins}
-                        onChange={(e) =>
-                          setLiveMins(
-                            Math.max(15, Number(e.target.value) || 60)
-                          )
-                        }
-                        placeholder="Minutes (min 15)"
                         className={field}
-                        title="Session length — students can join for the full session (min 15 min)"
                       />
                       <input
                         value={liveSubject}
                         onChange={(e) => setLiveSubject(e.target.value)}
                         placeholder="Subject"
-                        className={`${field} sm:col-span-2`}
+                        className={field}
                       />
                       <input
                         value={meetUrl}
                         onChange={(e) => setMeetUrl(e.target.value)}
                         placeholder="https://meet.google.com/xxx-xxxx-xxx"
-                        className={`${field} sm:col-span-3`}
+                        className={`${field} sm:col-span-2`}
                       />
-                      <label className="sm:col-span-3 text-[11px] font-semibold text-slate-600">
+                      <label className="sm:col-span-2 text-[11px] font-semibold text-slate-600">
                         Schedule for later (optional)
                         <input
                           type="datetime-local"
@@ -1097,7 +1082,7 @@ function TeacherInner() {
                         type="button"
                         onClick={() => void startLive(false)}
                         disabled={busy}
-                        className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white sm:col-span-2"
+                        className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white"
                       >
                         Go live now
                       </button>
@@ -1120,11 +1105,9 @@ function TeacherInner() {
                       >
                         meet.google.com/new
                       </a>{" "}
-                      → paste link. Students open{" "}
-                      <strong>Live Class</strong> to join Meet. Join stays open
-                      for the <strong>full session</strong> (at least{" "}
-                      <strong>15 minutes</strong>); your Meet link stays until
-                      you click End session.
+                      → paste link. No fixed end time — session runs until you
+                      click <strong>End session</strong>. Students see the LIVE
+                      banner and Meet link the whole time.
                     </p>
                   </div>
                 ) : (
@@ -1135,13 +1118,8 @@ function TeacherInner() {
                           LIVE · {room.liveSession.title}
                         </div>
                         <div className="text-xs text-rose-600">
-                          Students can join until{" "}
-                          {new Date(
-                            room.liveSession.joinUntil ||
-                              room.liveSession.endsAt
-                          ).toLocaleTimeString()}
-                          {" · "}
-                          Meet stays open until you End session
+                          Open-ended · Meet + student banner stay until End
+                          session
                         </div>
                       </div>
                       <button

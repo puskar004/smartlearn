@@ -58,8 +58,7 @@ export default function LiveClassPage() {
 
       const sess = room.liveSession;
       if (sess?.active) {
-        const joinUntil =
-          sess.joinUntil || sess.endsAt || Date.now() + 15 * 60_000;
+        // No planned end — visible while teacher keeps session active
         setLive({
           id: sess.id,
           title: sess.title,
@@ -67,8 +66,8 @@ export default function LiveClassPage() {
           meetUrl: sess.meetUrl,
           joinCode: sess.joinCode,
           active: true,
-          endsAt: sess.endsAt || joinUntil,
-          joinUntil,
+          endsAt: sess.endsAt || Date.now() + 12 * 60 * 60_000,
+          joinUntil: sess.joinUntil || sess.endsAt,
           scheduledAt: sess.scheduledAt,
         });
         setError(null);
@@ -349,10 +348,7 @@ export default function LiveClassPage() {
               LIVE · {live.title} · {live.subject}
             </span>
             <span className="inline-flex items-center gap-1">
-              <Shield className="h-3.5 w-3.5" /> Join open until{" "}
-              {new Date(
-                live.joinUntil || live.endsAt || Date.now()
-              ).toLocaleTimeString()}
+              <Shield className="h-3.5 w-3.5" /> Open until teacher ends
             </span>
           </div>
           <MeetFrame
@@ -360,8 +356,8 @@ export default function LiveClassPage() {
             title={`${live.title} · Meet`}
           />
           <p className="text-[11px] text-slate-500">
-            Meet link stays available for the full class session (at least 15
-            minutes from start). Use the Join button above to open Google Meet.
+            No fixed end time. Banner and Meet stay available while the teacher
+            keeps the session live. Use Join to open Google Meet.
           </p>
         </div>
       )}

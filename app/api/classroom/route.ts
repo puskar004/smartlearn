@@ -534,7 +534,7 @@ export async function POST(req: NextRequest) {
         String(body.code || ""),
         String(body.title || "Live session"),
         String(body.subject || "General"),
-        Number(body.minutes) || 60,
+        0,
         body.meetUrl ? String(body.meetUrl) : undefined,
         scheduledAt
       );

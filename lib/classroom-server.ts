@@ -1257,16 +1257,15 @@ export function materialsForRoom(
   );
 }
 
-/** Min student join window + session length (minutes) */
-export const LIVE_MIN_JOIN_MINUTES = 15;
-export const LIVE_DEFAULT_MINUTES = 60;
+/** Soft safety only if teacher never clicks End (12h). Not a planned class length. */
+export const LIVE_SOFT_MAX_MS = 12 * 60 * 60 * 1000;
 
 export async function startLive(
   teacherId: string,
   code: string,
   title: string,
   subject: string,
-  minutes: number,
+  _minutes: number,
   meetUrl?: string,
   scheduledAt?: number
 ) {
@@ -1274,21 +1273,15 @@ export async function startLive(
     const now = Date.now();
     const start = scheduledAt && scheduledAt > now ? scheduledAt : now;
     const isScheduled = !!(scheduledAt && scheduledAt > now);
-    // At least 15 min so late students can still join; default 60 if unset
-    const mins = Math.max(
-      LIVE_MIN_JOIN_MINUTES,
-      Number(minutes) > 0 ? Number(minutes) : LIVE_DEFAULT_MINUTES
-    );
-    const endsAt = start + mins * 60_000;
-    // Join open for full planned session (and never less than 15 min)
-    const joinUntil = endsAt;
+    // No planned end — runs until teacher Ends. Soft cap only for cleanup.
+    const endsAt = start + LIVE_SOFT_MAX_MS;
     const live: LiveSession = {
       id: `live-${now}`,
       title,
       subject,
       startedAt: start,
       endsAt,
-      joinUntil,
+      joinUntil: endsAt,
       active: !isScheduled,
       joinCode: makeCode(4),
       meetUrl: meetUrl?.trim() || undefined,

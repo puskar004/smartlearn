@@ -72,12 +72,12 @@ export type LiveSession = {
   title: string;
   subject: string;
   startedAt: number;
-  /** Planned session end (soft) — Meet stays open while active until teacher ends */
-  endsAt: number;
   /**
-   * Students may join until this time (at least startedAt + 15 min,
-   * and covers full session while teacher keeps live active).
+   * Soft safety timestamp only — Meet stays open while `active` until teacher
+   * clicks End session (no fixed class length).
    */
+  endsAt: number;
+  /** @deprecated unused — kept for old sessions; join while active */
   joinUntil?: number;
   active: boolean;
   joinCode: string;
