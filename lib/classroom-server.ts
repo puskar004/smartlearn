@@ -556,10 +556,13 @@ export async function createClassroomForTeacher(
 }
 
 export async function listTeacherClassrooms(
-  teacherId: string
+  teacherId: string,
+  opts?: { fresh?: boolean }
 ): Promise<Classroom[]> {
   try {
-    const meta = await getTeacherMeta(teacherId);
+    const meta = await getTeacherMeta(teacherId, {
+      fresh: Boolean(opts?.fresh),
+    });
     const rooms = Array.isArray(meta.classrooms) ? meta.classrooms : [];
     return rooms
       .filter((r) => r && r.code)
@@ -568,6 +571,9 @@ export async function listTeacherClassrooms(
           return {
             ...r,
             code: String(r.code).toUpperCase(),
+            teacherId: r.teacherId || teacherId,
+            // Keep full student snapshots (xp/progress) — do not blank them
+            students: Array.isArray(r.students) ? r.students : [],
             materials: materialsForRoom(meta, r.code, r),
           };
         } catch {
@@ -575,6 +581,7 @@ export async function listTeacherClassrooms(
             ...r,
             code: String(r.code || "").toUpperCase(),
             materials: [] as TeacherMaterial[],
+            students: Array.isArray(r.students) ? r.students : [],
           };
         }
       });
@@ -616,16 +623,19 @@ async function updateClassroom(
   code: string,
   updater: (c: Classroom) => Classroom
 ): Promise<Classroom | null> {
-  const client = await clerkClient();
-  const user = await client.users.getUser(teacherId);
-  const meta = metaOf(user);
-  const rooms = meta.classrooms || [];
+  // Always force fresh meta for live/roster writes (stale cache was dropping students)
+  clearClerkWriteCooldown(teacherId);
+  let meta = await getTeacherMeta(teacherId, { fresh: true });
+  const rooms = [...(meta.classrooms || [])];
   const idx = rooms.findIndex((c) => c.code === code.toUpperCase());
   if (idx < 0) return null;
-  const next = updater({ ...rooms[idx] });
-  const classrooms = [...rooms];
-  classrooms[idx] = next;
-  await saveMeta(teacherId, { ...meta, role: "teacher", classrooms });
+  const next = updater({ ...rooms[idx], teacherId });
+  rooms[idx] = next;
+  await saveMeta(
+    teacherId,
+    { ...meta, role: "teacher", classrooms: rooms },
+    { force: true }
+  );
   return next;
 }
 
@@ -665,29 +675,36 @@ export async function deleteClassroom(
   });
 
   try {
-    const { unregisterClassCode } = await import("@/lib/class-code-index");
+    const { unregisterClassCode, markClassDeleted, publishClassLive } =
+      await import("@/lib/class-code-index");
+    await publishClassLive(normalized, teacherId, null);
+    await markClassDeleted(normalized);
     await unregisterClassCode(normalized);
   } catch {
     // ignore
   }
 
+  // Remove class from every joined student's Clerk meta + map
   for (const s of room.students || []) {
     try {
+      clearClerkWriteCooldown(s.studentId);
       const st = await client.users.getUser(s.studentId);
       const sm = metaOf(st);
       const next = codesOf(sm).filter((c) => c !== normalized);
-      if (
-        sm.joinedClassCode === normalized ||
-        (sm.joinedClassCodes || []).includes(normalized)
-      ) {
-        await saveMeta(s.studentId, {
+      const map = { ...(sm.joinedClassMap || {}) };
+      delete map[normalized];
+      await saveMeta(
+        s.studentId,
+        {
           ...sm,
           joinedClassCode: next[0] || null,
           joinedClassCodes: next,
-        });
-      }
+          joinedClassMap: map,
+        },
+        { force: true }
+      );
     } catch {
-      // non-fatal
+      // non-fatal — student client also drops via deleted-codes list
     }
   }
 

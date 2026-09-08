@@ -26,7 +26,12 @@ import {
 } from "@/lib/user-store";
 import { cn } from "@/lib/utils";
 import { displayName } from "@/lib/display-name";
-import { getJoinedClasses, getRole, setRole } from "@/lib/teacher-store";
+import {
+  dropJoinedClasses,
+  getJoinedClasses,
+  getRole,
+  setRole,
+} from "@/lib/teacher-store";
 import { emitRoleChanged } from "@/lib/role-events";
 
 const tiles = [
@@ -125,6 +130,9 @@ export default function DashboardPage() {
           credentials: "same-origin",
         });
         const data = await res.json();
+        if (Array.isArray(data.deleted) && data.deleted.length) {
+          dropJoinedClasses(userId, data.deleted as string[]);
+        }
         const rooms = (data.classrooms ||
           (data.classroom ? [data.classroom] : [])) as {
           code: string;

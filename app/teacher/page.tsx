@@ -126,10 +126,11 @@ function TeacherInner() {
     setError(msg);
   };
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     if (!userId) return;
     try {
-      const list = await apiListMyClasses();
+      // force=true bypasses server cache so student XP/list updates
+      const list = await apiListMyClasses({ fresh: force });
       // NEVER wipe existing classes on empty/rate-limit response
       if (list.length) {
         persistClasses(list);
@@ -140,13 +141,22 @@ function TeacherInner() {
           setRoom(hit);
           return next;
         });
+        setMatNote(
+          force
+            ? `Refreshed · ${list.reduce((n, c) => n + (c.students?.length || 0), 0)} student(s) across classes`
+            : null
+        );
+      } else if (force) {
+        setMatNote("No update from server (busy). Showing last saved roster.");
       }
       setError(null);
     } catch {
       // keep local cache; never show rate-limit banner
       setError(null);
+      if (force) setMatNote("Refresh delayed — try again in a few seconds.");
     } finally {
       setLoading(false);
+      setBusy(false);
     }
   }, [userId, persistClasses]);
 
@@ -202,13 +212,13 @@ function TeacherInner() {
     }
   }, [userId]);
 
-  // Live attendance: gentle poll (Clerk-friendly) while on live/attendance
+  // Live attendance + students tab: poll with fresh roster
   useEffect(() => {
     if (!userId) return;
-    if (tab !== "live" && tab !== "attendance") return;
+    if (tab !== "live" && tab !== "attendance" && tab !== "students") return;
     const id = setInterval(() => {
-      void refresh();
-    }, 25_000);
+      void refresh(true);
+    }, 20_000);
     return () => clearInterval(id);
   }, [userId, tab, refresh]);
 
@@ -605,11 +615,14 @@ function TeacherInner() {
         </button>
         <button
           type="button"
-          onClick={() => void refresh()}
+          onClick={() => {
+            setBusy(true);
+            void refresh(true);
+          }}
           disabled={busy || loading}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
         >
-          Refresh
+          {busy ? "Refreshing…" : "Refresh roster"}
         </button>
         {classes.map((c) => (
           <button

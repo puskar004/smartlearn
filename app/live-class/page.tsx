@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Loader2, Radio, Send, Shield, Ban, RefreshCw } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
 import {
+  dropJoinedClasses,
   getJoinedClass,
   getJoinedClasses,
   getRole,
@@ -144,6 +145,9 @@ export default function LiveClassPage() {
         credentials: "same-origin",
       });
       const data = await res.json();
+      if (Array.isArray(data.deleted) && data.deleted.length) {
+        dropJoinedClasses(userId, data.deleted as string[]);
+      }
       const list = (data.classrooms || []) as {
         code: string;
         name: string;

@@ -136,6 +136,34 @@ export type JoinedRoomMeta = {
   teacherName?: string;
 };
 
+/** Drop codes teacher deleted (server returns deleted[]) */
+export function dropJoinedClasses(userId: string, codes: string[]) {
+  if (!codes.length) return getJoinedClasses(userId);
+  const drop = new Set(codes.map((c) => c.toUpperCase()));
+  const next = getJoinedClasses(userId).filter((c) => !drop.has(c));
+  setJoinedClasses(userId, next);
+  try {
+    const key = ROOM_META + userId;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, JoinedRoomMeta>;
+      for (const c of drop) delete map[c];
+      localStorage.setItem(key, JSON.stringify(map));
+    }
+  } catch {
+    // ignore
+  }
+  for (const c of drop) {
+    try {
+      localStorage.removeItem(`sl_class_mats_v1_${c}`);
+      localStorage.removeItem(`sl_live_alert_${c}`);
+    } catch {
+      // ignore
+    }
+  }
+  return next;
+}
+
 export function saveJoinedRoomMeta(userId: string, room: JoinedRoomMeta) {
   if (typeof window === "undefined") return;
   try {
@@ -236,8 +264,11 @@ export async function apiCreateClassroom(name: string): Promise<Classroom> {
   return data.classroom as Classroom;
 }
 
-export async function apiListMyClasses(): Promise<Classroom[]> {
-  const res = await fetch("/api/classroom?action=mine");
+export async function apiListMyClasses(
+  opts?: { fresh?: boolean }
+): Promise<Classroom[]> {
+  const q = opts?.fresh ? "?action=mine&fresh=1" : "?action=mine";
+  const res = await fetch(`/api/classroom${q}`, { cache: "no-store" });
   const data = await readJson(res);
   // Soft-fail: never throw hard empty — caller keeps cache
   if (res.status === 429) return [];

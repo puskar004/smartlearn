@@ -7,8 +7,8 @@ import type { SmartlearnMeta } from "@/lib/classroom-types";
 type Entry = { meta: SmartlearnMeta; at: number; publicMetadata?: Record<string, unknown> };
 
 const store = new Map<string, Entry>();
-const TTL_MS = 300_000; // 5 minutes — fewer Clerk getUser hits
-const WRITE_COOLDOWN_MS = 15_000;
+const TTL_MS = 90_000; // 90s — balance rate limits vs fresh roster
+const WRITE_COOLDOWN_MS = 6_000;
 const lastWrite = new Map<string, number>();
 
 export function peekMeta(userId: string): SmartlearnMeta | null {

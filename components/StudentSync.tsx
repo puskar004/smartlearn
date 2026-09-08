@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import {
   apiSyncStudent,
-  getJoinedClass,
+  dropJoinedClasses,
   getJoinedClasses,
   setJoinedClasses,
 } from "@/lib/teacher-store";
@@ -59,11 +59,17 @@ export default function StudentSync() {
 
     const pullServerAlerts = async () => {
       try {
-        const res = await fetch("/api/classroom?action=joined");
+        const local = getJoinedClasses(userId);
+        const q = new URLSearchParams({ action: "joined" });
+        if (local.length) q.set("codes", local.join(","));
+        const res = await fetch(`/api/classroom?${q}`, { cache: "no-store" });
         const data = await res.json();
+        const deleted = (data.deleted || []) as string[];
+        if (deleted.length) dropJoinedClasses(userId, deleted);
         const codes = (data.codes ||
           (data.joined ? [data.joined] : [])) as string[];
         if (codes.length) setJoinedClasses(userId, codes);
+        else if (deleted.length) setJoinedClasses(userId, []);
 
         const rooms = (data.classrooms ||
           (data.classroom ? [data.classroom] : [])) as {
@@ -154,16 +160,16 @@ export default function StudentSync() {
       void pullServerAlerts();
     };
 
-    // Local alerts immediately; server sync delayed + sparse
+    // Sync progress to teacher soon after load (so XP ≠ 0 on teacher panel)
     pullLocalAlerts();
     const first = window.setTimeout(() => {
       sync();
       void pullServerAlerts();
-    }, 15_000);
+    }, 3_000);
     const id = setInterval(() => {
       sync();
       tick();
-    }, 5 * 60_000);
+    }, 90_000);
     window.addEventListener("storage", pullLocalAlerts);
     return () => {
       window.clearTimeout(first);

@@ -65,7 +65,8 @@ export async function GET(req: NextRequest) {
 
     if (action === "mine") {
       try {
-        const rooms = await listTeacherClassrooms(userId);
+        const fresh = sp.get("fresh") === "1" || sp.get("fresh") === "true";
+        const rooms = await listTeacherClassrooms(userId, { fresh });
         // Slim payload — avoid huge student/log blobs crashing the response
         const safe = (rooms || []).map((r) => ({
           code: r.code,
@@ -245,13 +246,32 @@ export async function GET(req: NextRequest) {
         // ignore
       }
 
+      // Drop teacher-deleted classes from response
+      let deleted: string[] = [];
+      try {
+        const { getDeletedCodes } = await import("@/lib/class-code-index");
+        const check = [
+          ...classrooms.map((c) => c.code),
+          ...extraCodes,
+          ...(joined ? [joined] : []),
+        ];
+        deleted = await getDeletedCodes(check);
+        if (deleted.length) {
+          const del = new Set(deleted);
+          classrooms = classrooms.filter((c) => !del.has(c.code));
+        }
+      } catch {
+        // ignore
+      }
+
       const codes = classrooms.map((c) => c.code);
       if (!classrooms.length) {
         return NextResponse.json({
           ok: true,
-          joined: joined || extraCodes[0] || null,
-          codes: extraCodes,
+          joined: null,
+          codes: [],
           classrooms: [],
+          deleted,
         });
       }
       const primary =
@@ -268,6 +288,7 @@ export async function GET(req: NextRequest) {
         classrooms,
         kicked: Boolean(primary?.kicked),
         kickReason: primary?.kickReason,
+        deleted,
       });
     }
 

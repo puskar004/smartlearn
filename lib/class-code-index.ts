@@ -32,6 +32,10 @@ type Index = {
   matsUrls?: Record<string, string>;
   /** CODE → current live session (cross-instance) */
   live?: Record<string, SharedLive | null>;
+  /** CODE → dedicated tiny live JSON URL (more reliable than full index) */
+  liveUrls?: Record<string, string>;
+  /** Soft-deleted codes (students should drop these) */
+  deleted?: Record<string, number>;
   updatedAt: number;
   remoteUrl?: string;
 };
@@ -190,6 +194,26 @@ export async function unregisterClassCode(code: string) {
   await persist(idx, true);
 }
 
+function liveLocalPath(code: string) {
+  const dir = process.env.VERCEL
+    ? "/tmp"
+    : path.join(process.cwd(), ".data");
+  return path.join(dir, `smartlearn-live-${code.toUpperCase()}.json`);
+}
+
+function liveStillValid(live: SharedLive | null): live is SharedLive {
+  if (!live) return false;
+  const now = Date.now();
+  if (live.active && live.endsAt && live.endsAt < now - 30 * 60_000) return false;
+  if (
+    !live.active &&
+    live.scheduledAt &&
+    live.scheduledAt < now - 60 * 60_000
+  )
+    return false;
+  return Boolean(live.active || (live.scheduledAt && live.scheduledAt > now));
+}
+
 /** Teacher starts/ends live → students see it on any server */
 export async function publishClassLive(
   code: string,
@@ -197,47 +221,142 @@ export async function publishClassLive(
   live: SharedLive | null
 ) {
   const c = code.toUpperCase();
+  const payload: SharedLive | null =
+    live &&
+    (live.active ||
+      (live.scheduledAt != null && live.scheduledAt > Date.now()))
+      ? {
+          id: live.id,
+          title: live.title,
+          subject: live.subject,
+          meetUrl: live.meetUrl,
+          joinCode: live.joinCode,
+          active: Boolean(live.active),
+          startedAt: live.startedAt,
+          endsAt: live.endsAt,
+          scheduledAt: live.scheduledAt,
+          teacherName: live.teacherName,
+          className: live.className,
+        }
+      : null;
+
+  // 1) Always write tiny local live file (same instance)
+  try {
+    await fs.mkdir(path.dirname(liveLocalPath(c)), { recursive: true });
+    if (payload) {
+      await fs.writeFile(liveLocalPath(c), JSON.stringify(payload), "utf8");
+    } else {
+      try {
+        await fs.unlink(liveLocalPath(c));
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2) Dedicated remote JSON (small — more reliable than full index)
+  let liveUrl: string | null = null;
+  if (payload) {
+    try {
+      liveUrl = await uploadBufferRemote(
+        Buffer.from(JSON.stringify(payload), "utf8"),
+        `live-${c}-${Date.now()}.json`,
+        "application/json"
+      );
+    } catch {
+      liveUrl = null;
+    }
+  }
+
+  // 3) Merge into shared index
   const idx = await loadIndex(true);
   idx.codes[c] = teacherId || idx.codes[c] || "";
   if (!idx.live) idx.live = {};
-  if (!live || (!live.active && !(live.scheduledAt && live.scheduledAt > Date.now()))) {
+  if (!idx.liveUrls) idx.liveUrls = {};
+  if (!payload) {
     delete idx.live[c];
+    delete idx.liveUrls[c];
   } else {
-    idx.live[c] = {
-      id: live.id,
-      title: live.title,
-      subject: live.subject,
-      meetUrl: live.meetUrl,
-      joinCode: live.joinCode,
-      active: Boolean(live.active),
-      startedAt: live.startedAt,
-      endsAt: live.endsAt,
-      scheduledAt: live.scheduledAt,
-      teacherName: live.teacherName,
-      className: live.className,
-    };
+    idx.live[c] = payload;
+    if (liveUrl) idx.liveUrls[c] = liveUrl;
   }
   await persist(idx, true);
 }
 
 export async function getClassLive(code: string): Promise<SharedLive | null> {
   const c = code.toUpperCase();
+
+  // A) Local file first (same server / warm instance)
+  try {
+    const raw = await fs.readFile(liveLocalPath(c), "utf8");
+    const j = JSON.parse(raw) as SharedLive;
+    if (liveStillValid(j)) return j;
+  } catch {
+    // ignore
+  }
+
+  // B) Dedicated remote URL from index pointer
+  try {
+    const idx = await loadIndex(true);
+    const url = idx.liveUrls?.[c];
+    if (url?.startsWith("http")) {
+      const res = await fetch(
+        url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(),
+        { cache: "no-store", headers: { Accept: "application/json" } }
+      );
+      if (res.ok) {
+        const j = (await res.json()) as SharedLive;
+        if (liveStillValid(j)) {
+          // warm local
+          try {
+            await fs.writeFile(liveLocalPath(c), JSON.stringify(j), "utf8");
+          } catch {
+            // ignore
+          }
+          return j;
+        }
+      }
+    }
+    const live = idx.live?.[c] || null;
+    if (liveStillValid(live)) return live;
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+/** Mark class deleted so students drop it on next poll */
+export async function markClassDeleted(code: string) {
+  const c = code.toUpperCase();
   const idx = await loadIndex(true);
-  const live = idx.live?.[c] || null;
-  if (!live) return null;
-  const now = Date.now();
-  // Expired active session
-  if (live.active && live.endsAt && live.endsAt < now - 30 * 60_000) {
-    return null;
+  if (!idx.deleted) idx.deleted = {};
+  idx.deleted[c] = Date.now();
+  delete idx.codes[c];
+  if (idx.live) delete idx.live[c];
+  if (idx.liveUrls) delete idx.liveUrls[c];
+  if (idx.materials) delete idx.materials[c];
+  await persist(idx, true);
+  try {
+    await fs.unlink(liveLocalPath(c));
+  } catch {
+    // ignore
   }
-  if (
-    !live.active &&
-    live.scheduledAt &&
-    live.scheduledAt < now - 60 * 60_000
-  ) {
-    return null;
+}
+
+export async function getDeletedCodes(codes: string[]): Promise<string[]> {
+  if (!codes.length) return [];
+  const idx = await loadIndex(true);
+  const del = idx.deleted || {};
+  const out: string[] = [];
+  for (const raw of codes) {
+    const c = raw.toUpperCase();
+    if (del[c]) out.push(c);
+    // also deleted if code no longer registered and was once known empty
   }
-  return live;
+  return out;
 }
 
 export async function getClassLiveMany(
