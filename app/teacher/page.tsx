@@ -124,17 +124,59 @@ function TeacherInner() {
   const refresh = useCallback(async (force = false) => {
     if (!userId) return;
     try {
-      // force=true bypasses server cache so student XP/list updates
       const list = await apiListMyClasses({ fresh: force });
       // NEVER wipe existing classes on empty/rate-limit response
       if (list.length) {
-        persistClasses(list);
-        setActiveCode((prev) => {
-          const next =
-            prev && list.some((c) => c.code === prev) ? prev : list[0].code;
-          const hit = list.find((c) => c.code === next) || list[0];
-          setRoom(hit);
-          return next;
+        // Preserve active live on this device if server lag drops it
+        setClasses((prev) => {
+          const merged = list.map((server) => {
+            const local = prev.find((p) => p.code === server.code);
+            if (
+              local?.liveSession?.active &&
+              !server.liveSession?.active
+            ) {
+              return {
+                ...server,
+                liveSession: local.liveSession,
+                attendanceLog:
+                  (server.attendanceLog?.length || 0) >=
+                  (local.attendanceLog?.length || 0)
+                    ? server.attendanceLog
+                    : local.attendanceLog || server.attendanceLog,
+              };
+            }
+            // Prefer server attendees when both active
+            if (
+              local?.liveSession?.active &&
+              server.liveSession?.active
+            ) {
+              return {
+                ...server,
+                liveSession: {
+                  ...server.liveSession,
+                  meetUrl:
+                    server.liveSession.meetUrl || local.liveSession.meetUrl,
+                  attendees:
+                    (server.liveSession.attendees?.length || 0) >=
+                    (local.liveSession.attendees?.length || 0)
+                      ? server.liveSession.attendees
+                      : local.liveSession.attendees,
+                },
+              };
+            }
+            return server;
+          });
+          persistClasses(merged);
+          setActiveCode((prevCode) => {
+            const next =
+              prevCode && merged.some((c) => c.code === prevCode)
+                ? prevCode
+                : merged[0].code;
+            const hit = merged.find((c) => c.code === next) || merged[0];
+            setRoom(hit);
+            return next;
+          });
+          return merged;
         });
         setMatNote(
           force
@@ -146,7 +188,6 @@ function TeacherInner() {
       }
       setError(null);
     } catch {
-      // keep local cache; never show rate-limit banner
       setError(null);
       if (force) setMatNote("Refresh delayed — try again in a few seconds.");
     } finally {
@@ -207,13 +248,15 @@ function TeacherInner() {
     }
   }, [userId]);
 
-  // Live attendance + students tab: poll with fresh roster
+  // Poll roster gently — never wipe live UI (refresh merges active live)
   useEffect(() => {
     if (!userId) return;
     if (tab !== "live" && tab !== "attendance" && tab !== "students") return;
+    // Live tab: slower soft refresh so Meet card stays stable
+    const ms = tab === "live" ? 45_000 : 20_000;
     const id = setInterval(() => {
-      void refresh(true);
-    }, 20_000);
+      void refresh(tab !== "live");
+    }, ms);
     return () => clearInterval(id);
   }, [userId, tab, refresh]);
 
@@ -522,7 +565,30 @@ function TeacherInner() {
         scheduledAt
       );
       if (!data.ok) throw new Error(data.error || "Could not start live");
-      if (data.classroom) setRoom(data.classroom);
+      if (data.classroom) {
+        const liveRoom = data.classroom as Classroom;
+        setRoom(liveRoom);
+        setClasses((prev) => {
+          const next = prev.map((c) =>
+            c.code === activeCode ? liveRoom : c
+          );
+          // If class missing from list, still keep live room
+          if (!next.some((c) => c.code === activeCode)) {
+            next.unshift(liveRoom);
+          }
+          try {
+            if (userId) {
+              localStorage.setItem(
+                `sl_teacher_classes_${userId}`,
+                JSON.stringify(next)
+              );
+            }
+          } catch {
+            // ignore
+          }
+          return next;
+        });
+      }
       // Notify joined students via local broadcast key they poll
       try {
         localStorage.setItem(
@@ -537,6 +603,7 @@ function TeacherInner() {
       } catch {
         // ignore
       }
+      // Don't force-refresh immediately — that was wiping live before Clerk caught up
       router.replace("/teacher?tab=live");
     } catch (err) {
       quietError(err instanceof Error ? err.message : "Live start failed");

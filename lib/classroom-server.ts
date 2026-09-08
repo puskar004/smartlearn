@@ -371,6 +371,45 @@ export async function findClassroomByCode(
   return null;
 }
 
+/** Prefer active live from cache when Clerk lag/rate-limit dropped it */
+function mergeLiveFromCache(
+  clerkMeta: SmartlearnMeta,
+  cached: SmartlearnMeta | null
+): SmartlearnMeta {
+  if (!cached?.classrooms?.length) return clerkMeta;
+  const cacheByCode = new Map(
+    (cached.classrooms || []).map((r) => [r.code.toUpperCase(), r])
+  );
+  const rooms = (clerkMeta.classrooms || []).map((room) => {
+    const code = room.code.toUpperCase();
+    const prev = cacheByCode.get(code);
+    if (room.liveSession?.active) return room;
+    if (prev?.liveSession?.active) {
+      return {
+        ...room,
+        liveSession: prev.liveSession,
+        // keep newer attendees if clerk has them
+        attendanceLog:
+          (room.attendanceLog?.length || 0) >= (prev.attendanceLog?.length || 0)
+            ? room.attendanceLog
+            : prev.attendanceLog || room.attendanceLog,
+        students:
+          (room.students?.length || 0) >= (prev.students?.length || 0)
+            ? room.students
+            : prev.students || room.students,
+      };
+    }
+    return room;
+  });
+  // Include cache-only rooms that clerk omitted (shouldn't happen often)
+  for (const [code, prev] of cacheByCode) {
+    if (!rooms.some((r) => r.code.toUpperCase() === code) && prev.liveSession?.active) {
+      rooms.push(prev);
+    }
+  }
+  return { ...clerkMeta, classrooms: rooms };
+}
+
 export async function getTeacherMeta(
   userId: string,
   opts?: { fresh?: boolean }
@@ -380,10 +419,14 @@ export async function getTeacherMeta(
     if (hit) return hit;
   }
 
+  const cached = peekMeta(userId) || getCachedMeta(userId, 30 * 60_000);
+
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(userId);
-    const meta = metaOf(user);
+    let meta = metaOf(user);
+    // Never let a lagging Clerk read wipe an active live session from memory
+    meta = mergeLiveFromCache(meta, cached);
     setCachedMeta(
       userId,
       meta,
@@ -391,8 +434,7 @@ export async function getTeacherMeta(
     );
     return meta;
   } catch (e) {
-    const stale = peekMeta(userId) || getCachedMeta(userId, 30 * 60_000);
-    if (stale) return stale;
+    if (cached) return cached;
     if (isRateLimitError(e)) {
       return { classrooms: [], materialBank: {}, role: "teacher" };
     }
@@ -568,7 +610,7 @@ export async function listTeacherClassrooms(
       fresh: Boolean(opts?.fresh),
     });
     const rooms = Array.isArray(meta.classrooms) ? meta.classrooms : [];
-    return rooms
+    const mapped = rooms
       .filter((r) => r && r.code)
       .map((r) => {
         try {
@@ -576,22 +618,63 @@ export async function listTeacherClassrooms(
             ...r,
             code: String(r.code).toUpperCase(),
             teacherId: r.teacherId || teacherId,
-            // Keep full student snapshots (xp/progress) — do not blank them
             students: Array.isArray(r.students) ? r.students : [],
             materials: materialsForRoom(meta, r.code, r),
-          };
+            liveSession: r.liveSession?.active ? r.liveSession : r.liveSession,
+          } as Classroom;
         } catch {
           return {
             ...r,
             code: String(r.code || "").toUpperCase(),
             materials: [] as TeacherMaterial[],
             students: Array.isArray(r.students) ? r.students : [],
-          };
+          } as Classroom;
         }
       });
+
+    // Overlay shared live index so teacher panel matches what students see
+    try {
+      const { getClassLive } = await import("@/lib/class-code-index");
+      return await Promise.all(
+        mapped.map(async (room) => {
+          const shared = await getClassLive(room.code);
+          if (shared?.active) {
+            return {
+              ...room,
+              liveSession: {
+                id: shared.id,
+                title: shared.title,
+                subject: shared.subject,
+                meetUrl: shared.meetUrl || room.liveSession?.meetUrl,
+                joinCode: shared.joinCode || room.liveSession?.joinCode || "",
+                active: true,
+                startedAt: shared.startedAt,
+                endsAt: shared.endsAt,
+                joinUntil: shared.joinUntil || shared.endsAt,
+                scheduledAt: shared.scheduledAt,
+                messages: room.liveSession?.messages || [],
+                attendees: room.liveSession?.attendees || [],
+                kickedIds: room.liveSession?.kickedIds,
+                kickReasons: room.liveSession?.kickReasons,
+              },
+            };
+          }
+          // Shared says no live — only clear if Clerk also has no active live
+          if (!shared && room.liveSession?.active) {
+            // Keep Clerk/cache active live (shared read miss should not kill teacher UI)
+            return room;
+          }
+          if (shared === null && !room.liveSession?.active) {
+            return { ...room, liveSession: null };
+          }
+          return room;
+        })
+      );
+    } catch {
+      return mapped;
+    }
   } catch (e) {
     console.error("listTeacherClassrooms", e);
-    // Stale cache if Clerk rate-limited
     const stale = peekMeta(teacherId);
     if (stale?.classrooms?.length) {
       return stale.classrooms.filter((r) => r && r.code);
