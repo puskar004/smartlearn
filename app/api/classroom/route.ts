@@ -215,13 +215,30 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Overlay shared live on every classroom (source of truth for multi-instance)
+      // Overlay shared live — or clear stale Meet if shared says ended
       try {
         const { getClassLive } = await import("@/lib/class-code-index");
         classrooms = await Promise.all(
           classrooms.map(async (room) => {
             const live = await getClassLive(room.code);
-            if (!live) return room;
+            if (!live) {
+              // Shared index has no active live → hide Meet even if Clerk lag
+              if (room.liveSession?.active) {
+                return {
+                  ...room,
+                  liveSession: room.liveSession
+                    ? { ...room.liveSession, active: false, meetUrl: undefined }
+                    : null,
+                };
+              }
+              return room;
+            }
+            if (!live.active) {
+              return {
+                ...room,
+                liveSession: null,
+              };
+            }
             return {
               ...room,
               name: live.className || room.name,
@@ -232,15 +249,13 @@ export async function GET(req: NextRequest) {
                 subject: live.subject,
                 meetUrl: live.meetUrl,
                 joinCode: live.joinCode,
-                active: live.active,
+                active: true,
                 startedAt: live.startedAt,
                 endsAt: live.endsAt,
                 joinUntil: live.joinUntil || live.endsAt,
                 scheduledAt: live.scheduledAt,
                 messages: room.liveSession?.messages || [],
                 attendees: room.liveSession?.attendees || [],
-                kickedIds: room.liveSession?.kickedIds,
-                kickReasons: room.liveSession?.kickReasons,
               },
             };
           })
@@ -545,8 +560,27 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "endLive") {
-      const room = await endLive(userId, String(body.code || ""));
-      return NextResponse.json({ ok: true, classroom: room });
+      const code = String(body.code || "").trim().toUpperCase();
+      const room = await endLive(userId, code);
+      if (!room) {
+        // Still clear shared live so students stop seeing Meet
+        try {
+          const { publishClassLive } = await import("@/lib/class-code-index");
+          await publishClassLive(code, userId, null);
+        } catch {
+          // ignore
+        }
+        return NextResponse.json({
+          ok: true,
+          classroom: null,
+          ended: true,
+        });
+      }
+      return NextResponse.json({
+        ok: true,
+        classroom: { ...room, liveSession: null },
+        ended: true,
+      });
     }
 
     if (action === "attend") {

@@ -952,8 +952,20 @@ function TeacherInner() {
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
                     Students are marked present when they open Live Class during
-                    an active session.
+                    an active session. Use{" "}
+                    <strong>Refresh roster</strong> to load the latest list.
                   </p>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setBusy(true);
+                      void refresh(true);
+                    }}
+                    className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-800"
+                  >
+                    {busy ? "Refreshing…" : "Refresh attendance"}
+                  </button>
                 </div>
                 {room.liveSession?.active && (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4">
@@ -964,7 +976,7 @@ function TeacherInner() {
                     <ul className="mt-3 space-y-1.5">
                       {(room.liveSession.attendees || []).length === 0 && (
                         <li className="text-xs text-rose-600/80">
-                          No one joined yet.
+                          No one joined yet — ask students to open Live Class.
                         </li>
                       )}
                       {(room.liveSession.attendees || []).map((a) => (
@@ -990,7 +1002,9 @@ function TeacherInner() {
                   {(room.attendanceLog || []).length === 0 &&
                     !room.liveSession?.active && (
                       <li className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-500">
-                        No sessions yet. Start a live class to track who joins.
+                        No sessions yet. Start a live class; when students open
+                        Live Class they appear here. Then End session to close
+                        the log.
                       </li>
                     )}
                   {(room.attendanceLog || []).map((rec) => (
@@ -1124,14 +1138,59 @@ function TeacherInner() {
                       </div>
                       <button
                         type="button"
-                        onClick={() =>
-                          void apiEndLive(room.code).then((d) => {
-                            if (d.classroom) setRoom(d.classroom);
-                          })
-                        }
-                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white"
+                        disabled={busy}
+                        onClick={() => {
+                          void (async () => {
+                            setBusy(true);
+                            try {
+                              const data = await apiEndLive(room.code);
+                              const next = (data.classroom || {
+                                ...room,
+                                liveSession: null,
+                              }) as Classroom;
+                              const cleared = {
+                                ...next,
+                                liveSession: null,
+                              };
+                              setRoom(cleared);
+                              setClasses((prev) =>
+                                prev.map((c) =>
+                                  c.code === room.code ? cleared : c
+                                )
+                              );
+                              try {
+                                localStorage.removeItem(
+                                  `sl_live_alert_${room.code}`
+                                );
+                                if (userId) {
+                                  localStorage.setItem(
+                                    `sl_teacher_classes_${userId}`,
+                                    JSON.stringify(
+                                      (classes || []).map((c) =>
+                                        c.code === room.code ? cleared : c
+                                      )
+                                    )
+                                  );
+                                }
+                              } catch {
+                                // ignore
+                              }
+                              setMatNote("Live session ended.");
+                              void refresh(true);
+                            } catch (e) {
+                              quietError(
+                                e instanceof Error
+                                  ? e.message
+                                  : "Could not end session"
+                              );
+                            } finally {
+                              setBusy(false);
+                            }
+                          })();
+                        }}
+                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
                       >
-                        End session
+                        {busy ? "Ending…" : "End session"}
                       </button>
                     </div>
                     {room.liveSession.meetUrl && (

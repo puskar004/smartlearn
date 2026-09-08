@@ -487,8 +487,9 @@ export async function apiEndLive(code: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "endLive", code }),
+    cache: "no-store",
   });
-  return res.json();
+  return res.json().catch(() => ({ ok: false, error: "End failed" }));
 }
 
 export async function apiPostMessage(

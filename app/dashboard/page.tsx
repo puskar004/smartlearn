@@ -142,8 +142,10 @@ export default function DashboardPage() {
             subject?: string;
           } | null;
         }[];
-        const live = rooms.find((r) => r.liveSession?.active);
-        if (live?.liveSession) {
+        const live = rooms.find(
+          (r) => r.liveSession?.active && r.liveSession
+        );
+        if (live?.liveSession?.active) {
           setLiveBanner({
             title: live.liveSession.title || "Live class",
             code: live.code,

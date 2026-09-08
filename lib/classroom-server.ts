@@ -79,34 +79,35 @@ function lightClassroom(c: Classroom): Classroom {
           ? s.recentMistakes.slice(0, 2)
           : [],
       })),
-      liveSession: sess
-        ? {
-            id: String(sess.id || ""),
-            title: String(sess.title || "Live").slice(0, 120),
-            subject: String(sess.subject || "").slice(0, 60),
-            startedAt: Number(sess.startedAt) || Date.now(),
-            endsAt: Number(sess.endsAt) || Date.now(),
-            joinUntil: sess.joinUntil
-              ? Number(sess.joinUntil)
-              : Number(sess.endsAt) || Date.now(),
-            active: Boolean(sess.active),
-            joinCode: String(sess.joinCode || "").slice(0, 12),
-            meetUrl: sess.meetUrl
-              ? String(sess.meetUrl).slice(0, 300)
-              : undefined,
-            scheduledAt: sess.scheduledAt,
-            messages: Array.isArray(sess.messages)
-              ? sess.messages.slice(-30)
-              : [],
-            attendees: Array.isArray(sess.attendees)
-              ? sess.attendees.slice(0, 60)
-              : [],
-            kickedIds: Array.isArray(sess.kickedIds)
-              ? sess.kickedIds.slice(0, 40)
-              : [],
-            kickReasons: sess.kickReasons || {},
-          }
-        : null,
+      liveSession:
+        sess && sess.active
+          ? {
+              id: String(sess.id || ""),
+              title: String(sess.title || "Live").slice(0, 120),
+              subject: String(sess.subject || "").slice(0, 60),
+              startedAt: Number(sess.startedAt) || Date.now(),
+              endsAt: Number(sess.endsAt) || Date.now(),
+              joinUntil: sess.joinUntil
+                ? Number(sess.joinUntil)
+                : Number(sess.endsAt) || Date.now(),
+              active: true,
+              joinCode: String(sess.joinCode || "").slice(0, 12),
+              meetUrl: sess.meetUrl
+                ? String(sess.meetUrl).slice(0, 300)
+                : undefined,
+              scheduledAt: sess.scheduledAt,
+              messages: Array.isArray(sess.messages)
+                ? sess.messages.slice(-30)
+                : [],
+              attendees: Array.isArray(sess.attendees)
+                ? sess.attendees.slice(0, 60)
+                : [],
+              kickedIds: Array.isArray(sess.kickedIds)
+                ? sess.kickedIds.slice(0, 40)
+                : [],
+              kickReasons: sess.kickReasons || {},
+            }
+          : null,
     };
   } catch {
     return {
@@ -937,27 +938,46 @@ export async function listStudentClassrooms(userId: string): Promise<
       }
     }
 
-    // Prefer shared live index (works across Vercel instances) then Clerk room
-    let sess = found.classroom.liveSession;
+    // Shared live is source of truth for active Meet (end clears it)
+    let sess = found.classroom.liveSession?.active
+      ? found.classroom.liveSession
+      : null;
+    let sharedChecked = false;
     try {
       const { getClassLive } = await import("@/lib/class-code-index");
       const shared = await getClassLive(code);
-      if (shared && (shared.active || (shared.scheduledAt && shared.scheduledAt > Date.now()))) {
+      sharedChecked = true;
+      if (shared?.active) {
         sess = {
           id: shared.id,
           title: shared.title,
           subject: shared.subject,
           meetUrl: shared.meetUrl,
           joinCode: shared.joinCode,
-          active: shared.active,
+          active: true,
           startedAt: shared.startedAt,
           endsAt: shared.endsAt,
           joinUntil: shared.joinUntil || shared.endsAt,
           scheduledAt: shared.scheduledAt,
-          messages: sess?.messages || [],
-          attendees: sess?.attendees || [],
-          kickedIds: sess?.kickedIds,
-          kickReasons: sess?.kickReasons,
+          messages: found.classroom.liveSession?.messages || [],
+          attendees: found.classroom.liveSession?.attendees || [],
+        };
+      } else if (shared === null) {
+        // Ended / no live — do not show Meet from stale Clerk
+        sess = null;
+      } else if (shared.scheduledAt && shared.scheduledAt > Date.now()) {
+        sess = {
+          id: shared.id,
+          title: shared.title,
+          subject: shared.subject,
+          meetUrl: shared.meetUrl,
+          joinCode: shared.joinCode,
+          active: false,
+          startedAt: shared.startedAt,
+          endsAt: shared.endsAt,
+          scheduledAt: shared.scheduledAt,
+          messages: [],
+          attendees: [],
         };
       }
     } catch {
@@ -969,14 +989,28 @@ export async function listStudentClassrooms(userId: string): Promise<
     // Pull materials: remote index + clerk bank + classroom
     let materials: TeacherMaterial[] = [];
     try {
-      // Fresh teacher meta so liveSession is current when shared index miss
       const tMeta = await getTeacherMeta(found.teacherId, { fresh: true });
       const roomFresh =
         (tMeta.classrooms || []).find(
           (r) => r.code === code.toUpperCase()
         ) || found.classroom;
-      if (roomFresh.liveSession?.active && !sess?.active) {
+      // Only trust Clerk active live if shared index was not available
+      if (
+        !sharedChecked &&
+        roomFresh.liveSession?.active &&
+        !sess?.active
+      ) {
         sess = roomFresh.liveSession;
+      }
+      if (sharedChecked && !sess && roomFresh.liveSession?.active) {
+        // shared says ended — keep sess null
+      }
+      // Merge attendees from fresh clerk room for attendance display path
+      if (sess?.active && roomFresh.liveSession?.attendees?.length) {
+        sess = {
+          ...sess,
+          attendees: roomFresh.liveSession.attendees,
+        };
       }
       materials = materialsForRoom(tMeta, code, roomFresh);
       try {
@@ -1008,14 +1042,15 @@ export async function listStudentClassrooms(userId: string): Promise<
       name: found.classroom.name || `Class ${code}`,
       teacherName: found.classroom.teacherName || "Teacher",
       materials,
-      liveSession: sess
-        ? {
-            ...sess,
-            kickedIds: undefined,
-            kickReasons: undefined,
-            meetUrl: kicked ? undefined : sess.meetUrl,
-          }
-        : null,
+      liveSession:
+        sess?.active || (sess?.scheduledAt && sess.scheduledAt > Date.now())
+          ? {
+              ...sess,
+              kickedIds: undefined,
+              kickReasons: undefined,
+              meetUrl: kicked || !sess.active ? undefined : sess.meetUrl,
+            }
+          : null,
       alerts: found.classroom.alerts || [],
       kicked,
       kickReason:
@@ -1339,14 +1374,23 @@ export async function startLive(
 }
 
 export async function endLive(teacherId: string, code: string) {
-  return updateClassroom(teacherId, code, (c) => {
+  const normalized = code.trim().toUpperCase();
+  // Clear shared live FIRST so students stop seeing Meet immediately
+  try {
+    const { publishClassLive } = await import("@/lib/class-code-index");
+    await publishClassLive(normalized, teacherId, null);
+  } catch (e) {
+    console.error("endLive clear shared", e);
+  }
+
+  const room = await updateClassroom(teacherId, normalized, (c) => {
     if (!c.liveSession) return c;
     const sess = c.liveSession;
     const now = Date.now();
     const stampLeft = (list: AttendanceAttendee[]) =>
       list.map((a) => (a.leftAt ? a : { ...a, leftAt: now }));
     const attendees = stampLeft(sess.attendees || []);
-    const attendanceLog = (c.attendanceLog || []).map((r) => {
+    let attendanceLog = (c.attendanceLog || []).map((r) => {
       if (r.sessionId === sess.id && !r.endedAt) {
         return {
           ...r,
@@ -1358,20 +1402,38 @@ export async function endLive(teacherId: string, code: string) {
       }
       return r;
     });
+    // Ensure a closed log exists even if start didn't create one
+    if (!attendanceLog.some((r) => r.sessionId === sess.id)) {
+      attendanceLog = [
+        {
+          id: `att-${sess.id}`,
+          sessionId: sess.id,
+          sessionTitle: sess.title,
+          subject: sess.subject,
+          startedAt: sess.startedAt,
+          endedAt: now,
+          attendees,
+        },
+        ...attendanceLog,
+      ].slice(0, 80);
+    }
     return {
       ...c,
-      liveSession: { ...sess, active: false, attendees },
+      // null = fully ended (UI shows start form again, not stale Meet)
+      liveSession: null,
       attendanceLog,
     };
-  }).then(async (room) => {
-    try {
-      const { publishClassLive } = await import("@/lib/class-code-index");
-      await publishClassLive(code, teacherId, null);
-    } catch {
-      // ignore
-    }
-    return room;
   });
+
+  // Clear again after Clerk write (race-safe)
+  try {
+    const { publishClassLive } = await import("@/lib/class-code-index");
+    await publishClassLive(normalized, teacherId, null);
+  } catch {
+    // ignore
+  }
+
+  return room;
 }
 
 export async function markAttendance(
@@ -1381,10 +1443,52 @@ export async function markAttendance(
 ): Promise<Classroom | null> {
   const found = await findClassroomByCode(code);
   if (!found) return null;
-  return updateClassroom(found.teacherId, found.classroom.code, (c) => {
-    const sess = c.liveSession;
-    if (!sess?.active) return c;
-    // Kicked students cannot rejoin this live session
+
+    let shared: {
+      id: string;
+      title: string;
+      subject: string;
+      meetUrl?: string;
+      joinCode: string;
+      startedAt: number;
+      endsAt: number;
+    } | null = null;
+    try {
+      const { getClassLive } = await import("@/lib/class-code-index");
+      const s = await getClassLive(code);
+      if (s?.active && s.id) {
+        shared = {
+          id: s.id,
+          title: s.title,
+          subject: s.subject,
+          meetUrl: s.meetUrl,
+          joinCode: s.joinCode,
+          startedAt: s.startedAt,
+          endsAt: s.endsAt,
+        };
+      }
+    } catch {
+      // ignore
+    }
+
+    return updateClassroom(found.teacherId, found.classroom.code, (c) => {
+      let sess = c.liveSession;
+      // If Clerk lost active flag but shared live is on, still mark attendance
+      if ((!sess || !sess.active) && shared) {
+        sess = {
+          id: shared.id,
+          title: shared.title || sess?.title || "Live class",
+          subject: shared.subject || sess?.subject || "General",
+          startedAt: shared.startedAt || sess?.startedAt || Date.now(),
+          endsAt: shared.endsAt || sess?.endsAt || Date.now() + 12 * 60 * 60_000,
+          active: true,
+          joinCode: shared.joinCode || sess?.joinCode || "",
+          meetUrl: shared.meetUrl || sess?.meetUrl,
+          messages: sess?.messages || [],
+          attendees: sess?.attendees || [],
+        };
+      }
+      if (!sess?.active) return c;
     if ((sess.kickedIds || []).includes(studentId)) {
       return c;
     }
@@ -1392,40 +1496,52 @@ export async function markAttendance(
     const already = existing.find(
       (a) => a.studentId === studentId && !a.leftAt
     );
-    if (already) return c;
-    const attendee: AttendanceAttendee = {
+    if (already) {
+      // Already present — still ensure attendanceLog has them
+      const hasInLog = (c.attendanceLog || []).some(
+        (r) =>
+          r.sessionId === sess!.id &&
+          (r.attendees || []).some((x) => x.studentId === studentId)
+      );
+      if (hasInLog) return c;
+    }
+    const attendee: AttendanceAttendee = already || {
       studentId,
       name: name || "Student",
       joinedAt: Date.now(),
     };
-    // allow re-join after leave as new segment
-    const attendees = [attendee, ...existing].slice(0, 120);
-    const attendanceLog = (c.attendanceLog || []).map((r) => {
-      if (r.sessionId !== sess.id) return r;
-      const open = r.attendees.find(
+    const attendees = already
+      ? existing
+      : [attendee, ...existing].slice(0, 120);
+    let attendanceLog = (c.attendanceLog || []).map((r) => {
+      if (r.sessionId !== sess!.id) return r;
+      const open = (r.attendees || []).find(
         (a) => a.studentId === studentId && !a.leftAt
       );
       if (open) return r;
-      return { ...r, attendees: [attendee, ...r.attendees].slice(0, 120) };
+      return {
+        ...r,
+        attendees: [attendee, ...(r.attendees || [])].slice(0, 120),
+      };
     });
-    const hasLog = attendanceLog.some((r) => r.sessionId === sess.id);
-    const nextLog = hasLog
-      ? attendanceLog
-      : [
-          {
-            id: `att-${sess.id}`,
-            sessionId: sess.id,
-            sessionTitle: sess.title,
-            subject: sess.subject,
-            startedAt: sess.startedAt,
-            attendees,
-          } as AttendanceRecord,
-          ...attendanceLog,
-        ].slice(0, 80);
+    const hasLog = attendanceLog.some((r) => r.sessionId === sess!.id);
+    if (!hasLog) {
+      attendanceLog = [
+        {
+          id: `att-${sess.id}`,
+          sessionId: sess.id,
+          sessionTitle: sess.title,
+          subject: sess.subject,
+          startedAt: sess.startedAt,
+          attendees,
+        } as AttendanceRecord,
+        ...attendanceLog,
+      ].slice(0, 80);
+    }
     return {
       ...c,
       liveSession: { ...sess, attendees },
-      attendanceLog: nextLog,
+      attendanceLog,
     };
   });
 }

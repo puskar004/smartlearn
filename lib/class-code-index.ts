@@ -17,9 +17,10 @@ export type SharedLive = {
   meetUrl?: string;
   joinCode: string;
   active: boolean;
+  /** Explicit end marker — students must hide Meet/banner */
+  ended?: boolean;
   startedAt: number;
   endsAt: number;
-  /** Students may open Meet until this time (≥ 15 min from start, full session) */
   joinUntil?: number;
   scheduledAt?: number;
   teacherName?: string;
@@ -205,15 +206,14 @@ function liveLocalPath(code: string) {
 
 function liveStillValid(live: SharedLive | null): live is SharedLive {
   if (!live) return false;
+  if (live.ended === true || live.active === false) return false;
   const now = Date.now();
-  // Active = teacher still in session → banner + Meet stay visible (no planned end)
+  // Active only — banner/Meet while teacher has not ended
   if (live.active) {
-    // Soft safety only if End never clicked (12h from start)
-    const softMax = live.startedAt + 12 * 60 * 60 * 1000;
+    const softMax = (live.startedAt || now) + 12 * 60 * 60 * 1000;
     return now <= softMax;
   }
   if (live.scheduledAt && live.scheduledAt > now) return true;
-  if (live.scheduledAt && live.scheduledAt < now - 60 * 60_000) return false;
   return false;
 }
 
@@ -224,10 +224,25 @@ export async function publishClassLive(
   live: SharedLive | null
 ) {
   const c = code.toUpperCase();
-  const payload: SharedLive | null =
-    live &&
-    (live.active ||
-      (live.scheduledAt != null && live.scheduledAt > Date.now()))
+  const ending = !live || live.ended || live.active === false;
+  const payload: SharedLive | null = ending
+    ? {
+        id: live?.id || `ended-${Date.now()}`,
+        title: live?.title || "Ended",
+        subject: live?.subject || "",
+        meetUrl: undefined,
+        joinCode: "",
+        active: false,
+        ended: true,
+        startedAt: live?.startedAt || Date.now(),
+        endsAt: Date.now(),
+        joinUntil: Date.now(),
+        teacherName: live?.teacherName,
+        className: live?.className,
+      }
+    : live &&
+        (live.active ||
+          (live.scheduledAt != null && live.scheduledAt > Date.now()))
       ? {
           id: live.id,
           title: live.title,
@@ -235,35 +250,27 @@ export async function publishClassLive(
           meetUrl: live.meetUrl,
           joinCode: live.joinCode,
           active: Boolean(live.active),
+          ended: false,
           startedAt: live.startedAt,
           endsAt: live.endsAt,
-          joinUntil:
-            live.joinUntil ||
-            live.endsAt ||
-            live.startedAt + 15 * 60_000,
+          joinUntil: live.joinUntil || live.endsAt,
           scheduledAt: live.scheduledAt,
           teacherName: live.teacherName,
           className: live.className,
         }
       : null;
 
-  // 1) Always write tiny local live file (same instance)
+  // 1) Local live file — ended tombstone or active payload (never leave stale active)
   try {
     await fs.mkdir(path.dirname(liveLocalPath(c)), { recursive: true });
     if (payload) {
       await fs.writeFile(liveLocalPath(c), JSON.stringify(payload), "utf8");
-    } else {
-      try {
-        await fs.unlink(liveLocalPath(c));
-      } catch {
-        // ignore
-      }
     }
   } catch {
     // ignore
   }
 
-  // 2) Dedicated remote JSON (small — more reliable than full index)
+  // 2) Always upload new remote JSON so old active URLs are abandoned
   let liveUrl: string | null = null;
   if (payload) {
     try {
@@ -277,34 +284,38 @@ export async function publishClassLive(
     }
   }
 
-  // 3) Merge into shared index
+  // 3) Shared index — clear active live; keep ended pointer so readers see tombstone
   const idx = await loadIndex(true);
   idx.codes[c] = teacherId || idx.codes[c] || "";
   if (!idx.live) idx.live = {};
   if (!idx.liveUrls) idx.liveUrls = {};
-  if (!payload) {
+  if (ending || !payload || payload.ended || !payload.active) {
     delete idx.live[c];
-    delete idx.liveUrls[c];
+    if (liveUrl) idx.liveUrls[c] = liveUrl;
+    else delete idx.liveUrls[c];
   } else {
     idx.live[c] = payload;
     if (liveUrl) idx.liveUrls[c] = liveUrl;
   }
+  // Bust in-memory so next read does not serve old active session
+  mem.idx = idx;
   await persist(idx, true);
 }
 
 export async function getClassLive(code: string): Promise<SharedLive | null> {
   const c = code.toUpperCase();
 
-  // A) Local file first (same server / warm instance)
+  // A) Local file first
   try {
     const raw = await fs.readFile(liveLocalPath(c), "utf8");
     const j = JSON.parse(raw) as SharedLive;
+    if (j?.ended || j?.active === false) return null;
     if (liveStillValid(j)) return j;
   } catch {
     // ignore
   }
 
-  // B) Dedicated remote URL from index pointer
+  // B) Dedicated remote URL / index
   try {
     const idx = await loadIndex(true);
     const url = idx.liveUrls?.[c];
@@ -315,8 +326,15 @@ export async function getClassLive(code: string): Promise<SharedLive | null> {
       );
       if (res.ok) {
         const j = (await res.json()) as SharedLive;
+        if (j?.ended || j?.active === false) {
+          try {
+            await fs.writeFile(liveLocalPath(c), JSON.stringify(j), "utf8");
+          } catch {
+            // ignore
+          }
+          return null;
+        }
         if (liveStillValid(j)) {
-          // warm local
           try {
             await fs.writeFile(liveLocalPath(c), JSON.stringify(j), "utf8");
           } catch {
@@ -327,6 +345,7 @@ export async function getClassLive(code: string): Promise<SharedLive | null> {
       }
     }
     const live = idx.live?.[c] || null;
+    if (live?.ended || live?.active === false) return null;
     if (liveStillValid(live)) return live;
   } catch {
     // ignore
