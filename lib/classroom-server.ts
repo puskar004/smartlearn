@@ -57,9 +57,21 @@ function lightClassroom(c: Classroom): Classroom {
         }))
         .slice(0, 20),
       alerts: alerts.slice(0, 10),
-      attendanceLog: attendanceLog.slice(0, 20).map((r) => ({
-        ...r,
-        attendees: Array.isArray(r.attendees) ? r.attendees.slice(0, 80) : [],
+      attendanceLog: attendanceLog.slice(0, 40).map((r) => ({
+        id: String(r.id || ""),
+        sessionId: String(r.sessionId || ""),
+        sessionTitle: String(r.sessionTitle || "Session").slice(0, 120),
+        subject: String(r.subject || "").slice(0, 60),
+        startedAt: Number(r.startedAt) || Date.now(),
+        endedAt: r.endedAt ? Number(r.endedAt) : undefined,
+        attendees: Array.isArray(r.attendees)
+          ? r.attendees.slice(0, 120).map((a) => ({
+              studentId: String(a.studentId || ""),
+              name: String(a.name || "Student").slice(0, 80),
+              joinedAt: Number(a.joinedAt) || Date.now(),
+              leftAt: a.leftAt ? Number(a.leftAt) : undefined,
+            }))
+          : [],
       })),
       students: students.slice(0, 60).map((s) => ({
         studentId: String(s.studentId || ""),
@@ -1511,7 +1523,17 @@ export async function endLive(teacherId: string, code: string) {
     // ignore
   }
 
-  return room;
+  // Ensure returned room always has the closed attendance log (never drop it)
+  if (room && (!room.attendanceLog || room.attendanceLog.length === 0)) {
+    const peek = peekMeta(teacherId);
+    const fromCache = peek?.classrooms?.find(
+      (x) => x.code === normalized
+    )?.attendanceLog;
+    if (fromCache?.length) {
+      return { ...room, attendanceLog: fromCache, liveSession: null };
+    }
+  }
+  return room ? { ...room, liveSession: null } : room;
 }
 
 export async function markAttendance(

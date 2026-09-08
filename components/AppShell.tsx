@@ -15,8 +15,10 @@ import ExtremeLock from "@/components/ExtremeLock";
 import FullscreenGate from "@/components/FullscreenGate";
 import SessionLockChrome, { isSessionLocked } from "@/components/SessionLock";
 import GradeGate from "@/components/GradeGate";
+import EyeFocusGuard from "@/components/EyeFocusGuard";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
+import { isEyeFocusEnabled } from "@/lib/eye-focus-store";
 import { cn } from "@/lib/utils";
 
 const MARKETING = new Set(["/", "/login", "/sign-in", "/sign-up"]);
@@ -34,6 +36,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { userId } = useAuth();
   const [role, setRole] = useState<"student" | "teacher">("student");
   const [locked, setLocked] = useState(false);
+  const [eyeOn, setEyeOn] = useState(false);
 
   useEffect(() => {
     const sync = () => {
@@ -46,6 +49,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     sync();
     window.addEventListener(ROLE_EVENT, sync);
     return () => window.removeEventListener(ROLE_EVENT, sync);
+  }, [userId]);
+
+  useEffect(() => {
+    const syncEye = () => setEyeOn(isEyeFocusEnabled(userId));
+    syncEye();
+    window.addEventListener("sl-eye-focus", syncEye);
+    window.addEventListener("storage", syncEye);
+    return () => {
+      window.removeEventListener("sl-eye-focus", syncEye);
+      window.removeEventListener("storage", syncEye);
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -79,6 +93,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
       {!isTeacher && onTest && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
+      {/* Persist eye-focus camera across Settings → other pages */}
+      {!isTeacher && eyeOn && !onTest && (
+        <div className="fixed bottom-4 left-4 z-[80] max-w-[min(100vw-2rem,360px)]">
+          <EyeFocusGuard enabled />
+        </div>
+      )}
       <SessionLockChrome />
 
       {marketing ? (

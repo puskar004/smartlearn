@@ -29,7 +29,8 @@ export async function saveMaterialFile(
   if (buf.length < 20) throw new Error("Empty or invalid file");
 
   const safeCode = code.replace(/[^A-Z0-9]/gi, "").slice(0, 12) || "CLASS";
-  const key = `${safeCode}_${teacherId.slice(0, 10)}_${Date.now()}.${(ext || "pdf").replace(/[^a-z0-9]/gi, "")}`;
+  // Include size hash-ish to help dedupe identical double-clicks
+  const key = `${safeCode}_${teacherId.slice(0, 10)}_${Date.now()}_${buf.length}.${(ext || "pdf").replace(/[^a-z0-9]/gi, "")}`;
   const mime =
     ext === "pdf"
       ? "application/pdf"

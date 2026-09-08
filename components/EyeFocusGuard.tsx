@@ -203,31 +203,44 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       }
 
       const base = baseline.current!;
-      // More sensitive: catch looking away / eyes closed sooner
       const faceAway =
         s.contrast < 18 || s.faceMean < 22 || s.faceMean > 230;
       const eyesClosed =
         faceAway ||
-        s.eyeMean < base.eye * 0.88 ||
-        s.eyeMean < base.mean * 0.72 ||
-        (s.eyeMean < 70 && s.faceMean > 60);
+        s.eyeMean < base.eye * 0.9 ||
+        s.eyeMean < base.mean * 0.75 ||
+        (s.eyeMean < 75 && s.faceMean > 55);
 
-      const now = performance.now();
-      const last = (loop as { _t?: number })._t || now;
-      (loop as { _t?: number })._t = now;
-      const dt = Math.min(100, Math.max(16, now - last));
+      // Absolute wall-clock so timer never freezes at ~27s
+      const now = Date.now();
+      if (!(loop as { _wall?: number })._wall) {
+        (loop as { _wall?: number })._wall = now;
+      }
+      const lastWall = (loop as { _wall?: number })._wall || now;
+      const dt = Math.min(250, Math.max(0, now - lastWall));
+      (loop as { _wall?: number })._wall = now;
 
-      if (eyesClosed) closedMs.current += dt;
-      else closedMs.current = Math.max(0, closedMs.current - dt * 1.5);
+      if (eyesClosed) {
+        closedMs.current += dt;
+      } else {
+        // Only decay when clearly focused (avoid reset near 27–29s)
+        if (closedMs.current < 25000) {
+          closedMs.current = Math.max(0, closedMs.current - dt * 0.8);
+        } else {
+          // Near threshold: require clear open eyes longer to decay
+          closedMs.current = Math.max(0, closedMs.current - dt * 0.2);
+        }
+      }
 
       const secs = Math.floor(closedMs.current / 1000);
-      if (secs >= 28) {
+      if (secs >= 30) {
         alarm(
           faceAway
             ? "Face not in frame ~30s — sit in front of camera!"
             : "Eyes closed / looking away ~30s — ALARM"
         );
         closedMs.current = 0;
+        (loop as { _wall?: number })._wall = Date.now();
       } else if (secs > 0) {
         setStatus(
           `${faceAway ? "Face away" : "Eyes drooping"} · ${secs}s / 30s`

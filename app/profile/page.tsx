@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { User } from "lucide-react";
-import EyeFocusGuard from "@/components/EyeFocusGuard";
 import {
   getParentPhone,
   setParentPhone,
   isFocusLockEnabled,
   setFocusLockEnabled,
 } from "@/components/FocusLock";
+import {
+  isEyeFocusEnabled,
+  setEyeFocusEnabled,
+} from "@/lib/eye-focus-store";
 import type { Grade } from "@/lib/curriculum";
 import {
   hardResetUser,
@@ -47,6 +50,7 @@ export default function ProfilePage() {
   useEffect(() => {
     setPhone(getParentPhone(userId));
     setFocusOn(isFocusLockEnabled());
+    setEyeGuard(isEyeFocusEnabled(userId));
     if (userId) {
       const p = loadProgress(userId);
       setProgress(p);
@@ -82,6 +86,7 @@ export default function ProfilePage() {
     setPhoneErr(null);
     setParentPhone(digits, userId);
     setFocusLockEnabled(focusOn);
+    setEyeFocusEnabled(eyeGuard, userId);
     if (userId) {
       const p = loadProgress(userId);
       p.grade = grade;
@@ -321,13 +326,16 @@ export default function ProfilePage() {
           <input
             type="checkbox"
             checked={eyeGuard}
-            onChange={(e) => setEyeGuard(e.target.checked)}
+            onChange={(e) => {
+              setEyeGuard(e.target.checked);
+              setEyeFocusEnabled(e.target.checked, userId);
+            }}
           />
-          Enable camera + mic eye-focus alarm (allow permission when asked)
+          Enable camera + mic eye-focus alarm (stays on across pages)
         </label>
         <p className="mt-1 text-[11px] text-slate-400">
-          Works best in Chrome. Keep face lit and centered. Closed eyes / looking
-          away ~30s triggers alarm.
+          Works best in Chrome. Camera stays active while browsing after Save.
+          Closed eyes / looking away ~30s triggers alarm.
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
@@ -395,9 +403,9 @@ export default function ProfilePage() {
         )}
       </div>
 
-      <div className="mt-6">
-        <EyeFocusGuard enabled={eyeGuard} />
-      </div>
+      <p className="mt-4 text-xs text-slate-500">
+        Eye-focus camera preview appears bottom-left on study pages when enabled.
+      </p>
     </div>
   );
 }

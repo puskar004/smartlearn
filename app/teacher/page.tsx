@@ -401,6 +401,7 @@ function TeacherInner() {
 
   const upload = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy) return; // debounce double-submit
     if (!activeCode || !matTitle.trim()) {
       setError("Title required.");
       return;
@@ -434,11 +435,18 @@ function TeacherInner() {
           (data.classroom?.materials || [])[0]?.url ||
           "";
         if (data.classroom) {
-          setRoom(data.classroom as Classroom);
+          // Dedupe materials by id/url
+          const cls = data.classroom as Classroom;
+          const seen = new Set<string>();
+          cls.materials = (cls.materials || []).filter((m) => {
+            const k = m.id || m.url;
+            if (!k || seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+          setRoom(cls);
           setClasses((prev) =>
-            prev.map((c) =>
-              c.code === activeCode ? (data.classroom as Classroom) : c
-            )
+            prev.map((c) => (c.code === activeCode ? cls : c))
           );
         } else if (pubUrl) {
           const mat = {
@@ -744,7 +752,8 @@ function TeacherInner() {
       ) : (
         <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_300px]">
           <div>
-            <div className="mb-4 flex flex-wrap gap-2 rounded-full bg-white/80 p-1 shadow-sm ring-1 ring-slate-200">
+            {/* Primary nav is sidebar — compact tabs only as secondary shortcuts */}
+            <div className="mb-4 flex flex-wrap gap-2 rounded-full bg-white/80 p-1 shadow-sm ring-1 ring-slate-200 lg:hidden">
               {(
                 [
                   ["students", "Students"],
@@ -1223,9 +1232,14 @@ function TeacherInner() {
                                 ...room,
                                 liveSession: null,
                               }) as Classroom;
+                              // Keep attendance forever after end
                               const cleared = {
                                 ...next,
                                 liveSession: null,
+                                attendanceLog:
+                                  next.attendanceLog?.length
+                                    ? next.attendanceLog
+                                    : room.attendanceLog || [],
                               };
                               setRoom(cleared);
                               setClasses((prev) =>

@@ -142,6 +142,9 @@ export async function POST(req: NextRequest) {
       teacherName,
     };
 
+    // Dedupe: same title+url within last 60s = double-click
+    // (handled after publish merge below)
+
     // 1) ALWAYS publish to shared class-code index (student reads this)
     let published: typeof mat[] = [mat];
     try {
@@ -197,6 +200,19 @@ export async function POST(req: NextRequest) {
         ])
       );
       room = { ...room, materials: Array.from(map.values()) };
+    }
+    // Final dedupe by url + title (prevents double list entries)
+    if (room?.materials) {
+      const seen = new Set<string>();
+      room = {
+        ...room,
+        materials: room.materials.filter((m) => {
+          const k = `${(m.title || "").toLowerCase()}|${m.url}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        }),
+      };
     }
 
     return NextResponse.json({

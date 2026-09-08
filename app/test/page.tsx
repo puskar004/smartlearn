@@ -143,23 +143,14 @@ export default function StudentTestPage() {
     };
   }, []);
 
-  // After camera/mic/share granted → lock fullscreen, then start clock
+  // Clock starts only after proctor + fullscreen (FS only via button click)
   const timerStarted = useRef(false);
-  const fsAsked = useRef(false);
   useEffect(() => {
-    if (!inTest) {
-      timerStarted.current = false;
-      fsAsked.current = false;
-    }
+    if (!inTest) timerStarted.current = false;
   }, [inTest]);
   useEffect(() => {
-    if (!proctorReady || !test || result) return;
-    if (!isFs && !fsAsked.current) {
-      fsAsked.current = true;
-      void enterFullscreen();
-      return;
-    }
-    if (!isFs || timerStarted.current) return;
+    if (!proctorReady || !isFs || !test || result) return;
+    if (timerStarted.current) return;
     timerStarted.current = true;
     const secs = Math.max(60, (test.durationMin || 30) * 60);
     const endsAt = Date.now() + secs * 1000;
@@ -501,39 +492,31 @@ export default function StudentTestPage() {
               setSetupError(msg);
             }}
             onReady={() => {
+              // Fullscreen MUST be a direct click — never from async onReady
               setProctorReady(true);
-              void enterFullscreen();
               setSetupError(null);
               setError(null);
             }}
           />
         )}
 
-        {/* NTA-style orange/yellow header */}
-        <header className="shrink-0 border-b border-[#c45a00] bg-gradient-to-b from-[#ff9f1a] via-[#f77f00] to-[#e85d04] shadow-md">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 sm:px-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white/80 bg-[#1a237e] text-[10px] font-black leading-tight text-white shadow">
-                SL
+        {/* NEET / NTA teal header */}
+        <header className="shrink-0 border-b border-teal-700 bg-gradient-to-r from-teal-600 to-cyan-600 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-4">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-bold text-white sm:text-base">
+                {test.title || "Live Test"}
               </div>
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-white drop-shadow-sm">
-                  CurioSphere Exam
-                </div>
-                <div className="text-[10px] font-semibold text-amber-50/95">
-                  National Testing Agency style · Computer Based Test
-                </div>
+              <div className="text-[10px] text-teal-50">
+                Code {test.code} · {test.teacherName}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3 sm:gap-4">
               <div className="text-right text-[11px] leading-tight text-white">
-                <div className="opacity-90">Candidate Name</div>
-                <div className="font-bold uppercase tracking-wide">
-                  {candidate}
-                </div>
+                <div className="opacity-90">{candidate}</div>
               </div>
-              <div className="rounded border border-[#1565c0] bg-[#1565c0] px-3 py-1 text-center shadow-inner">
-                <div className="text-[9px] font-semibold uppercase tracking-wide text-sky-100">
+              <div className="rounded border border-white/30 bg-white/15 px-3 py-1 text-center">
+                <div className="text-[9px] font-semibold uppercase tracking-wide text-teal-50">
                   Time Left
                 </div>
                 <div className="font-mono text-base font-black tabular-nums text-white">
@@ -550,20 +533,15 @@ export default function StudentTestPage() {
               )}
             </div>
           )}
-          {/* Subject / paper strip */}
-          <div className="flex items-stretch border-t border-[#c45a00]/80 bg-[#fff8e7]">
-            <div className="border-r border-amber-300 bg-[#1a237e] px-4 py-1.5 text-[12px] font-bold text-white">
-              {test.title || "Paper"}
+          <div className="flex items-stretch border-t border-teal-800/40 bg-white">
+            <div className="bg-rose-600 px-4 py-1.5 text-[12px] font-bold text-white">
+              SECTION A
             </div>
             <div className="flex flex-1 items-center gap-3 px-3 py-1 text-[11px] text-slate-700">
               <span>
-                Code: <strong className="font-mono">{test.code}</strong>
+                Ques. No {qi + 1} · MCQ Single · Marks : 4
               </span>
-              <span className="hidden sm:inline">·</span>
-              <span className="hidden sm:inline">
-                Invigilator: {test.teacherName}
-              </span>
-              <span className="ml-auto inline-flex items-center gap-1 font-semibold text-[#1a237e]">
+              <span className="ml-auto inline-flex items-center gap-1 font-semibold text-teal-800">
                 <Shield className="h-3 w-3" />
                 {isFs ? "FULLSCREEN" : "FS OFF"} ·{" "}
                 {proctorReady ? "PROCTORED" : "SETUP"}
@@ -671,61 +649,50 @@ export default function StudentTestPage() {
               </div>
             </div>
 
-            {/* Streamlined exam actions (no redundant Save&Next / Mark&Next pair) */}
-            <div className="shrink-0 border-t border-[#bdbdbd] bg-[#fafafa] px-2 py-2 sm:px-3">
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {/* NEET-style bottom actions */}
+            <div className="shrink-0 border-t border-[#bdbdbd] bg-[#f5f5f5] px-2 py-2.5 sm:px-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canAttempt}
+                  onClick={markAndNext}
+                  className="rounded bg-amber-300 px-3 py-2.5 text-[11px] font-bold text-slate-900 shadow-sm hover:bg-amber-250 disabled:opacity-50"
+                >
+                  Mark for Review &amp; Next
+                </button>
                 <button
                   type="button"
                   disabled={!canAttempt}
                   onClick={clearResponse}
-                  className="rounded border border-[#9e9e9e] bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-[#424242] shadow-sm hover:bg-[#f5f5f5] disabled:opacity-50"
+                  className="rounded bg-amber-200 px-3 py-2.5 text-[11px] font-bold text-slate-800 shadow-sm hover:bg-amber-100 disabled:opacity-50"
                 >
                   Clear Response
                 </button>
-                <button
-                  type="button"
-                  disabled={!canAttempt}
-                  onClick={saveAndMark}
-                  className="rounded border border-[#e65100] bg-[#fb8c00] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#f57c00] disabled:opacity-50"
-                >
-                  Mark for Review
-                </button>
-                <div className="ml-auto flex flex-wrap gap-1.5">
+                <div className="ml-auto flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={!canAttempt || qi <= 0}
-                    onClick={() => goTo(qi - 1)}
-                    className="rounded border border-[#546e7a] bg-[#607d8b] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#546e7a] disabled:opacity-40"
+                    disabled={!canAttempt}
+                    onClick={saveAndNext}
+                    className="rounded bg-emerald-500 px-4 py-2.5 text-[11px] font-black uppercase tracking-wide text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50"
                   >
-                    « Back
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canAttempt || qi >= n - 1}
-                    onClick={() => {
-                      markVisited();
-                      goTo(qi + 1);
-                    }}
-                    className="rounded border border-[#2e7d32] bg-[#43a047] px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-white shadow-sm hover:bg-[#388e3c] disabled:opacity-40"
-                  >
-                    Next »
+                    Save &amp; Next
                   </button>
                   <button
                     type="button"
                     disabled={!canAttempt || submitting}
                     onClick={() => requestSubmit()}
-                    className="rounded border border-[#1b5e20] bg-[#2e7d32] px-4 py-2 text-[11px] font-black uppercase tracking-wide text-white shadow-sm hover:bg-[#1b5e20] disabled:opacity-50"
+                    className="rounded bg-emerald-700 px-4 py-2.5 text-[11px] font-black uppercase tracking-wide text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50"
                   >
-                    {submitting ? "Submitting…" : "Submit"}
+                    {submitting ? "Submitting…" : "Submit Test"}
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* RIGHT: palette — always visible, sticky on desktop */}
-          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#eceff1] lg:sticky lg:top-0 lg:h-[calc(100vh-8rem)] lg:w-[300px] lg:border-t-0 lg:self-start">
-            <div className="shrink-0 border-b border-[#cfd8dc] bg-[#1a237e] px-3 py-2 text-center text-[12px] font-bold uppercase tracking-wide text-white">
+          {/* RIGHT: palette — fixed width, always on screen during exam */}
+          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#f0f4f8] lg:w-[280px] lg:border-l lg:border-t-0">
+            <div className="shrink-0 border-b border-orange-300 bg-orange-400 px-3 py-2 text-center text-[12px] font-bold uppercase tracking-wide text-white">
               Question Palette
             </div>
 
