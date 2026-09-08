@@ -7,7 +7,6 @@ import {
   BookOpen,
   Brain,
   MessageSquare,
-  Shield,
   Trophy,
   Zap,
   AlertTriangle,
@@ -17,6 +16,7 @@ import {
   Flame,
   PlayCircle,
   GraduationCap,
+  Radio,
 } from "lucide-react";
 import {
   accuracy,
@@ -26,7 +26,7 @@ import {
 } from "@/lib/user-store";
 import { cn } from "@/lib/utils";
 import { displayName } from "@/lib/display-name";
-import { setRole } from "@/lib/teacher-store";
+import { getJoinedClasses, getRole, setRole } from "@/lib/teacher-store";
 import { emitRoleChanged } from "@/lib/role-events";
 
 const tiles = [
@@ -99,10 +99,60 @@ export default function DashboardPage() {
   const { user } = useUser();
   const { userId, isSignedIn } = useAuth();
   const [p, setP] = useState<UserProgress | null>(null);
+  const [liveBanner, setLiveBanner] = useState<{
+    title: string;
+    code: string;
+    subject?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (userId) setP(loadProgress(userId));
   }, [userId]);
+
+  // Show teacher live session on student home after join
+  useEffect(() => {
+    if (!userId || !isSignedIn) return;
+    if (getRole(userId) === "teacher") return;
+
+    const pull = async () => {
+      try {
+        const codes = getJoinedClasses(userId);
+        const q = new URLSearchParams({ action: "joined" });
+        if (codes.length) q.set("codes", codes.join(","));
+        q.set("_", String(Date.now()));
+        const res = await fetch(`/api/classroom?${q}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        const data = await res.json();
+        const rooms = (data.classrooms ||
+          (data.classroom ? [data.classroom] : [])) as {
+          code: string;
+          liveSession?: {
+            active?: boolean;
+            title?: string;
+            subject?: string;
+          } | null;
+        }[];
+        const live = rooms.find((r) => r.liveSession?.active);
+        if (live?.liveSession) {
+          setLiveBanner({
+            title: live.liveSession.title || "Live class",
+            code: live.code,
+            subject: live.liveSession.subject,
+          });
+        } else {
+          setLiveBanner(null);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void pull();
+    const id = setInterval(() => void pull(), 12_000);
+    return () => clearInterval(id);
+  }, [userId, isSignedIn]);
 
   const acc = p ? accuracy(p) : null;
   const weak = p ? weaknessMap(p) : [];
@@ -113,6 +163,31 @@ export default function DashboardPage() {
 
   return (
     <div className="px-4 py-6 lg:px-8 lg:py-8">
+      {liveBanner && (
+        <Link
+          href="/live-class"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-gradient-to-r from-rose-600 to-orange-500 px-4 py-3 text-white shadow-lg shadow-rose-500/25 transition hover:brightness-105"
+        >
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+              <Radio className="h-5 w-5 animate-pulse" />
+            </span>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-rose-100">
+                Live now · class {liveBanner.code}
+              </div>
+              <div className="text-sm font-extrabold">
+                {liveBanner.title}
+                {liveBanner.subject ? ` · ${liveBanner.subject}` : ""}
+              </div>
+            </div>
+          </div>
+          <span className="rounded-xl bg-white px-4 py-2 text-xs font-black text-rose-700">
+            Join live class →
+          </span>
+        </Link>
+      )}
+
       {/* Welcome banner */}
       <div className="relative overflow-hidden rounded-[28px] border border-violet-100 bg-gradient-to-r from-[#f3e8ff] via-[#eef2ff] to-[#e0f2fe] p-6 shadow-sm sm:p-8">
         <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">

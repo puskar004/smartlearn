@@ -3,10 +3,11 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { Loader2, Radio, Send, Shield, Ban } from "lucide-react";
+import { Loader2, Radio, Send, Shield, Ban, RefreshCw } from "lucide-react";
 import MeetFrame from "@/components/MeetFrame";
 import {
   getJoinedClass,
+  getJoinedClasses,
   getRole,
   apiPostMessage,
   apiMarkAttendance,
@@ -99,7 +100,7 @@ export default function LiveClassPage() {
           scheduledAt: sess.scheduledAt,
         });
         setError(null);
-        if (sess.id && lastAttended.current !== `${code}:${sess.id}`) {
+        if (code && sess.id && lastAttended.current !== `${code}:${sess.id}`) {
           lastAttended.current = `${code}:${sess.id}`;
           void apiMarkAttendance(
             code,
@@ -120,7 +121,11 @@ export default function LiveClassPage() {
         setError(null);
       } else {
         setLive(null);
-        setError("No live session right now. Wait for your teacher to go live.");
+        setError(
+          code
+            ? `Joined class ${code}. No live session yet — wait for your teacher to start Live, then tap Refresh.`
+            : "Join a teacher class first (Class & Notes)."
+        );
       }
     },
     [user, userId]
@@ -129,34 +134,62 @@ export default function LiveClassPage() {
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      const res = await fetch("/api/classroom?action=joined");
+      const localCodes = getJoinedClasses(userId);
+      const q = new URLSearchParams({ action: "joined" });
+      if (localCodes.length) q.set("codes", localCodes.join(","));
+      q.set("_", String(Date.now()));
+
+      const res = await fetch(`/api/classroom?${q.toString()}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
       const data = await res.json();
       const list = (data.classrooms || []) as {
         code: string;
         name: string;
-        liveSession?: { active?: boolean } | null;
+        liveSession?: LiveInfo & { active?: boolean } | null;
         kicked?: boolean;
         kickReason?: string;
       }[];
-      const room = data.classroom;
+      const room = data.classroom as
+        | {
+            code?: string;
+            name?: string;
+            liveSession?: LiveInfo | null;
+            kicked?: boolean;
+            kickReason?: string;
+          }
+        | null
+        | undefined;
 
+      // If API empty but local join exists, still show waiting state for that code
       if (!room && !list.length) {
-        setLive(null);
-        setSections([]);
-        setError("Join a teacher class first (Join Teacher).");
+        if (localCodes.length) {
+          setSections(
+            localCodes.map((c) => ({ code: c, name: `Class ${c}`, live: false }))
+          );
+          setClassCode(localCodes[0]);
+          setClassName(`Class ${localCodes[0]}`);
+          setLive(null);
+          setError(
+            `Joined ${localCodes[0]}. Waiting for teacher to go live — tap Refresh.`
+          );
+        } else {
+          setLive(null);
+          setSections([]);
+          setError("Join a teacher class first (Class & Notes).");
+        }
         setLoading(false);
         return;
       }
 
-      // Multi-section: list all joined classes without glitching
       const sec = (list.length ? list : room ? [room] : []).map((r) => ({
-        code: r.code,
-        name: r.name || r.code,
+        code: String(r.code || ""),
+        name: r.name || String(r.code || ""),
         live: Boolean(r.liveSession?.active),
       }));
-      setSections(sec);
+      setSections(sec.filter((s) => s.code));
 
-      // Prefer: user pick → any live session → primary joined
       const pick =
         (preferredCode.current &&
           list.find((x) => x.code === preferredCode.current)) ||
@@ -167,14 +200,14 @@ export default function LiveClassPage() {
 
       if (!pick) {
         setLive(null);
-        setError("Join a teacher class first (Join Teacher).");
+        setError("Join a teacher class first (Class & Notes).");
         setLoading(false);
         return;
       }
 
-      applyRoom(pick, data.joined);
+      applyRoom(pick, data.joined || localCodes[0]);
     } catch {
-      setError("Could not load live class");
+      setError("Could not load live class. Check connection and Refresh.");
     } finally {
       setLoading(false);
     }
@@ -184,9 +217,21 @@ export default function LiveClassPage() {
     if (!userId) return;
     if (getRole(userId) === "teacher") return;
     void load();
-    // Faster poll while in live so kick applies without ending teacher session
-    const id = setInterval(() => void load(), 8_000);
-    return () => clearInterval(id);
+    // Poll often so live appears soon after teacher starts
+    const id = setInterval(() => void load(), 6_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key?.startsWith("sl_live_alert_")) void load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [userId, load]);
 
   const leaveLive = async () => {
@@ -247,9 +292,6 @@ export default function LiveClassPage() {
           <p className="mt-2 text-sm text-rose-800">
             {kickReason || "Your teacher kicked you from this session."}
           </p>
-          <p className="mt-2 text-xs text-rose-700/80">
-            You cannot rejoin this live session. Check Remarks for details.
-          </p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
             <Link
               href="/remarks"
@@ -281,8 +323,13 @@ export default function LiveClassPage() {
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             {className || getJoinedClass(userId || "") || "Your class"}
+            {classCode ? (
+              <span className="ml-2 font-mono text-xs text-slate-400">
+                · {classCode}
+              </span>
+            ) : null}
           </p>
-          {sections.length > 1 && (
+          {sections.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {sections.map((s) => (
                 <button
@@ -308,15 +355,27 @@ export default function LiveClassPage() {
             </div>
           )}
         </div>
-        {live?.active && (
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => void leaveLive()}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              setLoading(true);
+              void load();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
           >
-            Leave live · back to study
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </button>
-        )}
+          {live?.active && (
+            <button
+              type="button"
+              onClick={() => void leaveLive()}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Leave live · back to study
+            </button>
+          )}
+        </div>
       </div>
 
       {loading && (
@@ -325,16 +384,26 @@ export default function LiveClassPage() {
         </div>
       )}
 
-      {error && !live?.active && !live?.scheduledAt && (
+      {error && !live?.active && !live?.scheduledAt && !loading && (
         <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
           {error}
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap justify-center gap-3">
             <Link
               href="/join-class"
               className="font-bold text-indigo-600 underline"
             >
-              Join Teacher
+              Class &amp; Notes
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                void load();
+              }}
+              className="font-bold text-rose-600 underline"
+            >
+              Refresh live status
+            </button>
           </div>
         </div>
       )}

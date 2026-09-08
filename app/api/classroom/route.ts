@@ -136,22 +136,133 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "joined") {
-      const classrooms = await listStudentClassrooms(userId);
+      // Client may pass localStorage codes so live works even if Clerk join meta lagged
+      const extraCodes = (sp.get("codes") || "")
+        .split(",")
+        .map((c) => c.trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 12);
+
+      let classrooms = await listStudentClassrooms(userId);
       const joined = await getStudentJoinedCode(userId);
+
+      // Merge any extra codes not already listed (from browser join cache)
+      const have = new Set(classrooms.map((c) => c.code));
+      for (const c of extraCodes) {
+        if (have.has(c)) continue;
+        try {
+          const found = await findClassroomByCode(c);
+          if (!found) {
+            // Still try shared live index alone
+            const { getClassLive } = await import("@/lib/class-code-index");
+            const live = await getClassLive(c);
+            if (live) {
+              classrooms.push({
+                code: c,
+                name: live.className || `Class ${c}`,
+                teacherName: live.teacherName || "Teacher",
+                materials: [],
+                liveSession: {
+                  id: live.id,
+                  title: live.title,
+                  subject: live.subject,
+                  meetUrl: live.meetUrl,
+                  joinCode: live.joinCode,
+                  active: live.active,
+                  startedAt: live.startedAt,
+                  endsAt: live.endsAt,
+                  scheduledAt: live.scheduledAt,
+                  messages: [],
+                  attendees: [],
+                },
+                alerts: [],
+              });
+              have.add(c);
+            }
+            continue;
+          }
+          const { getClassLive } = await import("@/lib/class-code-index");
+          const live = await getClassLive(c);
+          const sess = live
+            ? {
+                id: live.id,
+                title: live.title,
+                subject: live.subject,
+                meetUrl: live.meetUrl,
+                joinCode: live.joinCode,
+                active: live.active,
+                startedAt: live.startedAt,
+                endsAt: live.endsAt,
+                scheduledAt: live.scheduledAt,
+                messages: found.classroom.liveSession?.messages || [],
+                attendees: found.classroom.liveSession?.attendees || [],
+              }
+            : found.classroom.liveSession;
+          classrooms.push({
+            code: found.classroom.code,
+            name: found.classroom.name || `Class ${c}`,
+            teacherName: found.classroom.teacherName || "Teacher",
+            materials: found.classroom.materials || [],
+            liveSession: sess,
+            alerts: found.classroom.alerts || [],
+          });
+          have.add(c);
+        } catch {
+          // ignore one code
+        }
+      }
+
+      // Overlay shared live on every classroom (source of truth for multi-instance)
+      try {
+        const { getClassLive } = await import("@/lib/class-code-index");
+        classrooms = await Promise.all(
+          classrooms.map(async (room) => {
+            const live = await getClassLive(room.code);
+            if (!live) return room;
+            return {
+              ...room,
+              name: live.className || room.name,
+              teacherName: live.teacherName || room.teacherName,
+              liveSession: {
+                id: live.id,
+                title: live.title,
+                subject: live.subject,
+                meetUrl: live.meetUrl,
+                joinCode: live.joinCode,
+                active: live.active,
+                startedAt: live.startedAt,
+                endsAt: live.endsAt,
+                scheduledAt: live.scheduledAt,
+                messages: room.liveSession?.messages || [],
+                attendees: room.liveSession?.attendees || [],
+                kickedIds: room.liveSession?.kickedIds,
+                kickReasons: room.liveSession?.kickReasons,
+              },
+            };
+          })
+        );
+      } catch {
+        // ignore
+      }
+
       const codes = classrooms.map((c) => c.code);
       if (!classrooms.length) {
         return NextResponse.json({
           ok: true,
-          joined: null,
-          codes: [],
+          joined: joined || extraCodes[0] || null,
+          codes: extraCodes,
           classrooms: [],
         });
       }
       const primary =
-        classrooms.find((x) => x.code === joined) || classrooms[0] || null;
+        classrooms.find((x) => x.liveSession?.active) ||
+        classrooms.find((x) => x.code === joined) ||
+        classrooms.find((x) => extraCodes.includes(x.code)) ||
+        classrooms[0] ||
+        null;
       return NextResponse.json({
         ok: true,
-        joined: primary?.code || joined,
+        joined: primary?.code || joined || extraCodes[0] || null,
         codes,
         classroom: primary,
         classrooms,

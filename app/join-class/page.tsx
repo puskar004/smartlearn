@@ -449,9 +449,9 @@ export default function JoinClassPage() {
                     <div className="flex flex-wrap gap-2">
                       <Link
                         href="/live-class"
-                        className="inline-flex flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-bold text-rose-800 hover:bg-rose-100"
                       >
-                        Live class
+                        Open live class
                       </Link>
                       <button
                         type="button"

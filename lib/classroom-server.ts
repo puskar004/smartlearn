@@ -917,15 +917,47 @@ export async function listStudentClassrooms(userId: string): Promise<
       }
     }
 
-    const sess = found.classroom.liveSession;
+    // Prefer shared live index (works across Vercel instances) then Clerk room
+    let sess = found.classroom.liveSession;
+    try {
+      const { getClassLive } = await import("@/lib/class-code-index");
+      const shared = await getClassLive(code);
+      if (shared && (shared.active || (shared.scheduledAt && shared.scheduledAt > Date.now()))) {
+        sess = {
+          id: shared.id,
+          title: shared.title,
+          subject: shared.subject,
+          meetUrl: shared.meetUrl,
+          joinCode: shared.joinCode,
+          active: shared.active,
+          startedAt: shared.startedAt,
+          endsAt: shared.endsAt,
+          scheduledAt: shared.scheduledAt,
+          messages: sess?.messages || [],
+          attendees: sess?.attendees || [],
+          kickedIds: sess?.kickedIds,
+          kickReasons: sess?.kickReasons,
+        };
+      }
+    } catch {
+      // keep clerk sess
+    }
     const kicked = Boolean(
       sess?.active && (sess.kickedIds || []).includes(userId)
     );
     // Pull materials: remote index + clerk bank + classroom
     let materials: TeacherMaterial[] = [];
     try {
-      const tMeta = await getTeacherMeta(found.teacherId);
-      materials = materialsForRoom(tMeta, code, found.classroom);
+      // Fresh teacher meta so liveSession is current when shared index miss
+      const tMeta = await getTeacherMeta(found.teacherId, { fresh: true });
+      const roomFresh =
+        (tMeta.classrooms || []).find(
+          (r) => r.code === code.toUpperCase()
+        ) || found.classroom;
+      if (roomFresh.liveSession?.active && !sess?.active) {
+        sess = roomFresh.liveSession;
+      }
+      materials = materialsForRoom(tMeta, code, roomFresh);
       try {
         const { getMaterialsByCode } = await import(
           "@/lib/materials-bank-store"
@@ -1249,6 +1281,32 @@ export async function startLive(
       attendanceLog = [rec, ...attendanceLog].slice(0, 80);
     }
     return { ...c, liveSession: live, alerts, attendanceLog };
+  }).then(async (room) => {
+    // Share live so students on other servers see it immediately
+    if (room) {
+      try {
+        const { publishClassLive } = await import("@/lib/class-code-index");
+        const sess = room.liveSession;
+        if (sess) {
+          await publishClassLive(code, teacherId, {
+            id: sess.id,
+            title: sess.title,
+            subject: sess.subject,
+            meetUrl: sess.meetUrl,
+            joinCode: sess.joinCode,
+            active: sess.active,
+            startedAt: sess.startedAt,
+            endsAt: sess.endsAt,
+            scheduledAt: sess.scheduledAt,
+            teacherName: room.teacherName,
+            className: room.name,
+          });
+        }
+      } catch (e) {
+        console.error("publishClassLive", e);
+      }
+    }
+    return room;
   });
 }
 
@@ -1277,6 +1335,14 @@ export async function endLive(teacherId: string, code: string) {
       liveSession: { ...sess, active: false, attendees },
       attendanceLog,
     };
+  }).then(async (room) => {
+    try {
+      const { publishClassLive } = await import("@/lib/class-code-index");
+      await publishClassLive(code, teacherId, null);
+    } catch {
+      // ignore
+    }
+    return room;
   });
 }
 

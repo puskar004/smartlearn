@@ -4,10 +4,25 @@
  */
 import { promises as fs } from "fs";
 import path from "path";
-import type { TeacherMaterial } from "@/lib/classroom-types";
+import type { LiveSession, TeacherMaterial } from "@/lib/classroom-types";
 import { uploadBufferRemote } from "@/lib/remote-upload";
 
 const MATERIAL_TTL_MS = 48 * 60 * 60 * 1000;
+
+/** Lightweight live payload shared across servers (students poll this) */
+export type SharedLive = {
+  id: string;
+  title: string;
+  subject: string;
+  meetUrl?: string;
+  joinCode: string;
+  active: boolean;
+  startedAt: number;
+  endsAt: number;
+  scheduledAt?: number;
+  teacherName?: string;
+  className?: string;
+};
 
 type Index = {
   codes: Record<string, string>; // CODE -> teacherId
@@ -15,6 +30,8 @@ type Index = {
   materials?: Record<string, TeacherMaterial[]>;
   /** Optional dedicated pack URL per code */
   matsUrls?: Record<string, string>;
+  /** CODE → current live session (cross-instance) */
+  live?: Record<string, SharedLive | null>;
   updatedAt: number;
   remoteUrl?: string;
 };
@@ -169,7 +186,69 @@ export async function unregisterClassCode(code: string) {
   delete idx.codes[c];
   if (idx.materials) delete idx.materials[c];
   if (idx.matsUrls) delete idx.matsUrls[c];
+  if (idx.live) delete idx.live[c];
   await persist(idx, true);
+}
+
+/** Teacher starts/ends live → students see it on any server */
+export async function publishClassLive(
+  code: string,
+  teacherId: string,
+  live: SharedLive | null
+) {
+  const c = code.toUpperCase();
+  const idx = await loadIndex(true);
+  idx.codes[c] = teacherId || idx.codes[c] || "";
+  if (!idx.live) idx.live = {};
+  if (!live || (!live.active && !(live.scheduledAt && live.scheduledAt > Date.now()))) {
+    delete idx.live[c];
+  } else {
+    idx.live[c] = {
+      id: live.id,
+      title: live.title,
+      subject: live.subject,
+      meetUrl: live.meetUrl,
+      joinCode: live.joinCode,
+      active: Boolean(live.active),
+      startedAt: live.startedAt,
+      endsAt: live.endsAt,
+      scheduledAt: live.scheduledAt,
+      teacherName: live.teacherName,
+      className: live.className,
+    };
+  }
+  await persist(idx, true);
+}
+
+export async function getClassLive(code: string): Promise<SharedLive | null> {
+  const c = code.toUpperCase();
+  const idx = await loadIndex(true);
+  const live = idx.live?.[c] || null;
+  if (!live) return null;
+  const now = Date.now();
+  // Expired active session
+  if (live.active && live.endsAt && live.endsAt < now - 30 * 60_000) {
+    return null;
+  }
+  if (
+    !live.active &&
+    live.scheduledAt &&
+    live.scheduledAt < now - 60 * 60_000
+  ) {
+    return null;
+  }
+  return live;
+}
+
+export async function getClassLiveMany(
+  codes: string[]
+): Promise<Record<string, SharedLive>> {
+  const out: Record<string, SharedLive> = {};
+  for (const raw of codes) {
+    const live = await getClassLive(raw);
+    if (live) out[raw.toUpperCase()] = live;
+  }
+  return out;
 }
 
 export async function lookupTeacherByCode(
