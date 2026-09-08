@@ -127,22 +127,28 @@ function TeacherInner() {
       const list = await apiListMyClasses({ fresh: force });
       // NEVER wipe existing classes on empty/rate-limit response
       if (list.length) {
-        // Preserve active live on this device if server lag drops it
+        // Never resurrect LIVE after End; never wipe attendanceLog
         setClasses((prev) => {
+          const pickLog = (
+            a?: Classroom["attendanceLog"],
+            b?: Classroom["attendanceLog"]
+          ) => {
+            const aa = a || [];
+            const bb = b || [];
+            if (aa.length >= bb.length) return aa.length ? aa : bb;
+            return bb;
+          };
           const merged = list.map((server) => {
             const local = prev.find((p) => p.code === server.code);
-            if (
-              local?.liveSession?.active &&
-              !server.liveSession?.active
-            ) {
+            // Server ended (null) — keep ended, merge history only
+            if (server.liveSession == null && local) {
               return {
                 ...server,
-                liveSession: local.liveSession,
-                attendanceLog:
-                  (server.attendanceLog?.length || 0) >=
-                  (local.attendanceLog?.length || 0)
-                    ? server.attendanceLog
-                    : local.attendanceLog || server.attendanceLog,
+                liveSession: null,
+                attendanceLog: pickLog(
+                  server.attendanceLog,
+                  local.attendanceLog
+                ),
               };
             }
             // Prefer server attendees when both active
@@ -162,9 +168,34 @@ function TeacherInner() {
                       ? server.liveSession.attendees
                       : local.liveSession.attendees,
                 },
+                attendanceLog: pickLog(
+                  server.attendanceLog,
+                  local.attendanceLog
+                ),
               };
             }
-            return server;
+            // Keep local LIVE only for start race (<30s), not after End
+            if (
+              local?.liveSession?.active &&
+              !server.liveSession?.active &&
+              Date.now() - (local.liveSession.startedAt || 0) < 30_000
+            ) {
+              return {
+                ...server,
+                liveSession: local.liveSession,
+                attendanceLog: pickLog(
+                  server.attendanceLog,
+                  local.attendanceLog
+                ),
+              };
+            }
+            return {
+              ...server,
+              attendanceLog: pickLog(
+                server.attendanceLog,
+                local?.attendanceLog
+              ),
+            };
           });
           persistClasses(merged);
           setActiveCode((prevCode) => {
@@ -424,23 +455,30 @@ function TeacherInner() {
           type: matType,
           file: matFile,
         });
-        if (!data.ok && !data.url && !data.classroom) {
-          throw new Error(
-            data.error ||
-              (typeof data === "string" ? data : "Upload failed")
-          );
-        }
         const pubUrl =
           data.url ||
           (data.classroom?.materials || [])[0]?.url ||
           "";
+        const durable =
+          data.ok &&
+          data.durable !== false &&
+          !!pubUrl &&
+          (pubUrl.startsWith("http://") ||
+            pubUrl.startsWith("https://") ||
+            pubUrl.startsWith("data:")) &&
+          !pubUrl.startsWith("/api/");
+        if (!durable) {
+          throw new Error(
+            data.error ||
+              "Cloud upload failed — students would not see this file. Retry, smaller PDF, or paste a public Drive link."
+          );
+        }
         if (data.classroom) {
-          // Dedupe materials by id/url
           const cls = data.classroom as Classroom;
           const seen = new Set<string>();
           cls.materials = (cls.materials || []).filter((m) => {
-            const k = m.id || m.url;
-            if (!k || seen.has(k)) return false;
+            const k = `${(m.title || "").toLowerCase()}|${m.url}`;
+            if (seen.has(k)) return false;
             seen.add(k);
             return true;
           });
@@ -448,7 +486,7 @@ function TeacherInner() {
           setClasses((prev) =>
             prev.map((c) => (c.code === activeCode ? cls : c))
           );
-        } else if (pubUrl) {
+        } else {
           const mat = {
             id: `mat-${Date.now()}`,
             title: matTitle.trim(),
@@ -460,27 +498,30 @@ function TeacherInner() {
           };
           setRoom((r) =>
             r
-              ? { ...r, materials: [mat, ...(r.materials || [])] }
+              ? {
+                  ...r,
+                  materials: [
+                    mat,
+                    ...(r.materials || []).filter(
+                      (m) =>
+                        m.url !== mat.url ||
+                        (m.title || "").toLowerCase() !==
+                          mat.title.toLowerCase()
+                    ),
+                  ],
+                }
               : r
-          );
-        } else {
-          throw new Error(
-            data.error ||
-              "Could not save PDF. Try again or paste a Drive link."
           );
         }
         const mb = (
           (data.size || matFile.size) /
           (1024 * 1024)
         ).toFixed(2);
-        const isLocal =
-          data.durable === false ||
-          (pubUrl && pubUrl.startsWith("/api/"));
         setMatNote(
-          isLocal
-            ? `Saved PDF (${mb} MB) · Open works here. For other devices, paste a Drive link if cloud host is down.`
-            : `Published PDF (${mb} MB) · students can view for 48 hours`
+          `Published PDF (${mb} MB) · students can open for 48 hours`
         );
+        setMatFile(null);
+        setMatTitle("");
       } else {
         const url = normalizeMaterialUrl(matUrl);
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -969,12 +1010,17 @@ function TeacherInner() {
                       {matNote}
                     </p>
                   )}
+                  {error && tab === "materials" && (
+                    <p className="mt-2 text-xs font-semibold text-rose-600">
+                      {error}
+                    </p>
+                  )}
                   <button
                     type="submit"
                     disabled={busy}
                     className="mt-3 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
                   >
-                    Publish to class
+                    {busy ? "Uploading…" : "Publish to class"}
                   </button>
                 </form>
                 <ul className="space-y-2">

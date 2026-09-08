@@ -434,22 +434,28 @@ export async function apiUploadMaterialFile(opts: {
   if (!res.ok && !data.error) {
     data.error = `Upload failed (${res.status}). ${text.slice(0, 80)}`;
   }
-  // Rate limit / soft host: if we got url or classroom, treat as success
-  if (!data.ok && (data.url || data.classroom)) {
-    data.ok = true;
-    data.error = undefined;
+  // Only success when durable public URL exists (students on other devices)
+  const durableUrl =
+    typeof data.url === "string" &&
+    (data.url.startsWith("http://") ||
+      data.url.startsWith("https://") ||
+      data.url.startsWith("data:"));
+  if (data.ok && data.durable === false && !durableUrl) {
+    data.ok = false;
+    data.error =
+      data.error ||
+      "Cloud upload failed — students would not see this file. Retry or paste a Drive link.";
   }
-  // Always cache locally so student on same browser sees instantly
-  if (data.ok) {
+  if (data.ok && durableUrl) {
     const mats = (data.classroom?.materials || []) as TeacherMaterial[];
     if (mats.length) cacheClassMaterials(opts.code, mats);
-    else if (data.url) {
+    else {
       pushCachedMaterial(opts.code, {
         id: `mat-local-${Date.now()}`,
         title: opts.title,
         subject: opts.subject,
         type: opts.type,
-        url: data.url,
+        url: data.url!,
         createdAt: Date.now(),
         teacherName: "Teacher",
       });

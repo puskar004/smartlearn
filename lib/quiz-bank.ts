@@ -501,10 +501,10 @@ export function questionsForChapter(input: {
     .toLowerCase();
 
   // HARD LOCK: only bank items whose classified subject == chapter family
-  // Never let "general" bleed into a named subject section
+  // Never mix Physics into Chemistry etc. general → only general/untagged
   const sameSubject = BOARD_BANK.filter((q) => {
     const s = subjectOfBankQ(q.tags, q.prompt);
-    if (family === "general") return true;
+    if (family === "general") return s === "general";
     return s === family;
   });
 

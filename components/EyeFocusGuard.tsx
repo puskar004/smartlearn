@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Mic, Volume2 } from "lucide-react";
+import { Camera, ChevronDown, ChevronUp, Mic, Volume2 } from "lucide-react";
 
 type Landmark = { x: number; y: number };
 
@@ -14,9 +14,7 @@ type FaceLandmarkerLike = {
 };
 
 /**
- * Eye / face focus monitor.
- * Uses improved heuristic (reliable without heavy ML install).
- * Optional MediaPipe if available via window global after script inject.
+ * Eye / face focus monitor — collapsed corner badge by default so it never blocks nav.
  */
 export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -26,6 +24,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
   const [permission, setPermission] = useState<"pending" | "ok" | "denied">(
     "pending"
   );
+  const [expanded, setExpanded] = useState(false);
   const closedMs = useRef(0);
   const raf = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
@@ -33,6 +32,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
   const lastAlarm = useRef(0);
   const baseline = useRef<{ mean: number; eye: number } | null>(null);
   const calibFrames = useRef(0);
+  const wallRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) {
@@ -57,6 +57,8 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       landmarkerRef.current = null;
       baseline.current = null;
       calibFrames.current = 0;
+      wallRef.current = 0;
+      closedMs.current = 0;
     }
 
     function alarm(reason: string) {
@@ -64,6 +66,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       if (now - lastAlarm.current < 8000) return;
       lastAlarm.current = now;
       setStatus(`⚠️ ${reason}`);
+      setExpanded(true);
       try {
         const ctx = new AudioContext();
         const o = ctx.createOscillator();
@@ -119,9 +122,6 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
 
       const faceMean = avg(w * 0.22, h * 0.12, w * 0.56, h * 0.6);
       const eyeMean = avg(w * 0.28, h * 0.2, w * 0.44, h * 0.16);
-      const mouthMean = avg(w * 0.35, h * 0.55, w * 0.3, h * 0.12);
-
-      // variance proxy via corner samples
       const corners = [
         avg(0, 0, 12, 12),
         avg(w - 12, 0, 12, 12),
@@ -131,7 +131,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       const cornerAvg = corners.reduce((a, b) => a + b, 0) / 4;
       const contrast = Math.abs(faceMean - cornerAvg);
 
-      return { faceMean, eyeMean, mouthMean, contrast };
+      return { faceMean, eyeMean, contrast };
     }
 
     async function start() {
@@ -163,6 +163,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
           await video.play();
         }
         setStatus("Calibrating… keep eyes open 2 sec");
+        wallRef.current = Date.now();
         loop();
       } catch (e) {
         setPermission("denied");
@@ -189,7 +190,6 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
         return;
       }
 
-      // Calibrate first ~45 frames while user looks at camera
       if (calibFrames.current < 45) {
         calibFrames.current += 1;
         const b = baseline.current || { mean: s.faceMean, eye: s.eyeMean };
@@ -211,25 +211,18 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
         s.eyeMean < base.mean * 0.75 ||
         (s.eyeMean < 75 && s.faceMean > 55);
 
-      // Absolute wall-clock so timer never freezes at ~27s
       const now = Date.now();
-      if (!(loop as { _wall?: number })._wall) {
-        (loop as { _wall?: number })._wall = now;
-      }
-      const lastWall = (loop as { _wall?: number })._wall || now;
-      const dt = Math.min(250, Math.max(0, now - lastWall));
-      (loop as { _wall?: number })._wall = now;
+      if (!wallRef.current) wallRef.current = now;
+      const dt = Math.min(250, Math.max(0, now - wallRef.current));
+      wallRef.current = now;
 
       if (eyesClosed) {
         closedMs.current += dt;
+      } else if (closedMs.current < 25000) {
+        closedMs.current = Math.max(0, closedMs.current - dt * 0.8);
       } else {
-        // Only decay when clearly focused (avoid reset near 27–29s)
-        if (closedMs.current < 25000) {
-          closedMs.current = Math.max(0, closedMs.current - dt * 0.8);
-        } else {
-          // Near threshold: require clear open eyes longer to decay
-          closedMs.current = Math.max(0, closedMs.current - dt * 0.2);
-        }
+        // Near 30s: almost no decay unless clearly focused
+        closedMs.current = Math.max(0, closedMs.current - dt * 0.05);
       }
 
       const secs = Math.floor(closedMs.current / 1000);
@@ -240,7 +233,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
             : "Eyes closed / looking away ~30s — ALARM"
         );
         closedMs.current = 0;
-        (loop as { _wall?: number })._wall = Date.now();
+        wallRef.current = Date.now();
       } else if (secs > 0) {
         setStatus(
           `${faceAway ? "Face away" : "Eyes drooping"} · ${secs}s / 30s`
@@ -261,39 +254,60 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
 
   if (!enabled) return null;
 
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-900/95 px-3 py-2 text-xs font-bold text-white shadow-lg backdrop-blur"
+        title={status}
+      >
+        <span
+          className={`h-2 w-2 rounded-full ${
+            permission === "ok" ? "bg-emerald-400" : "bg-amber-400"
+          }`}
+        />
+        <Camera className="h-3.5 w-3.5 text-indigo-300" />
+        Eye · {status.slice(0, 28)}
+        <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+      </button>
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4 text-white shadow-lg">
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm font-semibold">
-        <Camera className="h-4 w-4 text-indigo-400" />
-        Eye Focus Guard
-        <Mic className="h-4 w-4 text-teal-400" />
-        <Volume2 className="h-4 w-4 text-amber-400" />
-        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-          {mode}
-        </span>
+    <div className="max-w-[min(100vw-2rem,340px)] rounded-2xl border border-slate-700 bg-slate-900 p-3 text-white shadow-lg">
+      <div className="mb-2 flex items-center justify-between gap-2 text-sm font-semibold">
+        <div className="flex items-center gap-2">
+          <Camera className="h-4 w-4 text-indigo-400" />
+          Eye Focus
+          <Mic className="h-3.5 w-3.5 text-teal-400" />
+          <Volume2 className="h-3.5 w-3.5 text-amber-400" />
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+          aria-label="Collapse"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
       </div>
-      <div className="flex flex-wrap gap-4">
+      <div className="flex flex-wrap gap-3">
         <video
           ref={videoRef}
           muted
           playsInline
           autoPlay
-          className="h-36 w-48 rounded-xl border border-slate-700 bg-black object-cover mirror"
+          className="h-28 w-36 rounded-xl border border-slate-700 bg-black object-cover"
           style={{ transform: "scaleX(-1)" }}
         />
         <canvas ref={canvasRef} className="hidden" />
-        <div className="min-w-[180px] flex-1 text-xs text-slate-300">
+        <div className="min-w-[140px] flex-1 text-xs text-slate-300">
           <p>
-            Camera:{" "}
-            <span className="font-semibold text-white">{permission}</span>
+            Cam: <span className="font-semibold text-white">{permission}</span> ·{" "}
+            {mode}
           </p>
-          <p className="mt-2 text-sm font-semibold text-indigo-300">{status}</p>
-          <ol className="mt-2 list-decimal space-y-1 pl-4 leading-relaxed text-slate-400">
-            <li>Click enable below / in Profile</li>
-            <li>Allow camera when browser asks</li>
-            <li>Sit in light, face centered</li>
-            <li>Wait for “Focused · eyes open”</li>
-          </ol>
+          <p className="mt-1 text-sm font-semibold text-indigo-300">{status}</p>
         </div>
       </div>
     </div>

@@ -1,39 +1,16 @@
 "use client";
 
-import { useAuth, useUser } from "@clerk/nextjs";
+import { useAuth } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Shield } from "lucide-react";
-import {
-  buildParentTabSwitchMessage,
-  openParentWhatsApp,
-} from "@/lib/whatsapp";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
 import { pushNotification } from "@/lib/notifications";
-import { displayName } from "@/lib/display-name";
 
-const PARENT_KEY = "sl_parent_phone";
 const FOCUS_KEY = "sl_focus_lock_enabled";
 const SWITCH_COUNT_KEY = "sl_tab_switch_count_";
 const COOLDOWN_MS = 3_000;
-
-function parentKey(userId?: string | null) {
-  return userId ? `${PARENT_KEY}_${userId}` : PARENT_KEY;
-}
-
-export function getParentPhone(userId?: string | null) {
-  if (typeof window === "undefined") return "";
-  return (
-    localStorage.getItem(parentKey(userId)) ||
-    localStorage.getItem(PARENT_KEY) ||
-    ""
-  );
-}
-
-export function setParentPhone(phone: string, userId?: string | null) {
-  localStorage.setItem(parentKey(userId), phone.replace(/\D/g, ""));
-}
 
 export function isFocusLockEnabled() {
   if (typeof window === "undefined") return true;
@@ -68,10 +45,9 @@ export function setModalOpen(on: boolean) {
   else delete document.documentElement.dataset.modalOpen;
 }
 
-/** Student-only tab-switch guardian (never on teacher routes). */
+/** Student-only in-app tab-switch notice during tests. No parent/WhatsApp alerts. */
 export default function FocusLock() {
   const { isSignedIn, userId } = useAuth();
-  const { user } = useUser();
   const path = usePathname() || "";
   const [banner, setBanner] = useState<string | null>(null);
   const [count, setCount] = useState(0);
@@ -95,11 +71,10 @@ export default function FocusLock() {
     return () => window.removeEventListener(ROLE_EVENT, sync);
   }, [userId]);
 
-  const alertParent = useCallback(() => {
+  const warnStudent = useCallback(() => {
     if (!isSignedIn || !userId) return;
     if (getRole(userId) !== "student") return;
     if (path.startsWith("/teacher")) return;
-    // Tab-switch ONLY during live test — but Test page has its own 5s/2-warning handler
     if (!onTest) return;
     if (document.documentElement.dataset.sessionLock === "test") return;
     if (!isFocusLockEnabled()) return;
@@ -114,20 +89,11 @@ export default function FocusLock() {
     localStorage.setItem(SWITCH_COUNT_KEY + userId, String(n));
     setCount(n);
 
-    const name = displayName(user);
-    const msg = buildParentTabSwitchMessage(name, n);
-    const phone = getParentPhone(userId);
-    const sent = phone ? openParentWhatsApp(phone, msg) : false;
-
-    setBanner(
-      sent
-        ? `Test tab switch #${n}! Parent WhatsApp alert opened.`
-        : `Test tab switch #${n}! Stay on the exam window.`
-    );
+    setBanner(`Test tab switch #${n}! Stay on the exam window.`);
 
     pushNotification(userId, {
       title: `Test tab switch #${n}`,
-      body: sent ? `Parent alert sent.` : `Stay focused on the test.`,
+      body: "Stay focused on the test.",
       href: "/test",
     });
 
@@ -147,7 +113,6 @@ export default function FocusLock() {
       const g = ctx.createGain();
       o.connect(g);
       g.connect(ctx.destination);
-      // Longer buzzer (~1.2s) so student notices
       o.frequency.value = 880;
       g.gain.value = 0.1;
       o.start();
@@ -163,7 +128,7 @@ export default function FocusLock() {
     }
 
     window.setTimeout(() => setBanner(null), 8000);
-  }, [isSignedIn, user, userId, path, onTest]);
+  }, [isSignedIn, userId, path, onTest]);
 
   useEffect(() => {
     if (!isSignedIn || !userId) return;
@@ -180,7 +145,7 @@ export default function FocusLock() {
       if (!armed.current) return;
       if (isPdfReading()) return;
       if (document.visibilityState === "hidden") {
-        alertParent();
+        warnStudent();
       } else if (document.visibilityState === "visible") {
         try {
           if (
@@ -195,11 +160,10 @@ export default function FocusLock() {
       }
     };
 
-    // pagehide / blur backup — some mobile browsers
     const onPageHide = () => {
       if (!armed.current) return;
       if (isPdfReading()) return;
-      alertParent();
+      warnStudent();
     };
 
     document.addEventListener("visibilitychange", onVis);
@@ -209,7 +173,7 @@ export default function FocusLock() {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pagehide", onPageHide);
     };
-  }, [isSignedIn, userId, role, onTeacher, onTest, alertParent]);
+  }, [isSignedIn, userId, role, onTeacher, onTest, warnStudent]);
 
   if (!isSignedIn || role !== "student" || onTeacher || !onTest || !banner)
     return null;
@@ -223,7 +187,8 @@ export default function FocusLock() {
         </div>
         <p className="mt-3 text-sm font-semibold text-white">{banner}</p>
         <p className="mt-2 text-xs text-slate-400">
-          Tab switches this session: <strong className="text-amber-300">{count}</strong>
+          Tab switches this session:{" "}
+          <strong className="text-amber-300">{count}</strong>
         </p>
         <button
           type="button"

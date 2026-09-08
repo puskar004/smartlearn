@@ -381,7 +381,23 @@ export default function StudentTestPage() {
       setLeft(mins * 60);
       setProctorReady(false);
       setIsFs(false);
-      // Camera/mic first (proctor). Fullscreen only after permissions granted.
+      // Cam already granted in this click — try FS while gesture may still count
+      try {
+        const el = document.documentElement;
+        const req =
+          el.requestFullscreen?.bind(el) ||
+          (
+            el as HTMLElement & {
+              webkitRequestFullscreen?: () => Promise<void> | void;
+            }
+          ).webkitRequestFullscreen?.bind(el);
+        if (req) {
+          await Promise.resolve(req());
+          setIsFs(true);
+        }
+      } catch {
+        // Proctor will show Enter fullscreen button after ready
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
       setTest(null);
@@ -690,8 +706,8 @@ export default function StudentTestPage() {
             </div>
           </div>
 
-          {/* RIGHT: palette — fixed width, always on screen during exam */}
-          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#f0f4f8] lg:w-[280px] lg:border-l lg:border-t-0">
+          {/* RIGHT: palette — sticky full height on desktop */}
+          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#f0f4f8] lg:sticky lg:top-0 lg:h-full lg:max-h-full lg:w-[280px] lg:border-l lg:border-t-0">
             <div className="shrink-0 border-b border-orange-300 bg-orange-400 px-3 py-2 text-center text-[12px] font-bold uppercase tracking-wide text-white">
               Question Palette
             </div>
@@ -839,26 +855,23 @@ export default function StudentTestPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-3 py-4 sm:px-6 sm:py-6">
+    <div className="mx-auto flex min-h-[70vh] max-w-3xl flex-col justify-center px-3 py-6 sm:px-6">
       {!test && (
         <>
           <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-            <ClipboardList className="h-3.5 w-3.5" /> Live Test · JEE-style
+            <ClipboardList className="h-3.5 w-3.5" /> Live Test · NEET / JEE style
           </div>
           <h1 className="mt-3 text-2xl font-extrabold text-slate-900 sm:text-3xl">
             Join teacher test
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            Hi {candidate}. Palette:{" "}
-            <span className="font-semibold text-emerald-600">
-              Green = answered
-            </span>
-            , grey = not visited, red = not answered, purple = marked for review.
+            Hi {candidate}. After start: Mark for Review, Clear, Save &amp; Next,
+            Submit. Palette: green answered · grey not visited · purple review.
           </p>
 
           <form
             onSubmit={(e) => void join(e)}
-            className="mt-8 max-w-xl space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            className="mt-8 w-full max-w-xl space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"
           >
             <input
               value={code}

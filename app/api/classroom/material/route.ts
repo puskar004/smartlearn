@@ -113,16 +113,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Save locally always; try public host without blocking forever
+    // Durable public URL only (Blob / free host / tiny data:) — no same-server fake success
     const saved = await saveMaterialFile(userId, code, buf, ext);
     const publishUrl = saved.url;
 
-    if (!publishUrl) {
+    if (!publishUrl || !saved.durable) {
       return NextResponse.json(
         {
           ok: false,
+          durable: false,
           error:
-            "Could not save PDF. Try a smaller file or paste a Drive link.",
+            "Cloud upload failed — students would not see this file. Retry, use a smaller PDF, or paste a public Google Drive / direct PDF link. (Tip: set BLOB_READ_WRITE_TOKEN on Vercel for reliable uploads.)",
         },
         { status: 200 }
       );
@@ -228,13 +229,11 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload failed";
     console.error("material upload", message);
-    // Rate limits never block the teacher UI
     if (/too many|429|rate/i.test(message)) {
       return NextResponse.json({
-        ok: true,
-        url: null,
+        ok: false,
         durable: false,
-        note: "Saved without cloud index — try again later",
+        error: "Server busy — wait a few seconds and upload again.",
       });
     }
     return NextResponse.json(

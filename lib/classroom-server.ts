@@ -393,19 +393,63 @@ function mergeLiveFromCache(
   const cacheByCode = new Map(
     (cached.classrooms || []).map((r) => [r.code.toUpperCase(), r])
   );
+  const pickLog = (a?: AttendanceRecord[], b?: AttendanceRecord[]) => {
+    const aa = a || [];
+    const bb = b || [];
+    if (aa.length >= bb.length) return aa.length ? aa : bb;
+    return bb;
+  };
   const rooms = (clerkMeta.classrooms || []).map((room) => {
     const code = room.code.toUpperCase();
     const prev = cacheByCode.get(code);
-    if (room.liveSession?.active) return room;
-    if (prev?.liveSession?.active) {
+    if (room.liveSession?.active) {
       return {
         ...room,
-        liveSession: prev.liveSession,
-        // keep newer attendees if clerk has them
-        attendanceLog:
-          (room.attendanceLog?.length || 0) >= (prev.attendanceLog?.length || 0)
-            ? room.attendanceLog
-            : prev.attendanceLog || room.attendanceLog,
+        attendanceLog: pickLog(room.attendanceLog, prev?.attendanceLog),
+        students:
+          (room.students?.length || 0) >= (prev?.students?.length || 0)
+            ? room.students
+            : prev?.students || room.students,
+      };
+    }
+    // Never resurrect LIVE after End: if log closed that session, or start not recent
+    if (prev?.liveSession?.active) {
+      const sid = prev.liveSession.id;
+      const closed =
+        (room.attendanceLog || []).some(
+          (r) => r.sessionId === sid && r.endedAt
+        ) ||
+        (prev.attendanceLog || []).some(
+          (r) => r.sessionId === sid && r.endedAt
+        );
+      const recentStart =
+        Date.now() - (prev.liveSession.startedAt || 0) < 45_000;
+      if (!closed && recentStart) {
+        return {
+          ...room,
+          liveSession: prev.liveSession,
+          attendanceLog: pickLog(room.attendanceLog, prev.attendanceLog),
+          students:
+            (room.students?.length || 0) >= (prev.students?.length || 0)
+              ? room.students
+              : prev.students || room.students,
+        };
+      }
+      return {
+        ...room,
+        liveSession: null,
+        attendanceLog: pickLog(room.attendanceLog, prev.attendanceLog),
+        students:
+          (room.students?.length || 0) >= (prev.students?.length || 0)
+            ? room.students
+            : prev.students || room.students,
+      };
+    }
+    if (prev) {
+      return {
+        ...room,
+        liveSession: null,
+        attendanceLog: pickLog(room.attendanceLog, prev.attendanceLog),
         students:
           (room.students?.length || 0) >= (prev.students?.length || 0)
             ? room.students
@@ -416,7 +460,11 @@ function mergeLiveFromCache(
   });
   // Include cache-only rooms that clerk omitted (shouldn't happen often)
   for (const [code, prev] of cacheByCode) {
-    if (!rooms.some((r) => r.code.toUpperCase() === code) && prev.liveSession?.active) {
+    if (
+      !rooms.some((r) => r.code.toUpperCase() === code) &&
+      prev.liveSession?.active &&
+      Date.now() - (prev.liveSession.startedAt || 0) < 45_000
+    ) {
       rooms.push(prev);
     }
   }

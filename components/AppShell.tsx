@@ -93,9 +93,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
       {!isTeacher && onTest && <FocusLock />}
       {!isTeacher && <ExtremeLock />}
-      {/* Persist eye-focus camera across Settings → other pages */}
+      {/* Collapsed badge by default — does not block nav */}
       {!isTeacher && eyeOn && !onTest && (
-        <div className="fixed bottom-4 left-4 z-[80] max-w-[min(100vw-2rem,360px)]">
+        <div className="pointer-events-auto fixed bottom-3 left-3 z-[60]">
           <EyeFocusGuard enabled />
         </div>
       )}

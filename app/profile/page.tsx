@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { User } from "lucide-react";
 import {
-  getParentPhone,
-  setParentPhone,
   isFocusLockEnabled,
   setFocusLockEnabled,
 } from "@/components/FocusLock";
@@ -26,8 +24,6 @@ import { emitRoleChanged } from "@/lib/role-events";
 export default function ProfilePage() {
   const { user, isSignedIn } = useUser();
   const { userId } = useAuth();
-  const [phone, setPhone] = useState("");
-  const [phoneErr, setPhoneErr] = useState<string | null>(null);
   const [grade, setGrade] = useState<Grade>("12");
   const [focusOn, setFocusOn] = useState(true);
   const [eyeGuard, setEyeGuard] = useState(false);
@@ -41,14 +37,7 @@ export default function ProfilePage() {
   const [teacherDept, setTeacherDept] = useState("");
   const [staffId, setStaffId] = useState("");
 
-  const normalizePhone = (raw: string) => raw.replace(/\D/g, "").slice(0, 15);
-  const isValidPhone = (raw: string) => {
-    const d = normalizePhone(raw);
-    return d.length === 10 || (d.length >= 11 && d.length <= 13);
-  };
-
   useEffect(() => {
-    setPhone(getParentPhone(userId));
     setFocusOn(isFocusLockEnabled());
     setEyeGuard(isEyeFocusEnabled(userId));
     if (userId) {
@@ -78,13 +67,6 @@ export default function ProfilePage() {
   }, [userId]);
 
   const save = () => {
-    const digits = normalizePhone(phone);
-    if (phone.trim() && !isValidPhone(phone)) {
-      setPhoneErr("Enter a valid 10-digit mobile number (digits only).");
-      return;
-    }
-    setPhoneErr(null);
-    setParentPhone(digits, userId);
     setFocusLockEnabled(focusOn);
     setEyeFocusEnabled(eyeGuard, userId);
     if (userId) {
@@ -171,29 +153,6 @@ export default function ProfilePage() {
               </select>
             </label>
 
-            <label className="mt-4 block text-sm font-semibold text-slate-700">
-              Parent WhatsApp number
-              <input
-                value={phone}
-                onChange={(e) => {
-                  const v = e.target.value.replace(/[^\d+\s-]/g, "");
-                  setPhone(v);
-                  setPhoneErr(null);
-                }}
-                inputMode="numeric"
-                maxLength={15}
-                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                placeholder="9876543210"
-              />
-              {phoneErr && (
-                <span className="mt-1 block text-xs font-semibold text-rose-600">
-                  {phoneErr}
-                </span>
-              )}
-              <span className="mt-1 block text-[10px] text-slate-400">
-                10-digit Indian mobile (digits only)
-              </span>
-            </label>
           </>
         ) : (
           <div className="mt-5 space-y-3">

@@ -4,7 +4,7 @@ import { uploadBufferRemote } from "@/lib/remote-upload";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
-/** In-memory fallback for current serverless instance */
+/** In-memory fallback for current serverless instance (read only, not student-durable) */
 const mem = new Map<string, { buf: Buffer; contentType: string }>();
 
 function dataDir() {
@@ -17,6 +17,20 @@ export function materialMaxBytes() {
   return MAX_BYTES;
 }
 
+function mimeFor(ext: string) {
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "png") return "image/png";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return "application/octet-stream";
+}
+
+/**
+ * Save PDF for class notes. Success requires a student-durable URL:
+ * - Vercel Blob (BLOB_READ_WRITE_TOKEN) preferred
+ * - free public hosts
+ * - tiny data: URL embed
+ * Local/API-only URLs are NOT durable — caller must fail honestly.
+ */
 export async function saveMaterialFile(
   teacherId: string,
   code: string,
@@ -29,52 +43,41 @@ export async function saveMaterialFile(
   if (buf.length < 20) throw new Error("Empty or invalid file");
 
   const safeCode = code.replace(/[^A-Z0-9]/gi, "").slice(0, 12) || "CLASS";
-  // Include size hash-ish to help dedupe identical double-clicks
   const key = `${safeCode}_${teacherId.slice(0, 10)}_${Date.now()}_${buf.length}.${(ext || "pdf").replace(/[^a-z0-9]/gi, "")}`;
-  const mime =
-    ext === "pdf"
-      ? "application/pdf"
-      : ext === "png"
-        ? "image/png"
-        : ext === "jpg" || ext === "jpeg"
-          ? "image/jpeg"
-          : "application/octet-stream";
+  const mime = mimeFor((ext || "pdf").toLowerCase());
 
   mem.set(key, { buf, contentType: mime });
-  let wroteDisk = false;
   try {
     await fs.mkdir(dataDir(), { recursive: true });
     await fs.writeFile(path.join(dataDir(), key), buf);
-    wroteDisk = true;
   } catch {
-    // ignore
+    // ignore disk errors
   }
 
-  const localUrl = `/api/classroom/material?key=${encodeURIComponent(key)}`;
-
-  // 1) Public host (budgeted) — students on other devices
+  // 1) Public durable host (Blob first, then free hosts)
   try {
     const remote = await uploadBufferRemote(buf, key, mime);
-    if (remote) return { key, url: remote, durable: true };
+    if (remote && /^https?:\/\//i.test(remote)) {
+      return { key, url: remote, durable: true };
+    }
   } catch {
     // fall through
   }
 
-  // 2) Small embed
+  // 2) Tiny PDF as data URL (works cross-device in notes JSON)
   if (buf.length <= 80_000 && mime === "application/pdf") {
-    const b64 = buf.toString("base64");
     return {
       key,
-      url: `data:${mime};base64,${b64}`,
+      url: `data:${mime};base64,${buf.toString("base64")}`,
       durable: true,
     };
   }
 
-  // 3) Same-origin API — always works for teacher Open + same server
+  // 3) Not student-durable — do not pretend success
   return {
     key,
-    url: localUrl,
-    durable: wroteDisk,
+    url: "",
+    durable: false,
   };
 }
 
