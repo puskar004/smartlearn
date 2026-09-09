@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: "%s | CurioSphere",
   },
   description:
-    "Class 10–12 CBSE mastery with NCERT PDFs, PYQs, Gemini tutor, safe YouTube, focus lock, and parent WhatsApp alerts.",
+    "Class 10–12 CBSE mastery with NCERT PDFs, PYQs, Gemini tutor, safe YouTube, and focus tools.",
   applicationName: "CurioSphere",
   authors: [{ name: "CurioSphere" }],
   keywords: ["CurioSphere", "NCERT", "CBSE", "Class 10", "Class 12", "study"],

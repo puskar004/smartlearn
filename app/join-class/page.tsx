@@ -473,7 +473,7 @@ export default function JoinClassPage() {
                       <div className="mt-2 rounded-2xl border border-slate-100 bg-slate-50 p-3">
                         <p className="mb-2 text-[11px] font-semibold text-slate-500">
                           Notes stay available for 48 hours · open inside
-                          SmartLearn (no new tab)
+                          CurioSphere (no new tab)
                         </p>
                         <div className="mb-2 flex justify-end">
                           <button
