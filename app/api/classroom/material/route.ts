@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
       type: type as "notes" | "video" | "link",
       subject,
       createdAt: now,
-      expiresAt: now + 48 * 60 * 60 * 1000,
+      expiresAt: now + 30 * 24 * 60 * 60 * 1000,
       teacherName,
     };
 
@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
       durable: saved.durable,
       size: buf.length,
       studentVisible: (published || []).length,
-      ttlHours: 48,
+      ttlHours: 30 * 24,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Upload failed";

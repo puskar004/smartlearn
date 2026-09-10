@@ -7,7 +7,8 @@ import path from "path";
 import type { LiveSession, TeacherMaterial } from "@/lib/classroom-types";
 import { uploadBufferRemote } from "@/lib/remote-upload";
 
-const MATERIAL_TTL_MS = 48 * 60 * 60 * 1000;
+/** Keep teacher PDFs visible longer so history is not wiped after 2 days */
+const MATERIAL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Lightweight live payload shared across servers (students poll this) */
 export type SharedLive = {

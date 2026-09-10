@@ -55,7 +55,7 @@ function lightClassroom(c: Classroom): Classroom {
           expiresAt: m.expiresAt ? Number(m.expiresAt) : undefined,
           teacherName: String(m.teacherName || "").slice(0, 80),
         }))
-        .slice(0, 20),
+        .slice(0, 40),
       alerts: alerts.slice(0, 10),
       attendanceLog: attendanceLog.slice(0, 40).map((r) => ({
         id: String(r.id || ""),
@@ -65,7 +65,7 @@ function lightClassroom(c: Classroom): Classroom {
         startedAt: Number(r.startedAt) || Date.now(),
         endedAt: r.endedAt ? Number(r.endedAt) : undefined,
         attendees: Array.isArray(r.attendees)
-          ? r.attendees.slice(0, 120).map((a) => ({
+          ? r.attendees.slice(0, 200).map((a) => ({
               studentId: String(a.studentId || ""),
               name: String(a.name || "Student").slice(0, 80),
               joinedAt: Number(a.joinedAt) || Date.now(),
@@ -73,7 +73,7 @@ function lightClassroom(c: Classroom): Classroom {
             }))
           : [],
       })),
-      students: students.slice(0, 60).map((s) => ({
+      students: students.slice(0, 80).map((s) => ({
         studentId: String(s.studentId || ""),
         name: String(s.name || "Student").slice(0, 80),
         email: s.email ? String(s.email).slice(0, 80) : undefined,
@@ -142,7 +142,7 @@ function lightMaterialBank(
   bank: Record<string, TeacherMaterial[]> | undefined
 ): Record<string, TeacherMaterial[]> {
   const out: Record<string, TeacherMaterial[]> = {};
-  const ttl = 48 * 60 * 60 * 1000;
+  const ttl = 30 * 24 * 60 * 60 * 1000;
   const now = Date.now();
   for (const [code, list] of Object.entries(bank || {})) {
     out[code] = (list || [])
@@ -526,8 +526,10 @@ export async function getNotesForClassCode(code: string): Promise<{
   const add = (list: TeacherMaterial[] = []) => {
     for (const m of list) {
       if (!m?.url) continue;
-      const exp = m.expiresAt || (m.createdAt || 0) + 48 * 60 * 60 * 1000;
-      if (m.createdAt && exp < Date.now()) continue;
+      const exp =
+        m.expiresAt || (m.createdAt || 0) + 30 * 24 * 60 * 60 * 1000;
+      // Keep https materials until explicit expiry; drop expired only
+      if (exp < Date.now()) continue;
       if (
         !m.url.startsWith("http") &&
         !m.url.startsWith("data:") &&
@@ -1238,7 +1240,7 @@ export async function addMaterialToClass(
     subject: String(material.subject || "General").slice(0, 60),
     id: `mat-${now}-${Math.random().toString(36).slice(2, 6)}`,
     createdAt: now,
-    expiresAt: now + 48 * 60 * 60 * 1000,
+    expiresAt: now + 30 * 24 * 60 * 60 * 1000,
   };
 
   // Fresh meta from Clerk when possible
@@ -1413,7 +1415,7 @@ export function materialsForRoom(
   const fromBank = meta.materialBank?.[c] || [];
   const fromRoom = room?.materials || [];
   const map = new Map<string, TeacherMaterial>();
-  const ttl = 48 * 60 * 60 * 1000;
+  const ttl = 30 * 24 * 60 * 60 * 1000;
   const now = Date.now();
   for (const m of [...fromBank, ...fromRoom]) {
     if (!m?.url) continue;
@@ -1511,6 +1513,40 @@ export async function startLive(
   });
 }
 
+function mergeAttendees(
+  ...lists: (AttendanceAttendee[] | undefined)[]
+): AttendanceAttendee[] {
+  const map = new Map<string, AttendanceAttendee>();
+  for (const list of lists) {
+    for (const a of list || []) {
+      if (!a?.studentId) continue;
+      const id = String(a.studentId);
+      const prev = map.get(id);
+      if (!prev) {
+        map.set(id, {
+          studentId: id,
+          name: String(a.name || "Student").slice(0, 80),
+          joinedAt: Number(a.joinedAt) || Date.now(),
+          leftAt: a.leftAt ? Number(a.leftAt) : undefined,
+        });
+      } else {
+        const name =
+          a.name && a.name !== "Student" ? String(a.name) : prev.name;
+        map.set(id, {
+          studentId: id,
+          name: name.slice(0, 80),
+          joinedAt: Math.min(
+            Number(prev.joinedAt) || Date.now(),
+            Number(a.joinedAt) || Date.now()
+          ),
+          leftAt: a.leftAt || prev.leftAt,
+        });
+      }
+    }
+  }
+  return Array.from(map.values()).slice(0, 200);
+}
+
 export async function endLive(teacherId: string, code: string) {
   const normalized = code.trim().toUpperCase();
   // Clear shared live FIRST so students stop seeing Meet immediately
@@ -1527,14 +1563,20 @@ export async function endLive(teacherId: string, code: string) {
     const now = Date.now();
     const stampLeft = (list: AttendanceAttendee[]) =>
       list.map((a) => (a.leftAt ? a : { ...a, leftAt: now }));
-    const attendees = stampLeft(sess.attendees || []);
+    // NEVER drop people: merge live attendees + open log + any prior closed same session
+    const fromLogs = (c.attendanceLog || [])
+      .filter((r) => r.sessionId === sess.id)
+      .flatMap((r) => r.attendees || []);
+    const attendees = stampLeft(
+      mergeAttendees(sess.attendees, fromLogs)
+    );
     let attendanceLog = (c.attendanceLog || []).map((r) => {
-      if (r.sessionId === sess.id && !r.endedAt) {
+      if (r.sessionId === sess.id) {
         return {
           ...r,
           endedAt: now,
           attendees: stampLeft(
-            attendees.length ? attendees : r.attendees || []
+            mergeAttendees(attendees, r.attendees)
           ),
         };
       }
@@ -1658,18 +1700,15 @@ export async function markAttendance(
       name: name || "Student",
       joinedAt: Date.now(),
     };
-    const attendees = already
-      ? existing
-      : [attendee, ...existing].slice(0, 120);
+    const attendees = mergeAttendees(
+      already ? existing : [attendee, ...existing],
+      existing
+    );
     let attendanceLog = (c.attendanceLog || []).map((r) => {
       if (r.sessionId !== sess!.id) return r;
-      const open = (r.attendees || []).find(
-        (a) => a.studentId === studentId && !a.leftAt
-      );
-      if (open) return r;
       return {
         ...r,
-        attendees: [attendee, ...(r.attendees || [])].slice(0, 120),
+        attendees: mergeAttendees(r.attendees, [attendee], attendees),
       };
     });
     const hasLog = attendanceLog.some((r) => r.sessionId === sess!.id);

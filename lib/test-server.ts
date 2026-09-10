@@ -177,11 +177,14 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
               map.set(t.id, {
                 ...t,
                 ...existing,
-                submissions: {
-                  ...(t.submissions || {}),
-                  ...(existing.submissions || {}),
-                },
-                active: existing.active && t.active ? existing.active : t.active && existing.active !== false ? existing.active : t.active,
+                submissions: mergeSubmissions(
+                  t.submissions,
+                  existing.submissions
+                ),
+                active:
+                  existing.active || t.active
+                    ? Boolean(existing.active ?? t.active)
+                    : false,
               });
             }
           }
@@ -212,7 +215,17 @@ export async function listTeacherTests(teacherId: string) {
     for (const t of metaOf(user).liveTests || []) {
       if (t.teacherId === teacherId || !t.teacherId) {
         const ex = map.get(t.id);
-        map.set(t.id, ex ? { ...t, ...ex, submissions: { ...t.submissions, ...ex.submissions } } : t);
+        map.set(
+          t.id,
+          ex
+            ? {
+                ...t,
+                ...ex,
+                submissions: mergeSubmissions(t.submissions, ex.submissions),
+                teacherId: ex.teacherId || t.teacherId || teacherId,
+              }
+            : { ...t, teacherId: t.teacherId || teacherId }
+        );
       }
     }
   } catch {
@@ -277,8 +290,10 @@ export async function submitTest(
     if (answers[i] === q.correctIndex) score += 1;
   });
 
+  const cleanName =
+    (name && String(name).trim()) || prev?.name || "Student";
   test.submissions[studentId] = {
-    name,
+    name: cleanName.slice(0, 80),
     answers,
     score,
     total: test.questions.length,
@@ -287,7 +302,10 @@ export async function submitTest(
     videoKeys: prev?.videoKeys || [],
   };
   await saveTest(test);
-  return test.submissions[studentId];
+  // Re-read merge in case concurrent moments wrote
+  const fresh = await findTestByCode(code);
+  const saved = fresh?.submissions?.[studentId] || test.submissions[studentId];
+  return saved;
 }
 
 async function saveMediaFile(
@@ -308,12 +326,98 @@ async function saveMediaFile(
     const buf = Buffer.from(raw, "base64");
     if (buf.length < 80) return undefined;
     if (buf.length > 1_800_000) return undefined;
-    await fs.writeFile(path.join(dir, key), buf);
+    try {
+      await fs.writeFile(path.join(dir, key), buf);
+    } catch {
+      // local may fail on serverless — still try remote
+    }
+    // Durable public URL so teacher can view after cold start
+    try {
+      const { uploadBufferRemote } = await import("@/lib/remote-upload");
+      const mime =
+        kind === "jpg"
+          ? "image/jpeg"
+          : kind === "webm-audio"
+            ? "audio/webm"
+            : "video/webm";
+      const remote = await uploadBufferRemote(buf, key, mime);
+      if (remote) return remote;
+    } catch (e) {
+      console.error("saveMediaFile remote", e);
+    }
     return key;
   } catch (e) {
     console.error("saveMediaFile", e);
     return undefined;
   }
+}
+
+function mergeSubmission(
+  a?: LiveTest["submissions"][string],
+  b?: LiveTest["submissions"][string]
+): LiveTest["submissions"][string] | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const aDone =
+    Array.isArray(a.answers) &&
+    a.answers.length > 0 &&
+    typeof a.score === "number" &&
+    a.total > 0;
+  const bDone =
+    Array.isArray(b.answers) &&
+    b.answers.length > 0 &&
+    typeof b.score === "number" &&
+    b.total > 0;
+  const base = aDone && !bDone ? a : bDone && !aDone ? b : a.at >= b.at ? a : b;
+  const other = base === a ? b : a;
+  const name =
+    base.name && base.name !== "Student"
+      ? base.name
+      : other.name || base.name || "Student";
+  const moments = [
+    ...(base.moments || []),
+    ...(other.moments || []),
+  ]
+    .sort((x, y) => (y.at || 0) - (x.at || 0))
+    .slice(0, 900);
+  const seen = new Set<string>();
+  const uniqMoments = moments.filter((m) => {
+    const k = `${m.at}|${m.imageKey || m.imageDataUrl?.slice(0, 40) || m.note || ""}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const videoKeys = Array.from(
+    new Set([...(base.videoKeys || []), ...(other.videoKeys || [])])
+  ).slice(0, 80);
+  return {
+    name,
+    answers:
+      aDone && base === a
+        ? a.answers
+        : bDone && base === b
+          ? b.answers
+          : a.answers?.length
+            ? a.answers
+            : b.answers || [],
+    score: aDone || bDone ? base.score : Math.max(a.score || 0, b.score || 0),
+    total: base.total || other.total || 0,
+    at: Math.max(a.at || 0, b.at || 0),
+    moments: uniqMoments,
+    videoKeys,
+  };
+}
+
+function mergeSubmissions(
+  ...maps: (LiveTest["submissions"] | undefined)[]
+): LiveTest["submissions"] {
+  const out: LiveTest["submissions"] = {};
+  for (const m of maps) {
+    for (const [sid, sub] of Object.entries(m || {})) {
+      out[sid] = mergeSubmission(out[sid], sub) || sub;
+    }
+  }
+  return out;
 }
 
 export async function addTestMoment(
@@ -451,6 +555,25 @@ export async function readMediaChunk(key: string): Promise<{
   buf: Buffer;
   contentType: string;
 } | null> {
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    try {
+      const res = await fetch(key, { cache: "no-store" });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      const ct = res.headers.get("content-type") || "";
+      let contentType = "application/octet-stream";
+      if (ct.includes("jpeg") || ct.includes("jpg") || key.includes(".jpg"))
+        contentType = "image/jpeg";
+      else if (ct.includes("png") || key.includes(".png"))
+        contentType = "image/png";
+      else if (ct.includes("webm") || key.includes(".webm"))
+        contentType = "audio/webm";
+      else if (ct) contentType = ct.split(";")[0];
+      return { buf, contentType };
+    } catch {
+      return null;
+    }
+  }
   try {
     const safe = path.basename(key);
     const buf = await fs.readFile(path.join(videoDir(), safe));

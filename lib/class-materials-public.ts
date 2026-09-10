@@ -5,7 +5,7 @@
 import type { TeacherMaterial } from "@/lib/classroom-types";
 import { uploadBufferRemote } from "@/lib/remote-upload";
 
-export const NOTES_TTL_MS = 48 * 60 * 60 * 1000;
+export const NOTES_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type ClassNotesPack = {
   code: string;

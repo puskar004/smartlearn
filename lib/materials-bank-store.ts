@@ -7,7 +7,7 @@ import path from "path";
 import type { TeacherMaterial } from "@/lib/classroom-types";
 import { uploadBufferRemote } from "@/lib/remote-upload";
 
-export const MATERIAL_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
+export const MATERIAL_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days history
 
 export type CodeBank = {
   byCode: Record<

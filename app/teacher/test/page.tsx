@@ -573,12 +573,16 @@ export default function TeacherTestPage() {
                     const imgSrc =
                       m.imageDataUrl ||
                       (m.imageKey
-                        ? `/api/tests?media=${encodeURIComponent(m.imageKey)}`
+                        ? m.imageKey.startsWith("http")
+                          ? m.imageKey
+                          : `/api/tests?media=${encodeURIComponent(m.imageKey)}`
                         : null);
                     const audioSrc =
                       m.audioDataUrl ||
                       (m.audioKey
-                        ? `/api/tests?media=${encodeURIComponent(m.audioKey)}`
+                        ? m.audioKey.startsWith("http")
+                          ? m.audioKey
+                          : `/api/tests?media=${encodeURIComponent(m.audioKey)}`
                         : null);
                     return (
                     <li
