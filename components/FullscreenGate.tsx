@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Maximize2, Shield } from "lucide-react";
+import {
+  isDocumentFullscreen,
+  onFullscreenChange,
+  requestDocumentFullscreen,
+} from "@/lib/fullscreen";
 
 /**
- * Blocks the app until the user enters (and stays in) fullscreen.
- * Browser requires a user gesture for requestFullscreen.
- * Optional deferUntil: CSS selector that must match before gate shows
- * (e.g. after camera permission — avoids FS exit on getUserMedia prompt).
+ * Blocks until real browser fullscreen. Must be entered via this button click.
  */
 export default function FullscreenGate({
   deferUntil,
@@ -18,33 +20,16 @@ export default function FullscreenGate({
   const [ready, setReady] = useState(false);
   const [deferredOk, setDeferredOk] = useState(!deferUntil);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const check = useCallback(() => {
-    const el =
-      document.fullscreenElement ||
-      (document as Document & { webkitFullscreenElement?: Element })
-        .webkitFullscreenElement;
-    setFs(Boolean(el));
+    setFs(isDocumentFullscreen());
     setReady(true);
   }, []);
 
   useEffect(() => {
     check();
-    const onChange = () => check();
-    document.addEventListener("fullscreenchange", onChange);
-    document.addEventListener("webkitfullscreenchange", onChange as EventListener);
-    const onResize = () => {
-      // soft hint only
-    };
-    window.addEventListener("resize", onResize);
-    return () => {
-      document.removeEventListener("fullscreenchange", onChange);
-      document.removeEventListener(
-        "webkitfullscreenchange",
-        onChange as EventListener
-      );
-      window.removeEventListener("resize", onResize);
-    };
+    return onFullscreenChange(check);
   }, [check]);
 
   useEffect(() => {
@@ -56,29 +41,30 @@ export default function FullscreenGate({
       setDeferredOk(Boolean(document.querySelector(deferUntil)));
     };
     tick();
-    const id = window.setInterval(tick, 400);
+    const id = window.setInterval(tick, 300);
     return () => clearInterval(id);
   }, [deferUntil]);
 
   const enter = async () => {
     setError(null);
+    setBusy(true);
     try {
-      const root = document.documentElement;
-      const req =
-        root.requestFullscreen?.bind(root) ||
-        (
-          root as HTMLElement & {
-            webkitRequestFullscreen?: () => Promise<void> | void;
-          }
-        ).webkitRequestFullscreen?.bind(root);
-      if (!req) {
-        setError("Fullscreen not supported on this browser. Use Chrome/Edge.");
-        return;
-      }
-      await Promise.resolve(req());
+      const ok = await requestDocumentFullscreen(document.documentElement);
       check();
+      if (!ok && !isDocumentFullscreen()) {
+        const ok2 = await requestDocumentFullscreen(document.body);
+        check();
+        if (!ok2 && !isDocumentFullscreen()) {
+          setError(
+            "Fullscreen blocked. Click again, or press F11, then click once more."
+          );
+        }
+      }
     } catch {
       setError("Allow fullscreen when the browser asks, then try again.");
+      check();
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -91,41 +77,40 @@ export default function FullscreenGate({
           <Maximize2 className="h-8 w-8" />
         </div>
         <h1 className="mt-5 text-2xl font-extrabold text-white">
-          Student Fullscreen Lock
+          Enter exam fullscreen
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-slate-400">
-          Student section runs only in{" "}
-          <strong className="text-indigo-300">fullscreen</strong>. Nothing else
-          is usable until you enter — and if you exit, this screen returns
-          immediately.
+          Browser tabs and the address bar must hide. Click below — this only
+          works from a direct click.
         </p>
         <ul className="mt-4 space-y-2 text-left text-xs text-slate-500">
           <li className="flex gap-2">
             <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            Hides browser chrome for focus study
+            Hides browser chrome for the live test
           </li>
           <li className="flex gap-2">
             <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            Tab switch still triggers student warning + parent alert
-          </li>
-          <li className="flex gap-2">
-            <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            Teachers are not locked (multi-tab free)
+            If you exit fullscreen, this lock returns
           </li>
         </ul>
         <button
           type="button"
-          onClick={() => void enter()}
-          className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-500"
+          autoFocus
+          disabled={busy}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void enter();
+          }}
+          className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-600/30 hover:bg-indigo-500 disabled:opacity-60"
         >
-          Enter Fullscreen — continue
+          {busy ? "Entering…" : "Enter Fullscreen — continue"}
         </button>
         {error && (
           <p className="mt-3 text-xs font-medium text-rose-400">{error}</p>
         )}
         <p className="mt-4 text-[11px] text-slate-600">
-          Tip: On phones, rotate to landscape and use “Add to Home Screen” for a
-          near-fullscreen experience.
+          Tip: Chrome/Edge desktop works best. Press F11 if the button is blocked.
         </p>
       </div>
     </div>

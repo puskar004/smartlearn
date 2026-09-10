@@ -411,6 +411,7 @@ export default function TestProctor({
     <div
       className="mb-3 space-y-2"
       data-proctor-ready={camOk && micOk && screenOk ? "1" : "0"}
+      data-testid="test-proctor"
     >
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
         <span className="inline-flex items-center gap-1">

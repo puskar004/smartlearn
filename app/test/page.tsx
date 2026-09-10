@@ -21,6 +21,11 @@ import { displayName } from "@/lib/display-name";
 import { setSessionLock } from "@/components/SessionLock";
 import TestProctor from "@/components/TestProctor";
 import { getRole } from "@/lib/teacher-store";
+import {
+  isDocumentFullscreen,
+  onFullscreenChange,
+  requestDocumentFullscreen,
+} from "@/lib/fullscreen";
 import { cn } from "@/lib/utils";
 
 type Q = {
@@ -127,21 +132,11 @@ export default function StudentTestPage() {
     setTabWarn(null);
   }, [inTest]);
 
-  // Track fullscreen — required to attempt
+  // Track real browser fullscreen (incl. webkit)
   useEffect(() => {
-    const syncFs = () => {
-      setIsFs(Boolean(document.fullscreenElement));
-    };
+    const syncFs = () => setIsFs(isDocumentFullscreen());
     syncFs();
-    document.addEventListener("fullscreenchange", syncFs);
-    document.addEventListener("webkitfullscreenchange", syncFs as EventListener);
-    return () => {
-      document.removeEventListener("fullscreenchange", syncFs);
-      document.removeEventListener(
-        "webkitfullscreenchange",
-        syncFs as EventListener
-      );
-    };
+    return onFullscreenChange(syncFs);
   }, []);
 
   // Clock starts only after proctor + fullscreen (FS only via button click)
@@ -159,33 +154,29 @@ export default function StudentTestPage() {
     setLeft(secs);
   }, [proctorReady, isFs, test, result]);
 
-  /** Must be called directly from a click — no await before this */
-  const requestFsNow = () => {
-    try {
-      const el = document.documentElement;
-      const req =
-        el.requestFullscreen?.bind(el) ||
-        (
-          el as HTMLElement & {
-            webkitRequestFullscreen?: () => Promise<void> | void;
-          }
-        ).webkitRequestFullscreen?.bind(el);
-      if (!req) return Promise.reject(new Error("no fs"));
-      return Promise.resolve(req());
-    } catch (e) {
-      return Promise.reject(e);
-    }
-  };
-
+  /** Call only from a direct button click (browser gesture requirement). */
   const enterFullscreen = async () => {
+    setError(null);
     try {
-      await requestFsNow();
-      setIsFs(Boolean(document.fullscreenElement));
-      setError(null);
+      // First line of async work after click = fullscreen request
+      const ok = await requestDocumentFullscreen(document.documentElement);
+      const now = isDocumentFullscreen() || ok;
+      setIsFs(now);
+      if (!now) {
+        // One more try on body
+        const ok2 = await requestDocumentFullscreen(document.body);
+        const now2 = isDocumentFullscreen() || ok2;
+        setIsFs(now2);
+        if (!now2) {
+          setError(
+            "Fullscreen blocked. Click the red button again, or press F11 / green maximize, then continue."
+          );
+        }
+      }
     } catch {
-      setIsFs(Boolean(document.fullscreenElement));
+      setIsFs(isDocumentFullscreen());
       setError(
-        "Allow fullscreen when the browser asks. Test can only run in fullscreen."
+        "Allow fullscreen when the browser asks, then click the button again."
       );
     }
   };
@@ -368,10 +359,7 @@ export default function StudentTestPage() {
     }
 
     // 1) FULLSCREEN FIRST — still inside the click gesture (no await before this)
-    const fsPromise = requestFsNow().then(
-      () => true,
-      () => false
-    );
+    const fsPromise = requestDocumentFullscreen(document.documentElement);
 
     setError(null);
     setResult(null);
@@ -407,12 +395,10 @@ export default function StudentTestPage() {
       setProctorReady(false);
 
       const fsOk = await fsPromise;
-      const nowFs = Boolean(document.fullscreenElement) || fsOk;
+      const nowFs = isDocumentFullscreen() || fsOk;
       setIsFs(nowFs);
       if (!nowFs) {
-        setError(
-          "Click “Enter fullscreen & start answering” when it appears (browser needs a direct click)."
-        );
+        setError(null); // modal button will force FS — no scary error yet
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -597,25 +583,37 @@ export default function StudentTestPage() {
               </p>
             )}
             {proctorReady && !isFs && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-4">
+              <div className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/90 p-4">
                 <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border-2 border-rose-500 bg-white px-6 py-8 text-center shadow-2xl">
-                <Shield className="h-10 w-10 text-rose-600" />
-                <div>
-                  <p className="text-lg font-bold text-rose-900">
-                    Fullscreen required
+                  <Shield className="h-10 w-10 text-rose-600" />
+                  <div>
+                    <p className="text-lg font-bold text-rose-900">
+                      Fullscreen required
+                    </p>
+                    <p className="mt-2 text-sm text-rose-800/80">
+                      Browser tabs must hide for the exam. Click the button
+                      below once — do not use the address bar.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void enterFullscreen();
+                    }}
+                    className="w-full rounded-xl border border-rose-700 bg-rose-600 px-5 py-4 text-sm font-black uppercase text-white shadow-lg hover:bg-rose-500"
+                  >
+                    Enter fullscreen &amp; start answering
+                  </button>
+                  {error && (
+                    <p className="text-xs font-semibold text-rose-600">{error}</p>
+                  )}
+                  <p className="text-[11px] text-slate-500">
+                    If it fails: press <strong>F11</strong> (Windows) or green
+                    window maximize, then click again.
                   </p>
-                  <p className="mt-2 text-sm text-rose-800/80">
-                    Browser only allows fullscreen from this button click. Tap
-                    below to start answering.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void enterFullscreen()}
-                  className="w-full rounded-xl border border-rose-700 bg-rose-600 px-5 py-4 text-sm font-black uppercase text-white shadow-lg hover:bg-rose-500"
-                >
-                  Enter fullscreen &amp; start answering
-                </button>
                 </div>
               </div>
             )}
