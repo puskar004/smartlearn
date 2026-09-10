@@ -96,7 +96,7 @@ export default function AppSidebar() {
   const bottom = isTeacher ? bottomTeacher : bottomStudent;
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 flex w-[72px] flex-col border-r border-indigo-100/80 bg-white/80 backdrop-blur-xl lg:w-[260px]">
+    <aside className="sl-app-sidebar fixed inset-y-0 left-0 z-40 flex w-[72px] flex-col border-r border-indigo-100/80 bg-white/80 backdrop-blur-xl lg:w-[260px]">
       <Link
         href={isTeacher ? "/teacher" : "/dashboard"}
         className="flex items-center gap-3 px-4 py-5 lg:px-5"

@@ -112,7 +112,8 @@ html.sl-session-lock body {
   overscroll-behavior: none;
 }
 
-html.sl-session-lock aside {
+/* Only hide app chrome sidebar — NOT the exam question palette */
+html.sl-session-lock aside.sl-app-sidebar {
   display: none !important;
 }
 

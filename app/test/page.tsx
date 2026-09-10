@@ -627,15 +627,15 @@ export default function StudentTestPage() {
           </div>
         )}
 
-        {/* Main exam body */}
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col lg:flex-row",
-            !canAttempt && "pointer-events-none opacity-45"
-          )}
-        >
+        {/* Main exam body — palette always visible; only question area dims until FS */}
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* LEFT: question */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-[#bdbdbd] bg-white">
+          <div
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1 flex-col border-r border-[#bdbdbd] bg-white",
+              !canAttempt && "pointer-events-none opacity-45"
+            )}
+          >
             <div className="flex items-center justify-between border-b border-[#cfd8dc] bg-[#eceff1] px-3 py-1.5">
               <span className="text-[13px] font-bold text-[#1a237e]">
                 Question {qi + 1}:
@@ -724,8 +724,11 @@ export default function StudentTestPage() {
             </div>
           </div>
 
-          {/* RIGHT: palette — sticky full height on desktop */}
-          <aside className="flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#f0f4f8] lg:sticky lg:top-0 lg:h-full lg:max-h-full lg:w-[280px] lg:border-l lg:border-t-0">
+          {/* RIGHT: question palette — always shown (NEET side nav) */}
+          <aside
+            data-exam-palette="1"
+            className="sl-exam-palette flex w-full shrink-0 flex-col border-t border-[#bdbdbd] bg-[#f0f4f8] lg:w-[300px] lg:border-l lg:border-t-0"
+          >
             <div className="shrink-0 border-b border-orange-300 bg-orange-400 px-3 py-2 text-center text-[12px] font-bold uppercase tracking-wide text-white">
               Question Palette
             </div>
@@ -755,8 +758,28 @@ export default function StudentTestPage() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              <div className="mb-2 text-[11px] font-bold uppercase text-[#1a237e]">
-                Choose a Question
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-[11px] font-bold uppercase text-[#1a237e]">
+                  Choose a Question
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    disabled={!canAttempt || qi <= 0}
+                    onClick={() => goTo(Math.max(0, qi - 1))}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-700 disabled:opacity-40"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canAttempt || qi >= n - 1}
+                    onClick={() => goTo(Math.min(n - 1, qi + 1))}
+                    className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-700 disabled:opacity-40"
+                  >
+                    Next →
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-5 gap-2">
                 {test.questions.map((_, i) => {
