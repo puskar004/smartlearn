@@ -61,6 +61,7 @@ export default function StudentTestPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
+  const [camReady, setCamReady] = useState(false);
   const [proctorReady, setProctorReady] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isFs, setIsFs] = useState(false);
@@ -158,7 +159,8 @@ export default function StudentTestPage() {
     setLeft(secs);
   }, [proctorReady, isFs, test, result]);
 
-  const enterFullscreen = async () => {
+  /** Must be called directly from a click — no await before this */
+  const requestFsNow = () => {
     try {
       const el = document.documentElement;
       const req =
@@ -168,17 +170,45 @@ export default function StudentTestPage() {
             webkitRequestFullscreen?: () => Promise<void> | void;
           }
         ).webkitRequestFullscreen?.bind(el);
-      if (!req) {
-        setError("Fullscreen not supported. Use Chrome/Edge on desktop.");
-        return;
-      }
-      await Promise.resolve(req());
-      setIsFs(true);
+      if (!req) return Promise.reject(new Error("no fs"));
+      return Promise.resolve(req());
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  };
+
+  const enterFullscreen = async () => {
+    try {
+      await requestFsNow();
+      setIsFs(Boolean(document.fullscreenElement));
       setError(null);
     } catch {
+      setIsFs(Boolean(document.fullscreenElement));
       setError(
         "Allow fullscreen when the browser asks. Test can only run in fullscreen."
       );
+    }
+  };
+
+  /** Pre-warm camera on consent check (user gesture) so Start can FS first */
+  const onConsentChange = async (on: boolean) => {
+    setConsent(on);
+    if (!on) {
+      setCamReady(false);
+      return;
+    }
+    try {
+      const pre = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: true,
+      });
+      pre.getTracks().forEach((t) => t.stop());
+      setCamReady(true);
+      setError(null);
+    } catch {
+      setCamReady(false);
+      setConsent(false);
+      setError("Allow camera + microphone first, then tick the box again.");
     }
   };
 
@@ -330,28 +360,24 @@ export default function StudentTestPage() {
 
   const join = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!consent) {
+    if (!consent || !camReady) {
       setError(
-        "Allow camera (ON) + mic + THIS TAB screen share to start the test."
+        "Tick the box and allow camera + mic first, then click Start again."
       );
       return;
     }
+
+    // 1) FULLSCREEN FIRST — still inside the click gesture (no await before this)
+    const fsPromise = requestFsNow().then(
+      () => true,
+      () => false
+    );
+
     setError(null);
     setResult(null);
     setLoading(true);
     try {
-      // Camera/mic BEFORE fullscreen (prevents FS drop on permission prompt)
-      try {
-        const pre = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: true,
-        });
-        pre.getTracks().forEach((t) => t.stop());
-      } catch {
-        throw new Error(
-          "Allow camera + microphone first, then join the test again."
-        );
-      }
+      // 2) Load test (cam already granted on consent)
       const res = await fetch(
         `/api/tests?code=${encodeURIComponent(code.trim())}`
       );
@@ -370,7 +396,6 @@ export default function StudentTestPage() {
       const t = data.test as TestMeta;
       if (!t.active) throw new Error("This test is closed by teacher");
       const len = t.questions.length;
-      // Teacher-set duration — timer starts when YOU start (not when test was created)
       const mins = Math.max(5, Number(t.durationMin) || 30);
       const endsAt = Date.now() + mins * 60_000;
       setTest({ ...t, endsAt, durationMin: mins });
@@ -380,23 +405,14 @@ export default function StudentTestPage() {
       setQi(0);
       setLeft(mins * 60);
       setProctorReady(false);
-      setIsFs(false);
-      // Cam already granted in this click — try FS while gesture may still count
-      try {
-        const el = document.documentElement;
-        const req =
-          el.requestFullscreen?.bind(el) ||
-          (
-            el as HTMLElement & {
-              webkitRequestFullscreen?: () => Promise<void> | void;
-            }
-          ).webkitRequestFullscreen?.bind(el);
-        if (req) {
-          await Promise.resolve(req());
-          setIsFs(true);
-        }
-      } catch {
-        // Proctor will show Enter fullscreen button after ready
+
+      const fsOk = await fsPromise;
+      const nowFs = Boolean(document.fullscreenElement) || fsOk;
+      setIsFs(nowFs);
+      if (!nowFs) {
+        setError(
+          "Click “Enter fullscreen & start answering” when it appears (browser needs a direct click)."
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
@@ -581,24 +597,26 @@ export default function StudentTestPage() {
               </p>
             )}
             {proctorReady && !isFs && (
-              <div className="flex flex-col items-center gap-2 rounded border-2 border-rose-500 bg-rose-50 px-4 py-4 text-center sm:flex-row sm:justify-center">
-                <Shield className="h-6 w-6 text-rose-600" />
-                <div className="text-left">
-                  <p className="text-sm font-bold text-rose-900">
-                    Fullscreen required to attempt the test
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-4">
+                <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border-2 border-rose-500 bg-white px-6 py-8 text-center shadow-2xl">
+                <Shield className="h-10 w-10 text-rose-600" />
+                <div>
+                  <p className="text-lg font-bold text-rose-900">
+                    Fullscreen required
                   </p>
-                  <p className="text-[11px] text-rose-800/80">
-                    Questions stay locked until you enter fullscreen. Exiting FS
-                    mid-test pauses answering.
+                  <p className="mt-2 text-sm text-rose-800/80">
+                    Browser only allows fullscreen from this button click. Tap
+                    below to start answering.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => void enterFullscreen()}
-                  className="rounded border border-rose-700 bg-rose-600 px-5 py-2 text-xs font-black uppercase text-white shadow hover:bg-rose-500"
+                  className="w-full rounded-xl border border-rose-700 bg-rose-600 px-5 py-4 text-sm font-black uppercase text-white shadow-lg hover:bg-rose-500"
                 >
                   Enter fullscreen &amp; start answering
                 </button>
+                </div>
               </div>
             )}
             {error && (
@@ -884,17 +902,22 @@ export default function StudentTestPage() {
               <input
                 type="checkbox"
                 checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
+                onChange={(e) => void onConsentChange(e.target.checked)}
                 className="mt-0.5"
               />
               <span>
                 Camera ON + mic + <strong>this tab</strong> share required.
                 Stopping share exits the test.
+                {camReady && (
+                  <strong className="mt-1 block text-emerald-700">
+                    Camera ready ✓ — click Start for fullscreen exam
+                  </strong>
+                )}
               </span>
             </label>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !consent || !camReady}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-60"
             >
               {loading ? (
@@ -902,7 +925,7 @@ export default function StudentTestPage() {
               ) : (
                 <LogIn className="h-4 w-4" />
               )}
-              Start locked test
+              {camReady ? "Start locked test (fullscreen)" : "Enable camera first"}
             </button>
           </form>
         </>

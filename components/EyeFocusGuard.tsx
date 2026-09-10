@@ -1,42 +1,61 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Camera, ChevronDown, ChevronUp, Mic, Volume2 } from "lucide-react";
-
-type Landmark = { x: number; y: number };
-
-type FaceLandmarkerLike = {
-  detectForVideo: (
-    video: HTMLVideoElement,
-    ts: number
-  ) => { faceLandmarks?: Landmark[][] };
-  close?: () => void;
-};
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, ChevronDown, ChevronUp, Volume2 } from "lucide-react";
 
 /**
- * Eye / face focus monitor — collapsed corner badge by default so it never blocks nav.
+ * Eye / face focus monitor.
+ * Video always stays in the DOM so the stream can attach and the timer runs.
  */
 export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState("Idle");
-  const [mode, setMode] = useState<"mediapipe" | "heuristic" | "off">("off");
+  const [mode, setMode] = useState<"heuristic" | "off">("off");
   const [permission, setPermission] = useState<"pending" | "ok" | "denied">(
     "pending"
   );
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [retry, setRetry] = useState(0);
   const closedMs = useRef(0);
   const raf = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
-  const landmarkerRef = useRef<FaceLandmarkerLike | null>(null);
   const lastAlarm = useRef(0);
   const baseline = useRef<{ mean: number; eye: number } | null>(null);
   const calibFrames = useRef(0);
   const wallRef = useRef(0);
 
+  const attachStreamToVideo = useCallback(async () => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return false;
+    try {
+      if (video.srcObject !== stream) video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "true");
+      await video.play();
+      return true;
+    } catch {
+      try {
+        await video.play();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!enabled) {
-      cleanup();
+      cancelAnimationFrame(raf.current);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      if (videoRef.current) videoRef.current.srcObject = null;
+      baseline.current = null;
+      calibFrames.current = 0;
+      wallRef.current = 0;
+      closedMs.current = 0;
       setStatus("Off");
       setMode("off");
       setPermission("pending");
@@ -44,17 +63,18 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
     }
 
     let alive = true;
+    setExpanded(true);
 
     function cleanup() {
+      alive = false;
       cancelAnimationFrame(raf.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       try {
-        landmarkerRef.current?.close?.();
+        if (videoRef.current) videoRef.current.srcObject = null;
       } catch {
         // ignore
       }
-      landmarkerRef.current = null;
       baseline.current = null;
       calibFrames.current = 0;
       wallRef.current = 0;
@@ -95,6 +115,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
     function sample(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) return null;
+      if (video.videoWidth < 2 || video.videoHeight < 2) return null;
       const w = 120;
       const h = 90;
       canvas.width = w;
@@ -130,56 +151,22 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       ];
       const cornerAvg = corners.reduce((a, b) => a + b, 0) / 4;
       const contrast = Math.abs(faceMean - cornerAvg);
-
       return { faceMean, eyeMean, contrast };
-    }
-
-    async function start() {
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          setPermission("denied");
-          setStatus("Camera API not available");
-          return;
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-          },
-          audio: true,
-        });
-        if (!alive) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        setPermission("ok");
-        setMode("heuristic");
-        const video = videoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          video.muted = true;
-          await video.play();
-        }
-        setStatus("Calibrating… keep eyes open 2 sec");
-        wallRef.current = Date.now();
-        loop();
-      } catch (e) {
-        setPermission("denied");
-        setStatus(
-          e instanceof Error
-            ? `Permission blocked: ${e.message}`
-            : "Allow camera + mic, then toggle again"
-        );
-      }
     }
 
     function loop() {
       if (!alive) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || video.readyState < 2) {
+      if (!video || !canvas) {
+        raf.current = requestAnimationFrame(loop);
+        return;
+      }
+      if (streamRef.current && video.srcObject !== streamRef.current) {
+        video.srcObject = streamRef.current;
+        void video.play().catch(() => undefined);
+      }
+      if (video.readyState < 2) {
         raf.current = requestAnimationFrame(loop);
         return;
       }
@@ -221,7 +208,6 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       } else if (closedMs.current < 25000) {
         closedMs.current = Math.max(0, closedMs.current - dt * 0.8);
       } else {
-        // Near 30s: almost no decay unless clearly focused
         closedMs.current = Math.max(0, closedMs.current - dt * 0.05);
       }
 
@@ -245,32 +231,104 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       raf.current = requestAnimationFrame(loop);
     }
 
+    async function start() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setPermission("denied");
+          setStatus("Camera API not available");
+          return;
+        }
+        setStatus("Starting camera…");
+        setPermission("pending");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+          audio: false,
+        });
+        if (!alive) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        setPermission("ok");
+        setMode("heuristic");
+
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        let ok = await attachStreamToVideo();
+        if (!ok) {
+          await new Promise((r) => setTimeout(r, 120));
+          ok = await attachStreamToVideo();
+        }
+        setStatus(
+          ok
+            ? "Calibrating… keep eyes open 2 sec"
+            : "Camera on — open preview if blank"
+        );
+        wallRef.current = Date.now();
+        loop();
+      } catch (e) {
+        setPermission("denied");
+        setStatus(
+          e instanceof Error
+            ? `Allow camera: ${e.message}`
+            : "Allow camera, then Retry"
+        );
+      }
+    }
+
     void start();
-    return () => {
-      alive = false;
-      cleanup();
-    };
-  }, [enabled]);
+    return () => cleanup();
+  }, [enabled, retry, attachStreamToVideo]);
+
+  useEffect(() => {
+    if (!enabled || !expanded) return;
+    void attachStreamToVideo();
+  }, [enabled, expanded, attachStreamToVideo]);
 
   if (!enabled) return null;
 
+  const videoEl = (
+    <video
+      ref={videoRef}
+      muted
+      playsInline
+      autoPlay
+      className={
+        expanded
+          ? "h-28 w-36 rounded-xl border border-slate-700 bg-black object-cover"
+          : "pointer-events-none absolute h-px w-px opacity-0"
+      }
+      style={{ transform: "scaleX(-1)" }}
+    />
+  );
+
   if (!expanded) {
     return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-900/95 px-3 py-2 text-xs font-bold text-white shadow-lg backdrop-blur"
-        title={status}
-      >
-        <span
-          className={`h-2 w-2 rounded-full ${
-            permission === "ok" ? "bg-emerald-400" : "bg-amber-400"
-          }`}
-        />
-        <Camera className="h-3.5 w-3.5 text-indigo-300" />
-        Eye · {status.slice(0, 28)}
-        <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
-      </button>
+      <div className="relative">
+        {videoEl}
+        <canvas ref={canvasRef} className="hidden" />
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded(true);
+            void attachStreamToVideo();
+          }}
+          className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-900/95 px-3 py-2 text-xs font-bold text-white shadow-lg backdrop-blur"
+          title={status}
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${
+              permission === "ok" ? "bg-emerald-400" : "bg-amber-400"
+            }`}
+          />
+          <Camera className="h-3.5 w-3.5 text-indigo-300" />
+          Eye · {status.slice(0, 28)}
+          <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+        </button>
+      </div>
     );
   }
 
@@ -280,7 +338,6 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
         <div className="flex items-center gap-2">
           <Camera className="h-4 w-4 text-indigo-400" />
           Eye Focus
-          <Mic className="h-3.5 w-3.5 text-teal-400" />
           <Volume2 className="h-3.5 w-3.5 text-amber-400" />
         </div>
         <button
@@ -293,21 +350,24 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
         </button>
       </div>
       <div className="flex flex-wrap gap-3">
-        <video
-          ref={videoRef}
-          muted
-          playsInline
-          autoPlay
-          className="h-28 w-36 rounded-xl border border-slate-700 bg-black object-cover"
-          style={{ transform: "scaleX(-1)" }}
-        />
+        {videoEl}
         <canvas ref={canvasRef} className="hidden" />
         <div className="min-w-[140px] flex-1 text-xs text-slate-300">
           <p>
-            Cam: <span className="font-semibold text-white">{permission}</span> ·{" "}
+            Cam:{" "}
+            <span className="font-semibold text-white">{permission}</span> ·{" "}
             {mode}
           </p>
           <p className="mt-1 text-sm font-semibold text-indigo-300">{status}</p>
+          {(permission === "denied" || permission === "pending") && (
+            <button
+              type="button"
+              onClick={() => setRetry((n) => n + 1)}
+              className="mt-2 rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-bold text-white"
+            >
+              Retry camera
+            </button>
+          )}
         </div>
       </div>
     </div>
