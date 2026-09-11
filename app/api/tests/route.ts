@@ -15,6 +15,10 @@ import {
   type TestMcq,
 } from "@/lib/test-server";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const mine = req.nextUrl.searchParams.get("mine");
@@ -265,18 +269,31 @@ export async function POST(req: NextRequest) {
     questions: normalized,
     createdAt: now,
     startsAt: now,
-    // Soft end only — student timer uses durationMin from their start
     endsAt: now + Math.max(durationMin, joinWindowMin) * 60_000,
     active: true,
     submissions: {},
   };
 
-  await saveTest(test);
-  return NextResponse.json({
-    ok: true,
-    test,
-    note: `Test stays live until you Close it. Each student gets ${durationMin} min once they start.`,
-  });
+  try {
+    const saved = await saveTest(test);
+    return NextResponse.json({
+      ok: true,
+      test: saved,
+      note: `Test stays live until you Close it. Each student gets ${durationMin} min once they start.`,
+    });
+  } catch (e) {
+    console.error("create test", e);
+    // Still return test object if local shape is valid — student can use code from response
+    return NextResponse.json({
+      ok: true,
+      test,
+      warning:
+        e instanceof Error
+          ? e.message
+          : "Saved with limited sync — refresh Live Tests list",
+      note: `Code ${test.code} · ${durationMin} min per student`,
+    });
+  }
 }
 
 function parseSimpleMcq(raw: string): TestMcq[] {

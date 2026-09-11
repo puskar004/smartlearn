@@ -191,10 +191,17 @@ export default function TeacherTestPage() {
           questions: qs,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Create failed");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        throw new Error(
+          data.error || data.message || `Create failed (${res.status})`
+        );
+      }
+      if (!data.test?.code) {
+        throw new Error(data.error || "Create failed — no test code returned");
+      }
       setMsg(
-        `Live · code ${data.test.code} · join open ${joinWindowMin} min · each student gets ${durationMin} min`
+        `Live · code ${data.test.code} · each student gets ${durationMin} min · stays live until Close`
       );
       setQuestions([]);
       setRawText("");

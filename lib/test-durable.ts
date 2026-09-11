@@ -161,11 +161,15 @@ export async function durableSaveTest(test: LiveTest) {
 
   let testUrl: string | null = null;
   try {
-    testUrl = await uploadBufferRemote(
-      Buffer.from(JSON.stringify(payload), "utf8"),
-      `test-${c}-${Date.now()}.json`,
-      "application/json"
-    );
+    // Skip remote if payload huge (many snaps) — local + index still work
+    const raw = Buffer.from(JSON.stringify(payload), "utf8");
+    if (raw.length < 3_500_000) {
+      testUrl = await uploadBufferRemote(
+        raw,
+        `test-${c}-${Date.now()}.json`,
+        "application/json"
+      );
+    }
     if (testUrl) {
       try {
         await fs.writeFile(testPointer(c), testUrl, "utf8");

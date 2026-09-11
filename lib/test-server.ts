@@ -99,39 +99,47 @@ function metaOf(user: {
   return (m.smartlearn as Meta) || {};
 }
 
-/** Strip heavy moments before Clerk metadata (size limits) — keep score/name/keys */
+/** Tiny Clerk copy — full questions/snaps live in file + durable store */
 function lightTest(t: LiveTest): LiveTest {
   const submissions: LiveTest["submissions"] = {};
   for (const [sid, s] of Object.entries(t.submissions || {})) {
     submissions[sid] = {
       name: s.name || "Student",
-      answers: Array.isArray(s.answers) ? s.answers : [],
+      answers: Array.isArray(s.answers) ? s.answers.slice(0, 200) : [],
       score: Number(s.score) || 0,
       total: Number(s.total) || t.questions?.length || 0,
       at: Number(s.at) || Date.now(),
-      videoKeys: (s.videoKeys || []).slice(0, 20),
-      moments: (s.moments || []).slice(0, 8).map((m) => ({
+      videoKeys: (s.videoKeys || []).slice(0, 10),
+      moments: (s.moments || []).slice(0, 5).map((m) => ({
         at: m.at,
         note: m.note,
         videoKey: m.videoKey,
         imageKey: m.imageKey,
         audioKey: m.audioKey,
-        // only tiny previews in Clerk; full snaps via durable store / https keys
-        imageDataUrl:
-          m.imageKey && String(m.imageKey).startsWith("http")
-            ? undefined
-            : m.imageDataUrl
-              ? String(m.imageDataUrl).slice(0, 25_000)
-              : undefined,
       })),
     };
   }
   return {
-    ...t,
+    id: t.id,
     code: t.code,
     title: t.title,
-    active: t.active,
     teacherId: t.teacherId,
+    teacherName: t.teacherName,
+    subject: t.subject,
+    classCode: t.classCode,
+    durationMin: t.durationMin,
+    joinUntil: t.joinUntil,
+    // stub questions so Clerk metadata stays small (create must not 413)
+    questions: (t.questions || []).slice(0, 3).map((q, i) => ({
+      id: q.id || `q-${i}`,
+      prompt: String(q.prompt || "").slice(0, 80),
+      options: (q.options || []).slice(0, 4).map((o) => String(o).slice(0, 40)),
+      correctIndex: q.correctIndex ?? 0,
+    })),
+    createdAt: t.createdAt,
+    startsAt: t.startsAt,
+    endsAt: t.endsAt,
+    active: t.active,
     submissions,
   };
 }
@@ -152,7 +160,6 @@ export async function saveTest(test: LiveTest) {
     ? {
         ...prev,
         ...test,
-        // Explicit close wins; otherwise stay live if either copy is active
         active:
           test.active === false
             ? false
@@ -170,46 +177,57 @@ export async function saveTest(test: LiveTest) {
     0,
     100
   );
+
+  // 1) Local file FIRST — create must succeed even if remote/Clerk lag
   await writeFile(next);
 
-  // Durable mirror — survives Vercel instance hops (student submit → teacher list)
-  try {
-    const { durableSaveTest } = await import("@/lib/test-durable");
-    await durableSaveTest(merged);
-  } catch (e) {
-    console.error("durableSaveTest", e);
-  }
+  // 2) Durable mirror — timeout so create never hangs
+  void (async () => {
+    try {
+      const { durableSaveTest } = await import("@/lib/test-durable");
+      await Promise.race([
+        durableSaveTest(merged),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error("durable timeout")), 10_000)
+        ),
+      ]);
+    } catch (e) {
+      console.error("durableSaveTest", e);
+    }
+  })();
 
-  try {
-    const client = await clerkClient();
-    const user = await client.users.getUser(merged.teacherId);
-    const sm = metaOf(user);
-    // Clerk: lightweight only (scores/names/keys) — full snaps in durable store
-    const light = lightTest(merged);
-    const liveTests = [light, ...(sm.liveTests || [])]
-      .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
-      .map((t) =>
-        t.id === merged.id
-          ? {
-              ...t,
-              active: merged.active,
-              code: merged.code,
-              title: merged.title,
-              teacherId: merged.teacherId,
-              submissions: mergeSubmissions(t.submissions, light.submissions),
-            }
-          : t
-      )
-      .slice(0, 40);
-    await client.users.updateUserMetadata(merged.teacherId, {
-      publicMetadata: {
-        ...user.publicMetadata,
-        smartlearn: { ...sm, liveTests },
-      },
-    });
-  } catch (e) {
-    console.error("saveTest meta", e);
-  }
+  // 3) Clerk index (tiny) — never block create on failure
+  void (async () => {
+    try {
+      const client = await clerkClient();
+      const user = await client.users.getUser(merged.teacherId);
+      const sm = metaOf(user);
+      const light = lightTest(merged);
+      const liveTests = [light, ...(sm.liveTests || [])]
+        .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
+        .map((t) =>
+          t.id === merged.id
+            ? {
+                ...light,
+                submissions: mergeSubmissions(
+                  t.submissions,
+                  light.submissions
+                ),
+              }
+            : t
+        )
+        .slice(0, 40);
+      await client.users.updateUserMetadata(merged.teacherId, {
+        publicMetadata: {
+          ...user.publicMetadata,
+          smartlearn: { ...sm, liveTests },
+        },
+      });
+    } catch (e) {
+      console.error("saveTest meta", e);
+    }
+  })();
+
   return merged;
 }
 
