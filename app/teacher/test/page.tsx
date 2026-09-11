@@ -97,11 +97,44 @@ export default function TeacherTestPage() {
         cache: "no-store",
       });
       const data = await res.json();
-      if (Array.isArray(data.tests)) {
-        setTests(data.tests);
-      }
+      if (!Array.isArray(data.tests)) return;
+      // MERGE with existing — never wipe list if API returns partial/empty briefly
+      setTests((prev) => {
+        const map = new Map<string, TestRow>();
+        const put = (t: TestRow) => {
+          const id = t.id || t.code;
+          if (!id) return;
+          const ex = map.get(id);
+          if (!ex) {
+            map.set(id, t);
+            return;
+          }
+          map.set(id, {
+            ...ex,
+            ...t,
+            active: Boolean(ex.active || t.active),
+            questions:
+              (t.questions?.length || 0) >= (ex.questions?.length || 0)
+                ? t.questions
+                : ex.questions,
+            submissions: {
+              ...(ex.submissions || {}),
+              ...(t.submissions || {}),
+            },
+          });
+        };
+        for (const t of prev) put(t);
+        for (const t of data.tests as TestRow[]) put(t);
+        return Array.from(map.values()).sort(
+          (a, b) =>
+            Number(b.active) - Number(a.active) ||
+            Object.keys(b.submissions || {}).length -
+              Object.keys(a.submissions || {}).length ||
+            (b.endsAt || 0) - (a.endsAt || 0)
+        );
+      });
     } catch {
-      // ignore
+      // ignore — keep previous tests on screen
     }
   }, []);
 
@@ -200,6 +233,26 @@ export default function TeacherTestPage() {
       if (!data.test?.code) {
         throw new Error(data.error || "Create failed — no test code returned");
       }
+      // Optimistically keep test on screen immediately
+      const created = data.test as TestRow;
+      setTests((prev) => {
+        const rest = prev.filter(
+          (t) => t.id !== created.id && t.code !== created.code
+        );
+        return [
+          {
+            id: created.id,
+            code: created.code,
+            title: created.title,
+            durationMin: created.durationMin || durationMin,
+            active: true,
+            questions: created.questions || qs,
+            submissions: created.submissions || {},
+            endsAt: created.endsAt || Date.now(),
+          },
+          ...rest,
+        ];
+      });
       setMsg(
         `Live · code ${data.test.code} · each student gets ${durationMin} min · stays live until Close`
       );

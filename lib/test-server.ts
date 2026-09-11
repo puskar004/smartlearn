@@ -178,55 +178,49 @@ export async function saveTest(test: LiveTest) {
     100
   );
 
-  // 1) Local file FIRST — create must succeed even if remote/Clerk lag
+  // 1) Local file FIRST
   await writeFile(next);
 
-  // 2) Durable mirror — timeout so create never hangs
-  void (async () => {
-    try {
-      const { durableSaveTest } = await import("@/lib/test-durable");
-      await Promise.race([
-        durableSaveTest(merged),
-        new Promise<never>((_, rej) =>
-          setTimeout(() => rej(new Error("durable timeout")), 10_000)
-        ),
-      ]);
-    } catch (e) {
-      console.error("durableSaveTest", e);
-    }
-  })();
+  // 2) Durable mirror MUST complete for teacher/student cross-instance
+  //    (fire-and-forget caused tests to vanish from teacher after submit)
+  try {
+    const { durableSaveTest } = await import("@/lib/test-durable");
+    await Promise.race([
+      durableSaveTest(merged),
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("durable timeout")), 20_000)
+      ),
+    ]);
+  } catch (e) {
+    console.error("durableSaveTest", e);
+  }
 
-  // 3) Clerk index (tiny) — never block create on failure
-  void (async () => {
-    try {
-      const client = await clerkClient();
-      const user = await client.users.getUser(merged.teacherId);
-      const sm = metaOf(user);
-      const light = lightTest(merged);
-      const liveTests = [light, ...(sm.liveTests || [])]
-        .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
-        .map((t) =>
-          t.id === merged.id
-            ? {
-                ...light,
-                submissions: mergeSubmissions(
-                  t.submissions,
-                  light.submissions
-                ),
-              }
-            : t
-        )
-        .slice(0, 40);
-      await client.users.updateUserMetadata(merged.teacherId, {
-        publicMetadata: {
-          ...user.publicMetadata,
-          smartlearn: { ...sm, liveTests },
-        },
-      });
-    } catch (e) {
-      console.error("saveTest meta", e);
-    }
-  })();
+  // 3) Clerk index (scores/names) — await so teacher list has at least stubs
+  try {
+    const client = await clerkClient();
+    const user = await client.users.getUser(merged.teacherId);
+    const sm = metaOf(user);
+    const light = lightTest(merged);
+    const liveTests = [light, ...(sm.liveTests || [])]
+      .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
+      .map((t) =>
+        t.id === merged.id
+          ? {
+              ...light,
+              submissions: mergeSubmissions(t.submissions, light.submissions),
+            }
+          : t
+      )
+      .slice(0, 40);
+    await client.users.updateUserMetadata(merged.teacherId, {
+      publicMetadata: {
+        ...user.publicMetadata,
+        smartlearn: { ...sm, liveTests },
+      },
+    });
+  } catch (e) {
+    console.error("saveTest meta", e);
+  }
 
   return merged;
 }
@@ -384,7 +378,6 @@ export async function submitTest(
   if (!test.active) throw new Error("Test is closed by teacher");
 
   const prev = test.submissions[studentId];
-  // Block re-attempt if already fully submitted
   if (
     prev &&
     Array.isArray(prev.answers) &&
@@ -398,7 +391,8 @@ export async function submitTest(
   }
 
   let score = 0;
-  test.questions.forEach((q, i) => {
+  const qCount = test.questions?.length || 0;
+  (test.questions || []).forEach((q, i) => {
     if (answers[i] === q.correctIndex) score += 1;
   });
 
@@ -408,15 +402,16 @@ export async function submitTest(
     name: cleanName.slice(0, 80),
     answers,
     score,
-    total: test.questions.length,
+    total: qCount || answers.length || 0,
     at: Date.now(),
     moments: prev?.moments || [],
     videoKeys: prev?.videoKeys || [],
   };
-  await saveTest(test);
-  // Re-read merge in case concurrent moments wrote
-  const fresh = await findTestByCode(code);
-  const saved = fresh?.submissions?.[studentId] || test.submissions[studentId];
+  // Keep test active + full questions when saving submission
+  test.active = true;
+  const savedTest = await saveTest(test);
+  const saved =
+    savedTest.submissions?.[studentId] || test.submissions[studentId];
   return saved;
 }
 

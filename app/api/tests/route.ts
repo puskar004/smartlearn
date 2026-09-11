@@ -143,7 +143,16 @@ export async function POST(req: NextRequest) {
       "Student";
     try {
       const result = await submitTest(code, userId, name, answers);
-      return NextResponse.json({ ok: true, result });
+      // Return teacher-facing snapshot so UI can refresh confidently
+      const t = await findTestByCode(code);
+      return NextResponse.json({
+        ok: true,
+        result,
+        testCode: code,
+        submissionCount: t
+          ? Object.keys(t.submissions || {}).length
+          : 1,
+      });
     } catch (e) {
       return NextResponse.json(
         { error: e instanceof Error ? e.message : "Submit failed" },

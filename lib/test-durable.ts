@@ -182,7 +182,18 @@ export async function durableSaveTest(test: LiveTest) {
   }
 
   const idx = await loadIndex();
-  if (testUrl) idx.byCode[c] = testUrl;
+  // Always keep code→pointer even if this remote upload failed (reuse old pointer)
+  if (testUrl) {
+    idx.byCode[c] = testUrl;
+  } else if (!idx.byCode[c]) {
+    // try keep existing pointer file
+    try {
+      const ptr = (await fs.readFile(testPointer(c), "utf8")).trim();
+      if (ptr.startsWith("http")) idx.byCode[c] = ptr;
+    } catch {
+      // ignore
+    }
+  }
   const tid = test.teacherId || "";
   if (tid) {
     const codes = new Set([...(idx.byTeacher[tid] || []), c]);
