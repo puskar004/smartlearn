@@ -562,6 +562,21 @@ export async function getNotesForClassCode(code: string): Promise<{
 
   add(found.classroom.materials || []);
 
+  // Journal FIRST — every teacher upload is appended here
+  try {
+    const { journalListMaterials } = await import(
+      "@/lib/class-materials-journal"
+    );
+    const j = await journalListMaterials(c);
+    add(j.materials);
+    if (j.className) found.classroom.name = j.className || found.classroom.name;
+    if (j.teacherName)
+      found.classroom.teacherName =
+        j.teacherName || found.classroom.teacherName;
+  } catch (e) {
+    console.error("journalListMaterials", e);
+  }
+
   try {
     const { getClassMaterials } = await import("@/lib/class-code-index");
     add(await getClassMaterials(c));
@@ -1327,6 +1342,20 @@ export async function addMaterialToClass(
   };
   // Always keep full URL (incl. large data:) for bank + student pack
   const fullMat: TeacherMaterial = { ...m };
+
+  // Append-only journal so students always see every upload
+  try {
+    const { journalAppendMaterial } = await import(
+      "@/lib/class-materials-journal"
+    );
+    await journalAppendMaterial(normalized, fullMat, {
+      teacherId,
+      teacherName: material.teacherName || "Teacher",
+      className: normalized,
+    });
+  } catch (e) {
+    console.error("journalAppendMaterial", e);
+  }
 
   const bank = { ...(meta.materialBank || {}) };
   const prevBank = bank[normalized] || [];

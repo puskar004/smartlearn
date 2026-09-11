@@ -416,6 +416,31 @@ export async function GET(req: NextRequest) {
         );
         const notes = await getNotesForClassCode(c);
 
+        // Always union journal (append-only uploads) so 2nd/3rd PDF never missing
+        try {
+          const { journalListMaterials } = await import(
+            "@/lib/class-materials-journal"
+          );
+          const j = await journalListMaterials(c);
+          if (j.materials?.length) {
+            const map = new Map<string, (typeof notes.materials)[0]>();
+            for (const m of [...j.materials, ...notes.materials]) {
+              if (!m?.url) continue;
+              const k = m.id || m.url;
+              const p = map.get(k);
+              if (!p || (m.createdAt || 0) >= (p.createdAt || 0)) map.set(k, m);
+            }
+            notes.materials = Array.from(map.values()).sort(
+              (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+            );
+            if (j.className) notes.name = j.className || notes.name;
+            if (j.teacherName)
+              notes.teacherName = j.teacherName || notes.teacherName;
+          }
+        } catch {
+          // ignore
+        }
+
         // Teacher own view fallback
         if (!notes.materials.length) {
           try {
@@ -438,7 +463,7 @@ export async function GET(req: NextRequest) {
           name: notes.name,
           teacherName: notes.teacherName,
           count: notes.materials.length,
-          ttlHours: 48,
+          ttlHours: 24,
         });
       } catch (e) {
         console.error("materials", e);

@@ -118,15 +118,23 @@ export default function JoinClassPage() {
     const c = classCode.toUpperCase();
     try {
       const bust = Date.now();
-      // Always hit both endpoints and UNION — never stop at first old list
+      // notes + materials + cache-bust header
       const [mr, mr2] = await Promise.all([
         fetch(
           `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${bust}`,
-          { cache: "no-store", credentials: "same-origin" }
+          {
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+          }
         ),
         fetch(
           `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${bust + 1}`,
-          { cache: "no-store", credentials: "same-origin" }
+          {
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+          }
         ),
       ]);
       const md = await mr.json().catch(() => ({}));
@@ -136,6 +144,7 @@ export default function JoinClassPage() {
         ...((md2.materials || []) as TeacherMaterial[]),
       ];
 
+      // Server list is authority when non-empty — still merge with cache
       const materials = mergeMaterials(c, list);
       // Do NOT re-cache filtered list — mergeMaterials already cached full set
       return {

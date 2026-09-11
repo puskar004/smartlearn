@@ -146,7 +146,22 @@ export async function POST(req: NextRequest) {
     // Dedupe: same title+url within last 60s = double-click
     // (handled after publish merge below)
 
-    // 1) Clerk + bank first (source of truth for teacher room)
+    // 0) JOURNAL FIRST — student list source of truth (append-only)
+    let journalMats: typeof mat[] = [mat];
+    try {
+      const { journalAppendMaterial } = await import(
+        "@/lib/class-materials-journal"
+      );
+      journalMats = (await journalAppendMaterial(code, mat, {
+        teacherId: userId,
+        teacherName,
+        className: code,
+      })) as typeof mat[];
+    } catch (e) {
+      console.error("journalAppendMaterial", e);
+    }
+
+    // 1) Clerk + bank
     let room: Awaited<ReturnType<typeof addMaterialToClass>> | null = null;
     try {
       room = await addMaterialToClass(userId, code, {
@@ -163,20 +178,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2) ALWAYS publish full merged list to shared index so students see NEW + OLD
-    let published: typeof mat[] = [mat];
+    // 2) Shared class-code index (best-effort)
+    let published: typeof mat[] = journalMats;
     try {
       const { publishClassMaterials, registerClassCode } = await import(
         "@/lib/class-code-index"
       );
       await registerClassCode(code, userId);
-      // Always publish NEW mat + entire previous room list (every upload stays)
-      const toPublish = [
-        mat,
-        ...((room?.materials || []).filter(
-          (m) => m.id !== mat.id && m.url !== mat.url
-        ) || []),
-      ];
+      const toPublish = journalMats.length
+        ? journalMats
+        : [
+            mat,
+            ...((room?.materials || []).filter(
+              (m) => m.id !== mat.id && m.url !== mat.url
+            ) || []),
+          ];
       published = (await publishClassMaterials(
         code,
         userId,
@@ -187,36 +203,37 @@ export async function POST(req: NextRequest) {
       console.error("direct publishClassMaterials", e);
     }
 
-    if (!room) {
-      room = {
-        code,
-        name: code,
-        teacherId: userId,
-        teacherName,
-        createdAt: now,
-        materials: published.length ? published : [mat],
-        students: [],
-        liveSession: null,
-        alerts: [],
-        attendanceLog: [],
-      };
-    } else {
-      // Ensure brand-new mat is on the room list (newest first)
-      const byUrl = new Map<string, (typeof mat)>();
-      for (const m of [mat, ...(room.materials || []), ...published]) {
-        if (!m?.url) continue;
-        const prev = byUrl.get(m.url);
-        if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
-          byUrl.set(m.url, m as typeof mat);
-        }
+    // Room list = journal (complete) ∪ room ∪ published
+    const byKey = new Map<string, typeof mat>();
+    for (const m of [
+      mat,
+      ...journalMats,
+      ...(room?.materials || []),
+      ...published,
+    ]) {
+      if (!m?.url) continue;
+      const k = m.id || m.url;
+      const prev = byKey.get(k);
+      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+        byKey.set(k, m as typeof mat);
       }
-      room = {
-        ...room,
-        materials: Array.from(byUrl.values()).sort(
-          (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
-        ),
-      };
     }
+    const allMats = Array.from(byKey.values()).sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
+
+    room = {
+      code,
+      name: room?.name || code,
+      teacherId: userId,
+      teacherName: room?.teacherName || teacherName,
+      createdAt: room?.createdAt || now,
+      materials: allMats,
+      students: room?.students || [],
+      liveSession: room?.liveSession || null,
+      alerts: room?.alerts || [],
+      attendanceLog: room?.attendanceLog || [],
+    };
 
     return NextResponse.json({
       ok: true,
@@ -225,7 +242,7 @@ export async function POST(req: NextRequest) {
       url: publishUrl,
       durable: saved.durable,
       size: buf.length,
-      studentVisible: (published || []).length,
+      studentVisible: allMats.length,
       ttlHours: 30 * 24,
     });
   } catch (e) {
