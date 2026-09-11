@@ -86,59 +86,88 @@ async function readRemote(url: string): Promise<Index | null> {
   return null;
 }
 
-async function loadIndex(forceRemote = false): Promise<Index> {
-  if (!forceRemote && mem.idx?.codes) return mem.idx;
-
-  // Prefer remote mirror first (cross-instance truth)
-  try {
-    const url = (await fs.readFile(pointerPath(), "utf8")).trim();
-    if (url.startsWith("http")) {
-      const remote = await readRemote(url);
-      if (remote) {
-        mem.idx = remote;
-        // keep pointer
-        return remote;
+function mergeMaterialLists(
+  ...lists: (TeacherMaterial[] | undefined)[]
+): TeacherMaterial[] {
+  // One entry per URL; newest createdAt wins — old + new PDFs both kept
+  const byUrl = new Map<string, TeacherMaterial>();
+  for (const list of lists) {
+    for (const m of list || []) {
+      if (!m?.url || !stillActive(m)) continue;
+      const prev = byUrl.get(m.url);
+      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+        byUrl.set(m.url, m);
       }
     }
-  } catch {
-    // ignore
   }
+  return pruneMats(Array.from(byUrl.values()));
+}
 
-  // Known remote from mem
-  if (mem.idx?.remoteUrl) {
-    const remote = await readRemote(mem.idx.remoteUrl);
-    if (remote) {
-      mem.idx = remote;
-      return remote;
-    }
+function mergeIndexes(a: Index, b: Index): Index {
+  const codes = { ...(a.codes || {}), ...(b.codes || {}) };
+  const matsA = a.materials || {};
+  const matsB = b.materials || {};
+  const materials: Record<string, TeacherMaterial[]> = {};
+  for (const c of new Set([...Object.keys(matsA), ...Object.keys(matsB)])) {
+    materials[c] = mergeMaterialLists(matsA[c], matsB[c]);
   }
+  return {
+    codes,
+    materials,
+    matsUrls: { ...(a.matsUrls || {}), ...(b.matsUrls || {}) },
+    live: { ...(a.live || {}), ...(b.live || {}) },
+    liveUrls: { ...(a.liveUrls || {}), ...(b.liveUrls || {}) },
+    deleted: { ...(a.deleted || {}), ...(b.deleted || {}) },
+    updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0, Date.now()),
+    remoteUrl: b.remoteUrl || a.remoteUrl,
+  };
+}
 
+async function readLocalIndex(): Promise<Index | null> {
   try {
     const raw = await fs.readFile(localPath(), "utf8");
     const j = JSON.parse(raw) as Index;
-    if (j?.codes) {
-      if (j.remoteUrl) {
-        const remote = await readRemote(j.remoteUrl);
-        if (remote) {
-          mem.idx = remote;
-          return remote;
-        }
-      }
-      mem.idx = j;
-      return j;
-    }
+    if (j?.codes) return j;
   } catch {
     // ignore
   }
+  return null;
+}
 
-  const empty: Index = {
-    codes: {},
-    materials: {},
-    matsUrls: {},
-    updatedAt: Date.now(),
-  };
-  mem.idx = empty;
-  return empty;
+async function loadIndex(forceRemote = false): Promise<Index> {
+  if (!forceRemote && mem.idx?.codes) return mem.idx;
+
+  const local = (await readLocalIndex()) || mem.idx;
+  let remote: Index | null = null;
+
+  try {
+    const url = (await fs.readFile(pointerPath(), "utf8")).trim();
+    if (url.startsWith("http")) remote = await readRemote(url);
+  } catch {
+    // ignore
+  }
+  if (!remote && (local?.remoteUrl || mem.idx?.remoteUrl)) {
+    remote = await readRemote(
+      (local?.remoteUrl || mem.idx?.remoteUrl) as string
+    );
+  }
+
+  let out: Index;
+  if (remote && local) out = mergeIndexes(remote, local);
+  else if (remote) out = remote;
+  else if (local) out = local;
+  else {
+    out = {
+      codes: {},
+      materials: {},
+      matsUrls: {},
+      updatedAt: Date.now(),
+    };
+  }
+  // Always fold in-memory latest publish (same instance) so new PDF not lost
+  if (mem.idx?.materials) out = mergeIndexes(out, mem.idx);
+  mem.idx = out;
+  return out;
 }
 
 async function persist(idx: Index, forceRemote = true) {
@@ -470,28 +499,27 @@ export async function publishClassMaterials(
   idx.codes[c] = teacherId || idx.codes[c] || "";
   if (!idx.materials) idx.materials = {};
 
-  // Merge + prune 48h; keep https and small data URLs
-  const incoming = pruneMats(
-    materials.map((m) => {
+  // Merge + keep https/small data; NEW uploads always win by createdAt
+  const incoming = materials
+    .map((m) => {
       let url = m.url || "";
-      // Shared JSON can hold small data PDFs; huge ones need https host
       if (url.startsWith("data:") && url.length > 200_000) url = "";
+      const createdAt = m.createdAt || Date.now();
       return {
         ...m,
+        id: m.id || `mat-${createdAt}-${Math.random().toString(36).slice(2, 7)}`,
         url,
-        expiresAt: m.expiresAt || (m.createdAt || Date.now()) + MATERIAL_TTL_MS,
+        createdAt,
+        expiresAt: m.expiresAt || createdAt + MATERIAL_TTL_MS,
         teacherName: m.teacherName || teacherName || "Teacher",
       };
     })
-  ).filter((m) => m.url);
+    .filter((m) => m.url);
 
   const prev = idx.materials[c] || [];
-  const map = new Map<string, TeacherMaterial>();
-  for (const m of [...incoming, ...prev]) {
-    if (!stillActive(m) || !m.url) continue;
-    map.set(m.id || m.url, m);
-  }
-  idx.materials[c] = pruneMats(Array.from(map.values()));
+  // Incoming first so new PDFs are never dropped
+  idx.materials[c] = mergeMaterialLists(incoming, prev);
+  mem.idx = idx;
 
   await persist(idx, true); // ALWAYS re-upload remote index
   return idx.materials[c];

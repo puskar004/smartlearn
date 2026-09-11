@@ -542,10 +542,23 @@ export async function getNotesForClassCode(code: string): Promise<{
 
   add(found.classroom.materials || []);
 
+  // Shared class-code index FIRST (latest teacher publishes land here)
+  try {
+    const { getClassMaterials } = await import("@/lib/class-code-index");
+    add(await getClassMaterials(c));
+  } catch {
+    // ignore
+  }
+
   try {
     const meta = await getTeacherMeta(found.teacherId, { fresh: true });
     add(meta.materialBank?.[c] || []);
     add(materialsForRoom(meta, c, found.classroom));
+    // Fresh classroom row from meta (may include newest upload)
+    const row = (meta.classrooms || []).find(
+      (r) => r.code.toUpperCase() === c
+    );
+    if (row?.materials?.length) add(row.materials);
 
     const packUrl =
       meta.classMaterialPacks?.[c] || meta.materialsIndexUrl || null;
@@ -566,14 +579,6 @@ export async function getNotesForClassCode(code: string): Promise<{
     }
   } catch (e) {
     console.error("getNotesForClassCode", e);
-  }
-
-  // shared index fallback
-  try {
-    const { getClassMaterials } = await import("@/lib/class-code-index");
-    add(await getClassMaterials(c));
-  } catch {
-    // ignore
   }
 
   try {
@@ -1330,7 +1335,7 @@ export async function addMaterialToClass(
       className: existing?.name || normalized,
       materials: allForPack,
       updatedAt: now,
-      ttlHours: 48,
+      ttlHours: 30 * 24,
     });
     if (packUrl) remoteUrl = packUrl;
   } catch (e) {

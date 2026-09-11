@@ -146,24 +146,7 @@ export async function POST(req: NextRequest) {
     // Dedupe: same title+url within last 60s = double-click
     // (handled after publish merge below)
 
-    // 1) ALWAYS publish to shared class-code index (student reads this)
-    let published: typeof mat[] = [mat];
-    try {
-      const { publishClassMaterials, registerClassCode } = await import(
-        "@/lib/class-code-index"
-      );
-      await registerClassCode(code, userId);
-      published = (await publishClassMaterials(
-        code,
-        userId,
-        [mat],
-        teacherName
-      )) as typeof mat[];
-    } catch (e) {
-      console.error("direct publishClassMaterials", e);
-    }
-
-    // 2) Also try full addMaterialToClass (bank + clerk soft)
+    // 1) Clerk + bank first (source of truth for teacher room)
     let room: Awaited<ReturnType<typeof addMaterialToClass>> | null = null;
     try {
       room = await addMaterialToClass(userId, code, {
@@ -180,6 +163,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 2) ALWAYS publish full merged list to shared index so students see NEW + OLD
+    let published: typeof mat[] = [mat];
+    try {
+      const { publishClassMaterials, registerClassCode } = await import(
+        "@/lib/class-code-index"
+      );
+      await registerClassCode(code, userId);
+      const toPublish = [
+        mat,
+        ...((room?.materials || []).filter((m) => m.url !== mat.url) || []),
+      ];
+      published = (await publishClassMaterials(
+        code,
+        userId,
+        toPublish,
+        teacherName
+      )) as typeof mat[];
+    } catch (e) {
+      console.error("direct publishClassMaterials", e);
+    }
+
     if (!room) {
       room = {
         code,
@@ -193,26 +197,21 @@ export async function POST(req: NextRequest) {
         alerts: [],
         attendanceLog: [],
       };
-    } else if (published.length) {
-      const map = new Map(
-        [...(room.materials || []), ...published].map((m) => [
-          m.id || m.url,
-          m,
-        ])
-      );
-      room = { ...room, materials: Array.from(map.values()) };
-    }
-    // Final dedupe by url + title (prevents double list entries)
-    if (room?.materials) {
-      const seen = new Set<string>();
+    } else {
+      // Ensure brand-new mat is on the room list (newest first)
+      const byUrl = new Map<string, (typeof mat)>();
+      for (const m of [mat, ...(room.materials || []), ...published]) {
+        if (!m?.url) continue;
+        const prev = byUrl.get(m.url);
+        if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+          byUrl.set(m.url, m as typeof mat);
+        }
+      }
       room = {
         ...room,
-        materials: room.materials.filter((m) => {
-          const k = `${(m.title || "").toLowerCase()}|${m.url}`;
-          if (seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        }),
+        materials: Array.from(byUrl.values()).sort(
+          (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+        ),
       };
     }
 

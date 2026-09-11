@@ -59,12 +59,19 @@ export default function JoinClassPage() {
 
   const mergeMaterials = (c: string, server: TeacherMaterial[]) => {
     const cached = readCachedClassMaterials(c);
-    const map = new Map<string, TeacherMaterial>();
-    for (const m of [...server, ...cached]) {
+    const byUrl = new Map<string, TeacherMaterial>();
+    // Newest wins — server + cache both kept so new teacher PDFs appear
+    for (const m of [...cached, ...server]) {
       if (!m?.url) continue;
-      map.set(m.id || m.url, m);
+      const prev = byUrl.get(m.url);
+      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+        byUrl.set(m.url, m);
+      }
+      if (m.id) {
+        // also index by id so retitled same-file still one entry by url above
+      }
     }
-    const all = Array.from(map.values()).sort(
+    const all = Array.from(byUrl.values()).sort(
       (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
     );
     if (all.length) cacheClassMaterials(c, all);
@@ -74,30 +81,34 @@ export default function JoinClassPage() {
   const fetchMaterials = async (classCode: string) => {
     const c = classCode.toUpperCase();
     try {
-      // Primary notes endpoint
-      const mr = await fetch(
-        `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${Date.now()}`,
-        { cache: "no-store", credentials: "same-origin" }
-      );
-      let md = await mr.json().catch(() => ({}));
-      let list = (md.materials || []) as TeacherMaterial[];
-
-      // Fallback to materials action
-      if (!list.length) {
-        const mr2 = await fetch(
-          `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${Date.now()}`,
+      const bust = Date.now();
+      // Always hit both endpoints and UNION — never stop at first old list
+      const [mr, mr2] = await Promise.all([
+        fetch(
+          `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${bust}`,
           { cache: "no-store", credentials: "same-origin" }
-        );
-        md = await mr2.json().catch(() => ({}));
-        list = (md.materials || []) as TeacherMaterial[];
-      }
+        ),
+        fetch(
+          `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${bust + 1}`,
+          { cache: "no-store", credentials: "same-origin" }
+        ),
+      ]);
+      const md = await mr.json().catch(() => ({}));
+      const md2 = await mr2.json().catch(() => ({}));
+      const list = [
+        ...((md.materials || []) as TeacherMaterial[]),
+        ...((md2.materials || []) as TeacherMaterial[]),
+      ];
 
       const materials = mergeMaterials(c, list);
       if (materials.length) cacheClassMaterials(c, materials);
       return {
         materials,
-        name: (md.name as string) || undefined,
-        teacherName: (md.teacherName as string) || undefined,
+        name: (md.name as string) || (md2.name as string) || undefined,
+        teacherName:
+          (md.teacherName as string) ||
+          (md2.teacherName as string) ||
+          undefined,
         count: materials.length,
       };
     } catch {
