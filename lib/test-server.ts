@@ -99,31 +99,41 @@ function metaOf(user: {
   return (m.smartlearn as Meta) || {};
 }
 
-/** Strip heavy moments before Clerk metadata (size limits) */
+/** Strip heavy moments before Clerk metadata (size limits) — keep score/name/keys */
 function lightTest(t: LiveTest): LiveTest {
   const submissions: LiveTest["submissions"] = {};
   for (const [sid, s] of Object.entries(t.submissions || {})) {
     submissions[sid] = {
-      name: s.name,
-      answers: s.answers,
-      score: s.score,
-      total: s.total,
-      at: s.at,
-      videoKeys: s.videoKeys,
-      moments: (s.moments || []).slice(0, 12).map((m) => ({
+      name: s.name || "Student",
+      answers: Array.isArray(s.answers) ? s.answers : [],
+      score: Number(s.score) || 0,
+      total: Number(s.total) || t.questions?.length || 0,
+      at: Number(s.at) || Date.now(),
+      videoKeys: (s.videoKeys || []).slice(0, 20),
+      moments: (s.moments || []).slice(0, 8).map((m) => ({
         at: m.at,
         note: m.note,
         videoKey: m.videoKey,
         imageKey: m.imageKey,
         audioKey: m.audioKey,
-        // small preview so teacher still sees snaps after cold start
-        imageDataUrl: m.imageDataUrl
-          ? String(m.imageDataUrl).slice(0, 80_000)
-          : undefined,
+        // only tiny previews in Clerk; full snaps via durable store / https keys
+        imageDataUrl:
+          m.imageKey && String(m.imageKey).startsWith("http")
+            ? undefined
+            : m.imageDataUrl
+              ? String(m.imageDataUrl).slice(0, 25_000)
+              : undefined,
       })),
     };
   }
-  return { ...t, submissions };
+  return {
+    ...t,
+    code: t.code,
+    title: t.title,
+    active: t.active,
+    teacherId: t.teacherId,
+    submissions,
+  };
 }
 
 export function genTestCode() {
@@ -162,21 +172,31 @@ export async function saveTest(test: LiveTest) {
   );
   await writeFile(next);
 
+  // Durable mirror — survives Vercel instance hops (student submit → teacher list)
+  try {
+    const { durableSaveTest } = await import("@/lib/test-durable");
+    await durableSaveTest(merged);
+  } catch (e) {
+    console.error("durableSaveTest", e);
+  }
+
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(merged.teacherId);
     const sm = metaOf(user);
-    const liveTests = [lightTest(merged), ...(sm.liveTests || [])]
+    // Clerk: lightweight only (scores/names/keys) — full snaps in durable store
+    const light = lightTest(merged);
+    const liveTests = [light, ...(sm.liveTests || [])]
       .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
       .map((t) =>
         t.id === merged.id
           ? {
               ...t,
               active: merged.active,
-              submissions: mergeSubmissions(
-                t.submissions,
-                lightTest(merged).submissions
-              ),
+              code: merged.code,
+              title: merged.title,
+              teacherId: merged.teacherId,
+              submissions: mergeSubmissions(t.submissions, light.submissions),
             }
           : t
       )
@@ -193,12 +213,48 @@ export async function saveTest(test: LiveTest) {
   return merged;
 }
 
+function mergeTests(a: LiveTest, b: LiveTest): LiveTest {
+  // If either explicitly closed and the other is not newer active-only... prefer OR of active
+  // Closed only if BOTH say inactive (or one was closed via saveTest active:false on same id)
+  const active = Boolean(a.active || b.active);
+  return {
+    ...a,
+    ...b,
+    questions:
+      (b.questions?.length || 0) >= (a.questions?.length || 0)
+        ? b.questions
+        : a.questions,
+    submissions: mergeSubmissions(a.submissions, b.submissions),
+    active,
+    teacherId: a.teacherId || b.teacherId,
+    joinUntil: Math.max(a.joinUntil || 0, b.joinUntil || 0),
+    code: (a.code || b.code || "").toUpperCase(),
+  };
+}
+
 export async function findTestByCode(code: string): Promise<LiveTest | null> {
   const c = code.trim().toUpperCase();
   const map = new Map<string, LiveTest>();
 
+  const put = (t: LiveTest) => {
+    if (!t?.id && !t?.code) return;
+    const id = t.id || `code-${t.code}`;
+    const ex = map.get(id) || map.get(t.code);
+    const merged = ex ? mergeTests(ex, t) : t;
+    map.set(merged.id || id, merged);
+  };
+
   for (const t of await readFile()) {
-    if (t.code === c) map.set(t.id, t);
+    if (t.code === c) put(t);
+  }
+
+  // Durable remote (cross-instance)
+  try {
+    const { durableLoadByCode } = await import("@/lib/test-durable");
+    const d = await durableLoadByCode(c);
+    if (d) put(d);
+  } catch (e) {
+    console.error("durableLoadByCode", e);
   }
 
   try {
@@ -208,35 +264,7 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
       const res = await client.users.getUserList({ limit: 100, offset });
       for (const u of res.data) {
         for (const t of metaOf(u).liveTests || []) {
-          if (t.code === c) {
-            const existing = map.get(t.id);
-            // prefer file copy if it has richer submissions/moments
-            if (!existing) map.set(t.id, t);
-            else {
-              map.set(t.id, {
-                ...t,
-                ...existing,
-                // Prefer whichever copy is richer / still active
-                questions:
-                  (existing.questions?.length || 0) >=
-                  (t.questions?.length || 0)
-                    ? existing.questions
-                    : t.questions,
-                submissions: mergeSubmissions(
-                  t.submissions,
-                  existing.submissions
-                ),
-                // Stay active if EITHER source says active (don't drop live tests)
-                active: Boolean(existing.active || t.active),
-                teacherId: existing.teacherId || t.teacherId,
-                joinUntil: Math.max(
-                  existing.joinUntil || 0,
-                  t.joinUntil || 0,
-                  existing.startsAt || t.startsAt || 0
-                ),
-              });
-            }
-          }
+          if (t.code === c) put(t);
         }
       }
       offset += 100;
@@ -246,48 +274,57 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
     console.error("findTestByCode", e);
   }
 
-  const list = Array.from(map.values());
+  const list = Array.from(map.values()).filter(
+    (t) => t.code?.toUpperCase() === c
+  );
   if (!list.length) return null;
-  // Prefer active tests
-  list.sort((a, b) => Number(b.active) - Number(a.active) || b.createdAt - a.createdAt);
+  list.sort(
+    (a, b) =>
+      Number(b.active) - Number(a.active) ||
+      Object.keys(b.submissions || {}).length -
+        Object.keys(a.submissions || {}).length ||
+      b.createdAt - a.createdAt
+  );
   return list[0];
 }
 
 export async function listTeacherTests(teacherId: string) {
   const map = new Map<string, LiveTest>();
+  const put = (t: LiveTest) => {
+    const id = t.id || t.code;
+    if (!id) return;
+    const ex = map.get(id);
+    const withTeacher = { ...t, teacherId: t.teacherId || teacherId };
+    map.set(id, ex ? mergeTests(ex, withTeacher) : withTeacher);
+  };
+
   for (const t of await readFile()) {
-    if (t.teacherId === teacherId) map.set(t.id, t);
+    if (t.teacherId === teacherId) put(t);
   }
+
+  try {
+    const { durableListForTeacher } = await import("@/lib/test-durable");
+    for (const t of await durableListForTeacher(teacherId)) put(t);
+  } catch (e) {
+    console.error("durableListForTeacher", e);
+  }
+
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(teacherId);
     for (const t of metaOf(user).liveTests || []) {
-      if (t.teacherId === teacherId || !t.teacherId) {
-        const ex = map.get(t.id);
-        map.set(
-          t.id,
-          ex
-            ? {
-                ...t,
-                ...ex,
-                questions:
-                  (ex.questions?.length || 0) >= (t.questions?.length || 0)
-                    ? ex.questions
-                    : t.questions,
-                submissions: mergeSubmissions(t.submissions, ex.submissions),
-                teacherId: ex.teacherId || t.teacherId || teacherId,
-                active: Boolean(ex.active || t.active),
-              }
-            : { ...t, teacherId: t.teacherId || teacherId }
-        );
-      }
+      if (t.teacherId === teacherId || !t.teacherId) put(t);
     }
   } catch {
     // ignore
   }
-  // Active first, then newest
+
   return Array.from(map.values()).sort(
-    (a, b) => Number(b.active) - Number(a.active) || b.createdAt - a.createdAt
+    (a, b) =>
+      Number(b.active) - Number(a.active) ||
+      Object.keys(b.submissions || {}).length -
+        Object.keys(a.submissions || {}).length ||
+      b.createdAt - a.createdAt
   );
 }
 

@@ -107,7 +107,14 @@ export async function GET(req: NextRequest) {
     if (!userId)
       return NextResponse.json({ error: "Sign in" }, { status: 401 });
     const tests = await listTeacherTests(userId);
-    return NextResponse.json({ ok: true, tests });
+    // Ensure submissions always serializable for teacher UI
+    const safe = tests.map((t) => ({
+      ...t,
+      submissions: t.submissions || {},
+      questions: t.questions || [],
+      active: Boolean(t.active),
+    }));
+    return NextResponse.json({ ok: true, tests: safe, count: safe.length });
   }
 
   return NextResponse.json({ error: "code or mine required" }, { status: 400 });

@@ -93,9 +93,13 @@ export default function TeacherTestPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/tests?mine=1");
+      const res = await fetch(`/api/tests?mine=1&_=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
-      if (data.tests) setTests(data.tests);
+      if (Array.isArray(data.tests)) {
+        setTests(data.tests);
+      }
     } catch {
       // ignore
     }
