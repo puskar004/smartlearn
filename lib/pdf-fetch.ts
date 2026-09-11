@@ -255,6 +255,8 @@ export function hostAllowed(host: string) {
   )
     return true;
   if (h.includes("blob.vercel-storage.com")) return true;
+  if (h.includes("supabase.co")) return true;
+  if (h.includes("supabase.in")) return true;
   if (h.includes("tmpfiles.org")) return true;
   if (h.includes("catbox.moe")) return true;
   if (h.includes("google")) return true;

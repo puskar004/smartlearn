@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
           ok: false,
           durable: false,
           error:
-            "Upload failed. Use a PDF under ~500KB, or paste a public Google Drive link. Then student: Class & Notes → Refresh materials.",
+            "Upload failed. Check SUPABASE_SERVICE_ROLE_KEY + public bucket class-materials, or paste a Google Drive link. Student: Refresh materials.",
         },
         { status: 200 }
       );
@@ -249,6 +249,7 @@ export async function POST(req: NextRequest) {
       key: saved.key,
       url: publishUrl,
       durable: saved.durable,
+      storage: saved.storage || null,
       size: buf.length,
       studentVisible: allMats.length,
       ttlHours: 30 * 24,
