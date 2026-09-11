@@ -89,18 +89,35 @@ async function readRemote(url: string): Promise<Index | null> {
 function mergeMaterialLists(
   ...lists: (TeacherMaterial[] | undefined)[]
 ): TeacherMaterial[] {
-  // One entry per URL; newest createdAt wins — old + new PDFs both kept
+  // Keep every distinct upload: unique by id, and by url for id-less rows
+  const byId = new Map<string, TeacherMaterial>();
   const byUrl = new Map<string, TeacherMaterial>();
   for (const list of lists) {
     for (const m of list || []) {
       if (!m?.url || !stillActive(m)) continue;
-      const prev = byUrl.get(m.url);
-      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+      if (m.id) {
+        const prev = byId.get(m.id);
+        if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+          byId.set(m.id, m);
+        }
+      }
+      const prevU = byUrl.get(m.url);
+      if (!prevU || (m.createdAt || 0) >= (prevU.createdAt || 0)) {
         byUrl.set(m.url, m);
       }
     }
   }
-  return pruneMats(Array.from(byUrl.values()));
+  const out: TeacherMaterial[] = [];
+  const seenUrl = new Set<string>();
+  for (const m of byId.values()) {
+    out.push(m);
+    seenUrl.add(m.url);
+  }
+  for (const m of byUrl.values()) {
+    if (seenUrl.has(m.url)) continue;
+    out.push(m);
+  }
+  return pruneMats(out);
 }
 
 function mergeIndexes(a: Index, b: Index): Index {

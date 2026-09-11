@@ -448,8 +448,18 @@ export async function apiUploadMaterialFile(opts: {
   }
   if (data.ok && durableUrl) {
     const mats = (data.classroom?.materials || []) as TeacherMaterial[];
-    if (mats.length) cacheClassMaterials(opts.code, mats);
-    else {
+    // Always APPEND new file into cache (never replace whole list with one item)
+    if (mats.length) {
+      const prev = readCachedClassMaterials(opts.code);
+      const map = new Map<string, TeacherMaterial>();
+      for (const m of [...mats, ...prev]) {
+        if (!m?.url) continue;
+        const k = m.id || m.url;
+        const p = map.get(k);
+        if (!p || (m.createdAt || 0) >= (p.createdAt || 0)) map.set(k, m);
+      }
+      cacheClassMaterials(opts.code, Array.from(map.values()));
+    } else {
       pushCachedMaterial(opts.code, {
         id: `mat-local-${Date.now()}`,
         title: opts.title,

@@ -170,9 +170,12 @@ export async function POST(req: NextRequest) {
         "@/lib/class-code-index"
       );
       await registerClassCode(code, userId);
+      // Always publish NEW mat + entire previous room list (every upload stays)
       const toPublish = [
         mat,
-        ...((room?.materials || []).filter((m) => m.url !== mat.url) || []),
+        ...((room?.materials || []).filter(
+          (m) => m.id !== mat.id && m.url !== mat.url
+        ) || []),
       ];
       published = (await publishClassMaterials(
         code,

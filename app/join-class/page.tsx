@@ -65,20 +65,35 @@ export default function JoinClassPage() {
 
   const mergeMaterials = (c: string, server: TeacherMaterial[]) => {
     const cached = readCachedClassMaterials(c);
+    // Keep every PDF: key by id first (each upload has unique id), then url
+    const byId = new Map<string, TeacherMaterial>();
     const byUrl = new Map<string, TeacherMaterial>();
-    // Newest wins — server + cache both kept so new teacher PDFs appear
-    for (const m of [...cached, ...server]) {
+    for (const m of [...server, ...cached]) {
       if (!m?.url) continue;
-      const prev = byUrl.get(m.url);
-      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+      if (m.id) {
+        const prev = byId.get(m.id);
+        if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+          byId.set(m.id, m);
+        }
+      }
+      const prevU = byUrl.get(m.url);
+      if (!prevU || (m.createdAt || 0) >= (prevU.createdAt || 0)) {
         byUrl.set(m.url, m);
       }
     }
-    const all = Array.from(byUrl.values()).sort(
-      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
-    );
+    const seen = new Set<string>();
+    const all: TeacherMaterial[] = [];
+    for (const m of byId.values()) {
+      all.push(m);
+      seen.add(m.url);
+    }
+    for (const m of byUrl.values()) {
+      if (seen.has(m.url)) continue;
+      all.push(m);
+    }
+    all.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    // Cache FULL list (before student filter) so 2nd PDF is never lost
     if (all.length) cacheClassMaterials(c, all);
-    // Student panel: hide dismissed + auto-expire after 24h
     return filterStudentMaterials(userId, c, all);
   };
 
@@ -122,7 +137,7 @@ export default function JoinClassPage() {
       ];
 
       const materials = mergeMaterials(c, list);
-      if (materials.length) cacheClassMaterials(c, materials);
+      // Do NOT re-cache filtered list — mergeMaterials already cached full set
       return {
         materials,
         name: (md.name as string) || (md2.name as string) || undefined,

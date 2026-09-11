@@ -164,7 +164,9 @@ function lightMaterialBank(
             ? ""
             : url.startsWith("data:")
               ? url
-              : url.slice(0, 800);
+              : url.startsWith("http")
+                ? url.slice(0, 4000) // never chop blob URLs to 800 (broke 2nd PDF)
+                : url.slice(0, 2000);
         return {
           ...m,
           url: safeUrl,
@@ -529,13 +531,14 @@ export async function getNotesForClassCode(code: string): Promise<{
   const found = await findClassroomByCode(c);
   if (!found) return empty;
 
-  const map = new Map<string, TeacherMaterial>();
+  // Key by id AND url so every distinct upload is kept (never drop 2nd PDF)
+  const byId = new Map<string, TeacherMaterial>();
+  const byUrl = new Map<string, TeacherMaterial>();
   const add = (list: TeacherMaterial[] = []) => {
     for (const m of list) {
       if (!m?.url) continue;
       const exp =
         m.expiresAt || (m.createdAt || 0) + 30 * 24 * 60 * 60 * 1000;
-      // Keep https materials until explicit expiry; drop expired only
       if (exp < Date.now()) continue;
       if (
         !m.url.startsWith("http") &&
@@ -543,13 +546,22 @@ export async function getNotesForClassCode(code: string): Promise<{
         !m.url.startsWith("/api/")
       )
         continue;
-      map.set(m.id || m.url, m);
+      const id = String(m.id || "").trim();
+      if (id) {
+        const prev = byId.get(id);
+        if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
+          byId.set(id, m);
+        }
+      }
+      const prevU = byUrl.get(m.url);
+      if (!prevU || (m.createdAt || 0) >= (prevU.createdAt || 0)) {
+        byUrl.set(m.url, m);
+      }
     }
   };
 
   add(found.classroom.materials || []);
 
-  // Shared class-code index FIRST (latest teacher publishes land here)
   try {
     const { getClassMaterials } = await import("@/lib/class-code-index");
     add(await getClassMaterials(c));
@@ -561,27 +573,35 @@ export async function getNotesForClassCode(code: string): Promise<{
     const meta = await getTeacherMeta(found.teacherId, { fresh: true });
     add(meta.materialBank?.[c] || []);
     add(materialsForRoom(meta, c, found.classroom));
-    // Fresh classroom row from meta (may include newest upload)
     const row = (meta.classrooms || []).find(
       (r) => r.code.toUpperCase() === c
     );
     if (row?.materials?.length) add(row.materials);
 
-    const packUrl =
+    // ALL pack URLs for this class (history of uploads), not only latest
+    const packUrls = new Set<string>();
+    const latest =
       meta.classMaterialPacks?.[c] || meta.materialsIndexUrl || null;
-    if (packUrl?.startsWith("http")) {
-      const { fetchClassNotesPack } = await import(
-        "@/lib/class-materials-public"
-      );
-      const pack = await fetchClassNotesPack(packUrl);
-      if (pack) {
-        add(pack.materials);
-        if (pack.className) {
-          found.classroom.name = pack.className;
+    if (latest?.startsWith("http")) packUrls.add(latest);
+    if (meta.classMaterialPacks) {
+      for (const [k, u] of Object.entries(meta.classMaterialPacks)) {
+        if (k.toUpperCase() === c && u?.startsWith("http")) packUrls.add(u);
+      }
+    }
+    const { fetchClassNotesPack } = await import(
+      "@/lib/class-materials-public"
+    );
+    for (const packUrl of packUrls) {
+      try {
+        const pack = await fetchClassNotesPack(packUrl);
+        if (pack?.materials?.length) {
+          add(pack.materials);
+          if (pack.className) found.classroom.name = pack.className;
+          if (pack.teacherName)
+            found.classroom.teacherName = pack.teacherName;
         }
-        if (pack.teacherName) {
-          found.classroom.teacherName = pack.teacherName;
-        }
+      } catch {
+        // ignore one pack
       }
     }
   } catch (e) {
@@ -595,9 +615,18 @@ export async function getNotesForClassCode(code: string): Promise<{
     // ignore
   }
 
-  const materials = Array.from(map.values()).sort(
-    (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
-  );
+  // Prefer unique by id; fall back to url-only entries without id
+  const seenUrl = new Set<string>();
+  const materials: TeacherMaterial[] = [];
+  for (const m of byId.values()) {
+    materials.push(m);
+    seenUrl.add(m.url);
+  }
+  for (const m of byUrl.values()) {
+    if (seenUrl.has(m.url)) continue;
+    materials.push(m);
+  }
+  materials.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
   return {
     code: c,

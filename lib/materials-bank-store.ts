@@ -290,40 +290,77 @@ export async function getMaterialsByCode(
   seedRemoteUrl?: string | null
 ): Promise<TeacherMaterial[]> {
   const c = code.toUpperCase();
+  const map = new Map<string, TeacherMaterial>();
+  const take = (list: TeacherMaterial[] = []) => {
+    for (const m of list) {
+      if (!m?.url || !isMaterialActive(m)) continue;
+      const k = m.id || m.url;
+      const prev = map.get(k);
+      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) map.set(k, m);
+      // also keep distinct urls under url key
+      const pu = map.get(`u:${m.url}`);
+      if (!pu || (m.createdAt || 0) >= (pu.createdAt || 0)) {
+        map.set(`u:${m.url}`, m);
+      }
+    }
+  };
 
-  // 1) Shared class-code index (works across all Vercel instances)
+  // MERGE every source — never early-return after first list (dropped 2nd PDF)
   try {
     const { getClassMaterials, getClassMaterialsUrl } = await import(
       "@/lib/class-code-index"
     );
-    const shared = await getClassMaterials(c);
-    if (shared.length) return pruneList(shared);
-
+    take(await getClassMaterials(c));
     const u = await getClassMaterialsUrl(c);
     if (u) {
       const pack = await readCodeRemote(u);
-      if (pack?.materials?.length) return pruneList(pack.materials);
+      if (pack?.materials?.length) take(pack.materials);
     }
   } catch {
     // ignore
   }
 
-  // 2) Local per-class file
   try {
     const raw = await fs.readFile(codeLocalPath(c), "utf8");
     const j = JSON.parse(raw) as { materials?: TeacherMaterial[] };
-    if (j.materials?.length) return pruneList(j.materials);
+    if (j.materials?.length) take(j.materials);
   } catch {
     // ignore
   }
 
-  // 3) Full bank (mem / remote / disk)
-  const bank = await loadBank(seedRemoteUrl);
-  if (bank.codeUrls?.[c]) {
-    const pack = await readCodeRemote(bank.codeUrls[c]);
-    if (pack?.materials?.length) return pruneList(pack.materials);
+  try {
+    const bank = await loadBank(seedRemoteUrl);
+    if (bank.codeUrls?.[c]) {
+      const pack = await readCodeRemote(bank.codeUrls[c]);
+      if (pack?.materials?.length) take(pack.materials);
+    }
+    take(bank.byCode[c]?.materials || []);
+  } catch {
+    // ignore
   }
-  return pruneList(bank.byCode[c]?.materials || []);
+
+  // Dedupe: unique by id, then by url
+  const byId = new Map<string, TeacherMaterial>();
+  const byUrl = new Map<string, TeacherMaterial>();
+  for (const m of map.values()) {
+    if (m.id) {
+      const p = byId.get(m.id);
+      if (!p || (m.createdAt || 0) >= (p.createdAt || 0)) byId.set(m.id, m);
+    }
+    const p = byUrl.get(m.url);
+    if (!p || (m.createdAt || 0) >= (p.createdAt || 0)) byUrl.set(m.url, m);
+  }
+  const out: TeacherMaterial[] = [];
+  const seen = new Set<string>();
+  for (const m of byId.values()) {
+    out.push(m);
+    seen.add(m.url);
+  }
+  for (const m of byUrl.values()) {
+    if (seen.has(m.url)) continue;
+    out.push(m);
+  }
+  return pruneList(out);
 }
 
 export async function getMaterialsFromBank(
