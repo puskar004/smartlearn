@@ -518,7 +518,7 @@ function TeacherInner() {
           (1024 * 1024)
         ).toFixed(2);
         setMatNote(
-          `Published PDF (${mb} MB) · students can open for 48 hours`
+          `Published PDF (${mb} MB) · students: Class & Notes → Refresh materials`
         );
         setMatFile(null);
         setMatTitle("");

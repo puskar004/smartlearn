@@ -136,6 +136,7 @@ export default function LiveClassPage() {
         teacherName?: string;
         startedAt?: number;
         endsAt?: number;
+        joinUntil?: number;
       }[];
 
       setSections(
@@ -169,6 +170,9 @@ export default function LiveClassPage() {
               active: true,
               endsAt: preferred.endsAt || Date.now() + 12 * 60 * 60_000,
               startedAt: preferred.startedAt || Date.now(),
+              joinUntil:
+                preferred.joinUntil ||
+                (preferred.startedAt || Date.now()) + 15 * 60_000,
             },
           },
           preferred.code
@@ -405,16 +409,25 @@ export default function LiveClassPage() {
               LIVE · {live.title} · {live.subject}
             </span>
             <span className="inline-flex items-center gap-1">
-              <Shield className="h-3.5 w-3.5" /> Open until teacher ends
+              <Shield className="h-3.5 w-3.5" />{" "}
+              {live.joinUntil && live.joinUntil > Date.now()
+                ? `Join window open · ${Math.max(1, Math.ceil((live.joinUntil - Date.now()) / 60000))} min left`
+                : "Session open · teacher has not ended yet"}
             </span>
           </div>
+          {live.joinUntil && live.joinUntil > Date.now() && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">
+              Join now — Meet link is valid for 15 minutes from class start.
+              Open Google Meet below before the window closes.
+            </div>
+          )}
           <MeetFrame
             meetUrl={live.meetUrl || ""}
             title={`${live.title} · Meet`}
           />
           <p className="text-[11px] text-slate-500">
-            No fixed end time. Banner and Meet stay available while the teacher
-            keeps the session live. Use Join to open Google Meet.
+            Join within 15 minutes of start. After that the session can continue
+            until the teacher clicks End. Use Join to open Google Meet.
           </p>
         </div>
       )}

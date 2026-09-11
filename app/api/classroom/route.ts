@@ -155,6 +155,7 @@ export async function GET(req: NextRequest) {
         teacherName?: string;
         startedAt?: number;
         endsAt?: number;
+        joinUntil?: number;
       }[] = [];
       for (const c of codes) {
         const looked = await lookupClassLive(c);
@@ -169,6 +170,9 @@ export async function GET(req: NextRequest) {
             teacherName: looked.live.teacherName,
             startedAt: looked.live.startedAt,
             endsAt: looked.live.endsAt,
+            joinUntil:
+              looked.live.joinUntil ||
+              (looked.live.startedAt || Date.now()) + 15 * 60_000,
           });
           continue;
         }
@@ -187,6 +191,9 @@ export async function GET(req: NextRequest) {
               className: found.classroom.name,
               teacherName: found.classroom.teacherName,
               startedAt: sess.startedAt,
+              joinUntil:
+                sess.joinUntil ||
+                (sess.startedAt || Date.now()) + 15 * 60_000,
               endsAt: sess.endsAt,
             });
           }

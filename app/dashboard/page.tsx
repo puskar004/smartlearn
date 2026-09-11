@@ -108,6 +108,7 @@ export default function DashboardPage() {
     title: string;
     code: string;
     subject?: string;
+    joinUntil?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -143,6 +144,8 @@ export default function DashboardPage() {
               active?: boolean;
               title?: string;
               subject?: string;
+              joinUntil?: number;
+              startedAt?: number;
             }
           | null
           | undefined;
@@ -151,6 +154,9 @@ export default function DashboardPage() {
             title: live.title || "Live class",
             code: live.code,
             subject: live.subject,
+            joinUntil:
+              live.joinUntil ||
+              (live.startedAt || Date.now()) + 15 * 60_000,
           });
           return;
         }
@@ -179,10 +185,16 @@ export default function DashboardPage() {
         }[];
         const hit = rooms.find((r) => r.liveSession?.active);
         if (hit?.liveSession?.active) {
+          const ju =
+            (hit.liveSession as { joinUntil?: number }).joinUntil ||
+            ((hit.liveSession as { startedAt?: number }).startedAt ||
+              Date.now()) +
+              15 * 60_000;
           setLiveBanner({
             title: hit.liveSession.title || "Live class",
             code: hit.code,
             subject: hit.liveSession.subject,
+            joinUntil: ju,
           });
         } else {
           setLiveBanner(null);
@@ -218,6 +230,9 @@ export default function DashboardPage() {
             <div>
               <div className="text-xs font-bold uppercase tracking-wide text-rose-100">
                 Live now · class {liveBanner.code}
+                {liveBanner.joinUntil && liveBanner.joinUntil > Date.now()
+                  ? ` · join ${Math.max(1, Math.ceil((liveBanner.joinUntil - Date.now()) / 60000))} min`
+                  : ""}
               </div>
               <div className="text-sm font-extrabold">
                 {liveBanner.title}

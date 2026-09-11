@@ -41,15 +41,20 @@ function lightClassroom(c: Classroom): Classroom {
       teacherName: String(c?.teacherName || "Teacher").slice(0, 80),
       createdAt: Number(c?.createdAt) || Date.now(),
       materials: mats
-        .filter((m) => m && m.url && !String(m.url).startsWith("data:"))
+        .filter((m) => {
+          if (!m?.url) return false;
+          const u = String(m.url);
+          // Keep https + modest data: embeds (large data lives in shared index)
+          if (u.startsWith("data:") && u.length > 100_000) return false;
+          return true;
+        })
         .map((m) => ({
           id: String(m.id || `mat-${Date.now()}`),
           title: String(m.title || "Notes").slice(0, 120),
           type: (m.type === "video" || m.type === "link"
             ? m.type
             : "notes") as "notes" | "video" | "link",
-          // Do not truncate URLs — was causing Open 404
-          url: String(m.url).slice(0, 4000),
+          url: String(m.url).slice(0, 120_000),
           subject: String(m.subject || "General").slice(0, 60),
           createdAt: Number(m.createdAt) || Date.now(),
           expiresAt: m.expiresAt ? Number(m.expiresAt) : undefined,
@@ -1217,10 +1222,14 @@ export async function addMaterialToClass(
   material: Omit<TeacherMaterial, "id" | "createdAt">
 ) {
   let url = String(material.url || "").trim();
-  // Never put huge data-URLs into Clerk
-  if (url.startsWith("data:") && url.length > 120_000) {
+  // Clerk metadata size limit — huge data URLs go only to shared index
+  const clerkSafeData =
+    url.startsWith("data:") && url.length > 100_000
+      ? false
+      : true;
+  if (url.startsWith("data:") && url.length > 900_000) {
     throw new Error(
-      "PDF too large to embed. Use a smaller file or a Google Drive link."
+      "PDF too large to embed. Use a smaller file (~500KB) or a Google Drive link."
     );
   }
   if (!url) {
@@ -1276,29 +1285,38 @@ export async function addMaterialToClass(
     ...m,
     url:
       m.url.startsWith("https://") || m.url.startsWith("http://")
-        ? m.url.slice(0, 800)
-        : m.url.startsWith("data:") && m.url.length < 80_000
+        ? m.url.slice(0, 4000)
+        : m.url.startsWith("data:") && clerkSafeData && m.url.length < 100_000
           ? m.url
           : m.url.startsWith("/api/")
             ? m.url
-            : m.url.slice(0, 800),
+            : m.url.startsWith("data:")
+              ? "" // big data only in shared index / pack
+              : m.url.slice(0, 800),
   };
+  // Always keep full URL (incl. large data:) for bank + student pack
+  const fullMat: TeacherMaterial = { ...m };
 
   const bank = { ...(meta.materialBank || {}) };
   const prevBank = bank[normalized] || [];
-  bank[normalized] = [clerkMat, ...prevBank.filter((x) => x.id !== clerkMat.id)]
+  bank[normalized] = [
+    fullMat,
+    ...prevBank.filter((x) => x.id !== fullMat.id && x.url !== fullMat.url),
+  ]
     .filter((x) => x?.url)
-    .slice(0, 15);
+    .slice(0, 40);
 
   const rooms = [...(meta.classrooms || [])];
   const idx = rooms.findIndex((c) => c.code === normalized);
   const existing = idx >= 0 ? rooms[idx] : null;
   const roomMats = [
-    clerkMat,
-    ...((existing?.materials || []).filter((x) => x.id !== clerkMat.id) || []),
+    clerkMat.url ? clerkMat : fullMat,
+    ...((existing?.materials || []).filter(
+      (x) => x.id !== fullMat.id && x.url !== fullMat.url
+    ) || []),
   ]
-    .filter((x) => x?.url && !String(x.url).startsWith("data:"))
-    .slice(0, 15);
+    .filter((x) => x?.url)
+    .slice(0, 40);
 
   if (idx >= 0) {
     rooms[idx] = { ...rooms[idx], materials: roomMats };
@@ -1324,6 +1342,7 @@ export async function addMaterialToClass(
       "@/lib/class-materials-public"
     );
     const allForPack = activeNotes([
+      fullMat,
       clerkMat,
       ...(bank[normalized] || []),
       ...roomMats,
@@ -1372,29 +1391,30 @@ export async function addMaterialToClass(
     await publishClassMaterials(
       normalized,
       teacherId,
-      [clerkMat],
+      [fullMat, ...(clerkMat.url ? [clerkMat] : [])],
       material.teacherName || "Teacher"
     );
   } catch {
     // ignore
   }
 
-  const materials = fileMats.length
-    ? fileMats
-    : materialsForRoom({ ...meta, materialBank: bank }, normalized, {
-        ...(existing || {
-          code: normalized,
-          name: normalized,
-          teacherId,
-          teacherName: material.teacherName || "Teacher",
-          createdAt: now,
-          students: [],
-          liveSession: null,
-          alerts: [],
-          attendanceLog: [],
-        }),
-        materials: roomMats,
-      });
+  // Prefer bank (includes fullMat / data URLs) so new PDF always listed
+  const materials = (() => {
+    const map = new Map<string, TeacherMaterial>();
+    for (const x of [
+      fullMat,
+      ...fileMats,
+      ...(bank[normalized] || []),
+      ...roomMats,
+    ]) {
+      if (!x?.url) continue;
+      const prev = map.get(x.url);
+      if (!prev || (x.createdAt || 0) >= (prev.createdAt || 0)) map.set(x.url, x);
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+    );
+  })();
 
   return {
     code: normalized,
@@ -1450,15 +1470,16 @@ export async function startLive(
     const now = Date.now();
     const start = scheduledAt && scheduledAt > now ? scheduledAt : now;
     const isScheduled = !!(scheduledAt && scheduledAt > now);
-    // No planned end — runs until teacher Ends. Soft cap only for cleanup.
+    // Session runs until teacher Ends (soft 12h cap). Join window = 15 min.
     const endsAt = start + LIVE_SOFT_MAX_MS;
+    const joinUntil = start + 15 * 60_000;
     const live: LiveSession = {
       id: `live-${now}`,
       title,
       subject,
       startedAt: start,
       endsAt,
-      joinUntil: endsAt,
+      joinUntil,
       active: !isScheduled,
       joinCode: makeCode(4),
       meetUrl: meetUrl?.trim() || undefined,
@@ -1504,7 +1525,9 @@ export async function startLive(
             active: sess.active,
             startedAt: sess.startedAt,
             endsAt: sess.endsAt,
-            joinUntil: sess.joinUntil || sess.endsAt,
+            joinUntil:
+              sess.joinUntil ||
+              (sess.startedAt || Date.now()) + 15 * 60_000,
             scheduledAt: sess.scheduledAt,
             teacherName: room.teacherName,
             className: room.name,
@@ -1867,6 +1890,7 @@ export async function pushTeacherRemark(
 ) {
   const clean = text.trim().slice(0, 800);
   if (!clean) throw new Error("Empty feedback");
+  clearClerkWriteCooldown(studentId);
   const client = await clerkClient();
   const student = await client.users.getUser(studentId);
   const sm = metaOf(student);
@@ -1881,25 +1905,52 @@ export async function pushTeacherRemark(
     read: false,
   };
   const teacherRemarks = [remark, ...(sm.teacherRemarks || [])].slice(0, 40);
-  await saveMeta(studentId, { ...sm, teacherRemarks });
+  // Force write onto STUDENT Clerk metadata (not teacher)
+  await saveMeta(
+    studentId,
+    { ...sm, role: sm.role || "student", teacherRemarks },
+    { force: true }
+  );
+  // Verify write stuck
+  try {
+    const again = await client.users.getUser(studentId);
+    const check = metaOf(again).teacherRemarks || [];
+    if (!check.some((r) => r.id === remark.id)) {
+      await client.users.updateUserMetadata(studentId, {
+        publicMetadata: {
+          ...again.publicMetadata,
+          smartlearn: {
+            ...metaOf(again),
+            teacherRemarks,
+          },
+        },
+      });
+    }
+  } catch (e) {
+    console.error("remark verify", e);
+  }
 
-  // also class alert for StudentSync
   if (classCode) {
-    await updateClassroom(teacherId, classCode, (c) => ({
-      ...c,
-      alerts: pushAlert(c, {
-        kind: "remark",
-        title: "New teacher remark",
-        body: clean.slice(0, 120),
-        href: "/remarks",
-      }),
-    }));
+    try {
+      await updateClassroom(teacherId, classCode, (c) => ({
+        ...c,
+        alerts: pushAlert(c, {
+          kind: "remark",
+          title: "New teacher remark",
+          body: clean.slice(0, 120),
+          href: "/remarks",
+        }),
+      }));
+    } catch {
+      // non-fatal
+    }
   }
   return remark;
 }
 
 export async function getStudentRemarks(userId: string) {
-  const meta = await getTeacherMeta(userId);
+  clearClerkWriteCooldown(userId);
+  const meta = await getTeacherMeta(userId, { fresh: true });
   return meta.teacherRemarks || [];
 }
 

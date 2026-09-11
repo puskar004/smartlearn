@@ -8,30 +8,6 @@ function toBlob(buf: Buffer, contentType: string) {
   return new Blob([ab], { type: contentType });
 }
 
-async function withTimeout<T>(
-  p: Promise<T>,
-  ms: number,
-  label: string
-): Promise<T | null> {
-  let t: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      p,
-      new Promise<null>((resolve) => {
-        t = setTimeout(() => {
-          console.warn("upload timeout", label, ms);
-          resolve(null);
-        }, ms);
-      }),
-    ]);
-  } catch (e) {
-    console.error(label, e);
-    return null;
-  } finally {
-    if (t) clearTimeout(t);
-  }
-}
-
 async function resolveTmpfilesDirectUrl(pageUrl: string): Promise<string | null> {
   try {
     const res = await fetch(pageUrl, {
@@ -42,7 +18,7 @@ async function resolveTmpfilesDirectUrl(pageUrl: string): Promise<string | null>
       },
       redirect: "follow",
       cache: "no-store",
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(8000),
     });
     const html = await res.text();
     const m =
@@ -68,7 +44,7 @@ async function tryLitterbox(
   form.append("fileToUpload", toBlob(buf, contentType), filename);
   const res = await fetch(
     "https://litterbox.catbox.moe/resources/internals/api.php",
-    { method: "POST", body: form, signal: AbortSignal.timeout(10000) }
+    { method: "POST", body: form, signal: AbortSignal.timeout(18000) }
   );
   const text = (await res.text()).trim();
   return /^https?:\/\//i.test(text) ? text : null;
@@ -85,7 +61,7 @@ async function tryCatbox(
   const res = await fetch("https://catbox.moe/user/api.php", {
     method: "POST",
     body: form,
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(18000),
   });
   const text = (await res.text()).trim();
   return /^https?:\/\//i.test(text) ? text : null;
@@ -101,7 +77,7 @@ async function try0x0(
   const res = await fetch("https://0x0.st", {
     method: "POST",
     body: form,
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(18000),
   });
   const text = (await res.text()).trim();
   return /^https?:\/\//i.test(text) ? text : null;
@@ -117,7 +93,7 @@ async function tryTmpfiles(
   const res = await fetch("https://tmpfiles.org/api/v1/upload", {
     method: "POST",
     body: form,
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(18000),
   });
   const data = (await res.json().catch(() => null)) as {
     status?: string;
@@ -130,6 +106,30 @@ async function tryTmpfiles(
   return pageUrl.replace("tmpfiles.org/", "tmpfiles.org/dl/");
 }
 
+async function tryFileIo(
+  buf: Buffer,
+  filename: string,
+  contentType: string
+): Promise<string | null> {
+  const form = new FormData();
+  form.append("file", toBlob(buf, contentType), filename);
+  const res = await fetch("https://file.io/?expires=14d", {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(18000),
+  });
+  const data = (await res.json().catch(() => null)) as {
+    success?: boolean;
+    link?: string;
+  } | null;
+  const url = data?.link;
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+/**
+ * Upload buffer to a public host. Tries Vercel Blob first, then hosts
+ * one-by-one (more reliable than racing all at once on flaky networks).
+ */
 export async function uploadBufferRemote(
   buf: Buffer,
   filename: string,
@@ -151,31 +151,21 @@ export async function uploadBufferRemote(
     }
   }
 
-  // Race free hosts — first success wins; 12s total (no hang)
-  const hit = await withTimeout(
-    (async () => {
-      const attempts = [
-        tryLitterbox(buf, filename, contentType),
-        tryCatbox(buf, filename, contentType),
-        try0x0(buf, filename, contentType),
-        tryTmpfiles(buf, filename, contentType),
-      ];
-      const wrapped = attempts.map(
-        (p) =>
-          p.then((url) => {
-            if (url) return url;
-            throw new Error("empty");
-          }) as Promise<string>
-      );
-      try {
-        return await Promise.any(wrapped);
-      } catch {
-        return null;
-      }
-    })(),
-    12_000,
-    "remote-hosts"
-  );
+  const hosts = [
+    () => tryCatbox(buf, filename, contentType),
+    () => tryLitterbox(buf, filename, contentType),
+    () => tryTmpfiles(buf, filename, contentType),
+    () => try0x0(buf, filename, contentType),
+    () => tryFileIo(buf, filename, contentType),
+  ];
 
-  return hit || null;
+  for (const run of hosts) {
+    try {
+      const url = await run();
+      if (url && /^https?:\/\//i.test(url)) return url;
+    } catch (e) {
+      console.warn("host fail", e);
+    }
+  }
+  return null;
 }

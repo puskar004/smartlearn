@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
           ok: false,
           durable: false,
           error:
-            "Cloud upload failed — students would not see this file. Retry, use a smaller PDF, or paste a public Google Drive / direct PDF link. (Tip: set BLOB_READ_WRITE_TOKEN on Vercel for reliable uploads.)",
+            "Upload failed. Use a PDF under ~500KB, or paste a public Google Drive link. Then student: Class & Notes → Refresh materials.",
         },
         { status: 200 }
       );

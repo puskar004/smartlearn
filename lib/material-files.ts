@@ -3,8 +3,9 @@ import path from "path";
 import { uploadBufferRemote } from "@/lib/remote-upload";
 
 const MAX_BYTES = 5 * 1024 * 1024;
+/** PDFs up to this size can embed as data: for student notes pack */
+const DATA_URL_MAX = 550_000;
 
-/** In-memory fallback for current serverless instance (read only, not student-durable) */
 const mem = new Map<string, { buf: Buffer; contentType: string }>();
 
 function dataDir() {
@@ -21,15 +22,13 @@ function mimeFor(ext: string) {
   if (ext === "pdf") return "application/pdf";
   if (ext === "png") return "image/png";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
   return "application/octet-stream";
 }
 
 /**
- * Save PDF for class notes. Success requires a student-durable URL:
- * - Vercel Blob (BLOB_READ_WRITE_TOKEN) preferred
- * - free public hosts
- * - tiny data: URL embed
- * Local/API-only URLs are NOT durable — caller must fail honestly.
+ * Save PDF for class notes. Prefers public https; falls back to data: embed
+ * for medium files so students still get new uploads without Blob token.
  */
 export async function saveMaterialFile(
   teacherId: string,
@@ -51,10 +50,10 @@ export async function saveMaterialFile(
     await fs.mkdir(dataDir(), { recursive: true });
     await fs.writeFile(path.join(dataDir(), key), buf);
   } catch {
-    // ignore disk errors
+    // ignore
   }
 
-  // 1) Public durable host (Blob first, then free hosts)
+  // 1) Public https host
   try {
     const remote = await uploadBufferRemote(buf, key, mime);
     if (remote && /^https?:\/\//i.test(remote)) {
@@ -64,8 +63,8 @@ export async function saveMaterialFile(
     // fall through
   }
 
-  // 2) Tiny PDF as data URL (works cross-device in notes JSON)
-  if (buf.length <= 80_000 && mime === "application/pdf") {
+  // 2) data: embed — works in shared notes JSON for students (new + old)
+  if (buf.length <= DATA_URL_MAX) {
     return {
       key,
       url: `data:${mime};base64,${buf.toString("base64")}`,
@@ -73,12 +72,7 @@ export async function saveMaterialFile(
     };
   }
 
-  // 3) Not student-durable — do not pretend success
-  return {
-    key,
-    url: "",
-    durable: false,
-  };
+  return { key, url: "", durable: false };
 }
 
 export async function readMaterialFile(

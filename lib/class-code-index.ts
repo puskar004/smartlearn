@@ -503,7 +503,8 @@ export async function publishClassMaterials(
   const incoming = materials
     .map((m) => {
       let url = m.url || "";
-      if (url.startsWith("data:") && url.length > 200_000) url = "";
+      // Allow larger data: embeds so new PDFs still reach students without Blob
+      if (url.startsWith("data:") && url.length > 900_000) url = "";
       const createdAt = m.createdAt || Date.now();
       return {
         ...m,
