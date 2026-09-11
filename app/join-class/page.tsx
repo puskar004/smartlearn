@@ -118,39 +118,45 @@ export default function JoinClassPage() {
     const c = classCode.toUpperCase();
     try {
       const bust = Date.now();
-      // notes + materials + cache-bust header
-      const [mr, mr2] = await Promise.all([
+      const headers = {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      } as const;
+      // Dedicated notes route first (journal), then legacy actions
+      const [mr0, mr, mr2] = await Promise.all([
         fetch(
-          `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${bust}`,
-          {
-            cache: "no-store",
-            credentials: "same-origin",
-            headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-          }
+          `/api/classroom/notes?code=${encodeURIComponent(c)}&_=${bust}`,
+          { cache: "no-store", credentials: "same-origin", headers }
         ),
         fetch(
-          `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${bust + 1}`,
-          {
-            cache: "no-store",
-            credentials: "same-origin",
-            headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-          }
+          `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${bust + 1}`,
+          { cache: "no-store", credentials: "same-origin", headers }
+        ),
+        fetch(
+          `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${bust + 2}`,
+          { cache: "no-store", credentials: "same-origin", headers }
         ),
       ]);
+      const md0 = await mr0.json().catch(() => ({}));
       const md = await mr.json().catch(() => ({}));
       const md2 = await mr2.json().catch(() => ({}));
       const list = [
+        ...((md0.materials || []) as TeacherMaterial[]),
         ...((md.materials || []) as TeacherMaterial[]),
         ...((md2.materials || []) as TeacherMaterial[]),
       ];
 
-      // Server list is authority when non-empty — still merge with cache
       const materials = mergeMaterials(c, list);
       // Do NOT re-cache filtered list — mergeMaterials already cached full set
       return {
         materials,
-        name: (md.name as string) || (md2.name as string) || undefined,
+        name:
+          (md0.name as string) ||
+          (md.name as string) ||
+          (md2.name as string) ||
+          undefined,
         teacherName:
+          (md0.teacherName as string) ||
           (md.teacherName as string) ||
           (md2.teacherName as string) ||
           undefined,

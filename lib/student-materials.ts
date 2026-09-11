@@ -46,8 +46,9 @@ export function dismissMaterial(
 export function isMaterialExpired(m: TeacherMaterial, now = Date.now()) {
   const created = Number(m.createdAt) || 0;
   if (!created) return false;
+  // Prefer server expiresAt when set (usually 30d); else 24h student window
   const exp =
-    m.expiresAt && m.expiresAt < created + STUDENT_MAT_TTL_MS
+    m.expiresAt && m.expiresAt > created
       ? m.expiresAt
       : created + STUDENT_MAT_TTL_MS;
   return exp < now;
@@ -72,6 +73,9 @@ export function filterStudentMaterials(
 
 export function hoursLeft(m: TeacherMaterial, now = Date.now()) {
   const created = Number(m.createdAt) || now;
-  const exp = created + STUDENT_MAT_TTL_MS;
+  const exp =
+    m.expiresAt && m.expiresAt > created
+      ? m.expiresAt
+      : created + STUDENT_MAT_TTL_MS;
   return Math.max(0, Math.ceil((exp - now) / 3_600_000));
 }

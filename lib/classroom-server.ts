@@ -520,18 +520,19 @@ export async function getNotesForClassCode(code: string): Promise<{
   materials: TeacherMaterial[];
 }> {
   const c = code.trim().toUpperCase();
-  const empty = {
-    code: c,
-    name: `Class ${c}`,
-    teacherName: "",
-    materials: [] as TeacherMaterial[],
-  };
-  if (!c) return empty;
+  let name = `Class ${c}`;
+  let teacherName = "Teacher";
+  if (!c) {
+    return { code: c, name, teacherName: "", materials: [] };
+  }
 
-  const found = await findClassroomByCode(c);
-  if (!found) return empty;
+  // NEVER early-return empty — journal/index may still have PDFs
+  const found = await findClassroomByCode(c).catch(() => null);
+  if (found?.classroom) {
+    name = found.classroom.name || name;
+    teacherName = found.classroom.teacherName || teacherName;
+  }
 
-  // Key by id AND url so every distinct upload is kept (never drop 2nd PDF)
   const byId = new Map<string, TeacherMaterial>();
   const byUrl = new Map<string, TeacherMaterial>();
   const add = (list: TeacherMaterial[] = []) => {
@@ -560,19 +561,17 @@ export async function getNotesForClassCode(code: string): Promise<{
     }
   };
 
-  add(found.classroom.materials || []);
+  if (found?.classroom?.materials) add(found.classroom.materials);
 
-  // Journal FIRST — every teacher upload is appended here
+  // Journal — works even when findClassroomByCode fails
   try {
     const { journalListMaterials } = await import(
       "@/lib/class-materials-journal"
     );
     const j = await journalListMaterials(c);
     add(j.materials);
-    if (j.className) found.classroom.name = j.className || found.classroom.name;
-    if (j.teacherName)
-      found.classroom.teacherName =
-        j.teacherName || found.classroom.teacherName;
+    if (j.className) name = j.className || name;
+    if (j.teacherName) teacherName = j.teacherName || teacherName;
   } catch (e) {
     console.error("journalListMaterials", e);
   }
@@ -585,52 +584,51 @@ export async function getNotesForClassCode(code: string): Promise<{
   }
 
   try {
-    const meta = await getTeacherMeta(found.teacherId, { fresh: true });
-    add(meta.materialBank?.[c] || []);
-    add(materialsForRoom(meta, c, found.classroom));
-    const row = (meta.classrooms || []).find(
-      (r) => r.code.toUpperCase() === c
-    );
-    if (row?.materials?.length) add(row.materials);
-
-    // ALL pack URLs for this class (history of uploads), not only latest
-    const packUrls = new Set<string>();
-    const latest =
-      meta.classMaterialPacks?.[c] || meta.materialsIndexUrl || null;
-    if (latest?.startsWith("http")) packUrls.add(latest);
-    if (meta.classMaterialPacks) {
-      for (const [k, u] of Object.entries(meta.classMaterialPacks)) {
-        if (k.toUpperCase() === c && u?.startsWith("http")) packUrls.add(u);
-      }
-    }
-    const { fetchClassNotesPack } = await import(
-      "@/lib/class-materials-public"
-    );
-    for (const packUrl of packUrls) {
-      try {
-        const pack = await fetchClassNotesPack(packUrl);
-        if (pack?.materials?.length) {
-          add(pack.materials);
-          if (pack.className) found.classroom.name = pack.className;
-          if (pack.teacherName)
-            found.classroom.teacherName = pack.teacherName;
-        }
-      } catch {
-        // ignore one pack
-      }
-    }
-  } catch (e) {
-    console.error("getNotesForClassCode", e);
-  }
-
-  try {
     const { getMaterialsByCode } = await import("@/lib/materials-bank-store");
     add(await getMaterialsByCode(c, null));
   } catch {
     // ignore
   }
 
-  // Prefer unique by id; fall back to url-only entries without id
+  if (found?.teacherId) {
+    try {
+      const meta = await getTeacherMeta(found.teacherId, { fresh: true });
+      add(meta.materialBank?.[c] || []);
+      add(materialsForRoom(meta, c, found.classroom));
+      const row = (meta.classrooms || []).find(
+        (r) => r.code.toUpperCase() === c
+      );
+      if (row?.materials?.length) add(row.materials);
+
+      const packUrls = new Set<string>();
+      const latest =
+        meta.classMaterialPacks?.[c] || meta.materialsIndexUrl || null;
+      if (latest?.startsWith("http")) packUrls.add(latest);
+      if (meta.classMaterialPacks) {
+        for (const [k, u] of Object.entries(meta.classMaterialPacks)) {
+          if (k.toUpperCase() === c && u?.startsWith("http")) packUrls.add(u);
+        }
+      }
+      const { fetchClassNotesPack } = await import(
+        "@/lib/class-materials-public"
+      );
+      for (const packUrl of packUrls) {
+        try {
+          const pack = await fetchClassNotesPack(packUrl);
+          if (pack?.materials?.length) {
+            add(pack.materials);
+            if (pack.className) name = pack.className || name;
+            if (pack.teacherName) teacherName = pack.teacherName || teacherName;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } catch (e) {
+      console.error("getNotesForClassCode teacher meta", e);
+    }
+  }
+
   const seenUrl = new Set<string>();
   const materials: TeacherMaterial[] = [];
   for (const m of byId.values()) {
@@ -645,8 +643,8 @@ export async function getNotesForClassCode(code: string): Promise<{
 
   return {
     code: c,
-    name: found.classroom.name || `Class ${c}`,
-    teacherName: found.classroom.teacherName || "Teacher",
+    name: name || `Class ${c}`,
+    teacherName: teacherName || "Teacher",
     materials,
   };
 }

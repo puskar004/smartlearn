@@ -157,6 +157,14 @@ export async function POST(req: NextRequest) {
         teacherName,
         className: code,
       })) as typeof mat[];
+      console.log(
+        "journal ok",
+        code,
+        "count",
+        journalMats.length,
+        "ids",
+        journalMats.map((m) => m.id).join(",")
+      );
     } catch (e) {
       console.error("journalAppendMaterial", e);
     }

@@ -230,7 +230,33 @@ export async function journalListMaterials(code: string): Promise<{
   teacherName?: string;
   className?: string;
 }> {
-  const j = await loadJournal(code);
+  const c = code.toUpperCase();
+  let j = await loadJournal(c);
+
+  // Seed from class-code index if journal empty (first read after deploy)
+  if (!j.materials?.length) {
+    try {
+      const { getClassMaterials } = await import("@/lib/class-code-index");
+      const shared = await getClassMaterials(c);
+      if (shared.length) {
+        j = {
+          ...j,
+          materials: mergeMats(shared, j.materials),
+          updatedAt: Date.now(),
+        };
+        mem.set(c, j);
+        try {
+          await fs.mkdir(dir(), { recursive: true });
+          await fs.writeFile(localPath(c), JSON.stringify(j), "utf8");
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return {
     materials: j.materials || [],
     teacherName: j.teacherName,
