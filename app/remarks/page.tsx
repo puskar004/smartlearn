@@ -16,15 +16,42 @@ export default function RemarksPage() {
     const load = async () => {
       try {
         const data = await apiGetRemarks();
-        setRemarks((data.remarks || []) as TeacherRemark[]);
+        const list = (data.remarks || []) as TeacherRemark[];
+        if (list.length) {
+          setRemarks(list);
+          try {
+            localStorage.setItem(
+              `sl_student_remarks_${userId}`,
+              JSON.stringify(list.slice(0, 40))
+            );
+          } catch {
+            // ignore
+          }
+        } else {
+          try {
+            const raw = localStorage.getItem(`sl_student_remarks_${userId}`);
+            const cached = raw ? (JSON.parse(raw) as TeacherRemark[]) : [];
+            setRemarks(Array.isArray(cached) ? cached : []);
+          } catch {
+            setRemarks([]);
+          }
+        }
       } catch {
-        // ignore
+        try {
+          const raw = localStorage.getItem(`sl_student_remarks_${userId}`);
+          if (raw) {
+            const cached = JSON.parse(raw) as TeacherRemark[];
+            if (Array.isArray(cached)) setRemarks(cached);
+          }
+        } catch {
+          // ignore
+        }
       } finally {
         setLoading(false);
       }
     };
     void load();
-    const id = setInterval(() => void load(), 15_000);
+    const id = setInterval(() => void load(), 8_000);
     return () => clearInterval(id);
   }, [userId]);
 

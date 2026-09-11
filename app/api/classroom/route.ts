@@ -379,8 +379,17 @@ export async function GET(req: NextRequest) {
     }
 
     if (action === "remarks") {
-      const remarks = await getStudentRemarks(userId);
-      return NextResponse.json({ ok: true, remarks });
+      try {
+        const remarks = await getStudentRemarks(userId);
+        return NextResponse.json({
+          ok: true,
+          remarks,
+          count: remarks.length,
+        });
+      } catch (e) {
+        console.error("remarks get", e);
+        return NextResponse.json({ ok: true, remarks: [], count: 0 });
+      }
     }
 
     if (action === "room" && code) {

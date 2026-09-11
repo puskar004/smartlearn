@@ -11,6 +11,7 @@ import {
   Loader2,
   LogOut,
   School,
+  Trash2,
   User,
   Video,
 } from "lucide-react";
@@ -29,6 +30,11 @@ import {
   setJoinedClass,
   type TeacherMaterial,
 } from "@/lib/teacher-store";
+import {
+  dismissMaterial,
+  filterStudentMaterials,
+  hoursLeft,
+} from "@/lib/student-materials";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
 
 type JoinedRoom = {
@@ -67,15 +73,30 @@ export default function JoinClassPage() {
       if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
         byUrl.set(m.url, m);
       }
-      if (m.id) {
-        // also index by id so retitled same-file still one entry by url above
-      }
     }
     const all = Array.from(byUrl.values()).sort(
       (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
     );
     if (all.length) cacheClassMaterials(c, all);
-    return all;
+    // Student panel: hide dismissed + auto-expire after 24h
+    return filterStudentMaterials(userId, c, all);
+  };
+
+  const removeStudentPdf = (classCode: string, m: TeacherMaterial) => {
+    if (!userId) return;
+    const up = classCode.toUpperCase();
+    dismissMaterial(userId, up, m);
+    setRooms((prev) =>
+      prev.map((x) =>
+        x.code === up
+          ? {
+              ...x,
+              materials: filterStudentMaterials(userId, up, x.materials || []),
+            }
+          : x
+      )
+    );
+    setMsg(`Removed “${m.title || "PDF"}” from your list.`);
   };
 
   const fetchMaterials = async (classCode: string) => {
@@ -483,8 +504,8 @@ export default function JoinClassPage() {
                     {r.showMats && (
                       <div className="mt-2 rounded-2xl border border-slate-100 bg-slate-50 p-3">
                         <p className="mb-2 text-[11px] font-semibold text-slate-500">
-                          Notes stay available for 48 hours · open inside
-                          CurioSphere (no new tab)
+                          Notes auto-remove after <strong>24 hours</strong>. You
+                          can also delete any PDF from your list anytime.
                         </p>
                         <div className="mb-2 flex justify-end">
                           <button
@@ -515,7 +536,10 @@ export default function JoinClassPage() {
                         ) : (
                           <ul className="space-y-2">
                             {mats.map((m) => (
-                              <li key={m.id || m.url}>
+                              <li
+                                key={m.id || m.url}
+                                className="flex items-stretch gap-2"
+                              >
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -527,7 +551,11 @@ export default function JoinClassPage() {
                                         u
                                       )
                                     ) {
-                                      window.open(u, "_blank", "noopener,noreferrer");
+                                      window.open(
+                                        u,
+                                        "_blank",
+                                        "noopener,noreferrer"
+                                      );
                                       return;
                                     }
                                     setViewer({
@@ -537,9 +565,9 @@ export default function JoinClassPage() {
                                       id: m.id,
                                     });
                                   }}
-                                  className="flex w-full items-center gap-3 rounded-2xl border border-white bg-white px-3 py-3 text-left shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
+                                  className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl border border-white bg-white px-3 py-3 text-left shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
                                 >
-                                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50">
+                                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50">
                                     {m.type === "video" ? (
                                       <Video className="h-5 w-5 text-rose-500" />
                                     ) : (
@@ -551,12 +579,21 @@ export default function JoinClassPage() {
                                       {m.title}
                                     </div>
                                     <div className="text-[11px] text-slate-500">
-                                      {m.subject || "General"} · PDF notes
+                                      {m.subject || "General"} ·{" "}
+                                      {hoursLeft(m)}h left
                                     </div>
                                   </div>
-                                  <span className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white">
-                                    Open PDF
+                                  <span className="shrink-0 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white">
+                                    Open
                                   </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Remove from my list"
+                                  onClick={() => removeStudentPdf(r.code, m)}
+                                  className="inline-flex shrink-0 items-center justify-center rounded-2xl border border-rose-100 bg-white px-3 text-rose-600 shadow-sm hover:bg-rose-50"
+                                >
+                                  <Trash2 className="h-4 w-4" />
                                 </button>
                               </li>
                             ))}

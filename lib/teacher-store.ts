@@ -590,7 +590,10 @@ export async function apiSendRemark(
 }
 
 export async function apiGetRemarks() {
-  const res = await fetch("/api/classroom?action=remarks");
+  const res = await fetch(
+    `/api/classroom?action=remarks&_=${Date.now()}`,
+    { cache: "no-store", credentials: "same-origin" }
+  );
   return res.json();
 }
 

@@ -258,7 +258,7 @@ async function saveMeta(
     payload = JSON.parse(JSON.stringify(cleaned)) as SmartlearnMeta;
   } catch {
     payload = {
-      role: cleaned.role || "teacher",
+      role: cleaned.role || liveExisting.role || "student",
       classrooms: (cleaned.classrooms || []).slice(0, 10).map((c) => ({
         code: c.code,
         name: c.name,
@@ -274,6 +274,8 @@ async function saveMeta(
       materialBank: lightMaterialBank(mergedBank),
       activeClassCode: cleaned.activeClassCode || null,
       materialsIndexUrl: cleaned.materialsIndexUrl || null,
+      // CRITICAL: never drop student remarks on serialize failure
+      teacherRemarks: cleaned.teacherRemarks || liveExisting.teacherRemarks || [],
     };
   }
 
@@ -1905,29 +1907,51 @@ export async function pushTeacherRemark(
     read: false,
   };
   const teacherRemarks = [remark, ...(sm.teacherRemarks || [])].slice(0, 40);
-  // Force write onto STUDENT Clerk metadata (not teacher)
-  await saveMeta(
-    studentId,
-    { ...sm, role: sm.role || "student", teacherRemarks },
-    { force: true }
-  );
-  // Verify write stuck
+
+  // 1) File backup first (always works even if Clerk lags)
+  try {
+    const { appendStudentRemark } = await import("@/lib/remarks-store");
+    await appendStudentRemark(studentId, remark);
+  } catch (e) {
+    console.error("remarks file", e);
+  }
+
+  // 2) Force write onto STUDENT Clerk metadata
+  try {
+    await saveMeta(
+      studentId,
+      { ...sm, role: sm.role || "student", teacherRemarks },
+      { force: true }
+    );
+  } catch (e) {
+    console.error("remark saveMeta", e);
+  }
+
+  // 3) Direct Clerk patch (belt + suspenders)
   try {
     const again = await client.users.getUser(studentId);
-    const check = metaOf(again).teacherRemarks || [];
-    if (!check.some((r) => r.id === remark.id)) {
-      await client.users.updateUserMetadata(studentId, {
-        publicMetadata: {
-          ...again.publicMetadata,
-          smartlearn: {
-            ...metaOf(again),
-            teacherRemarks,
-          },
+    const prev = metaOf(again);
+    const merged = [
+      remark,
+      ...(prev.teacherRemarks || []).filter((r) => r.id !== remark.id),
+    ].slice(0, 40);
+    await client.users.updateUserMetadata(studentId, {
+      publicMetadata: {
+        ...again.publicMetadata,
+        smartlearn: {
+          ...prev,
+          role: prev.role || "student",
+          teacherRemarks: merged,
         },
-      });
-    }
+      },
+    });
+    setCachedMeta(studentId, {
+      ...prev,
+      role: prev.role || "student",
+      teacherRemarks: merged,
+    });
   } catch (e) {
-    console.error("remark verify", e);
+    console.error("remark clerk direct", e);
   }
 
   if (classCode) {
@@ -1950,8 +1974,24 @@ export async function pushTeacherRemark(
 
 export async function getStudentRemarks(userId: string) {
   clearClerkWriteCooldown(userId);
-  const meta = await getTeacherMeta(userId, { fresh: true });
-  return meta.teacherRemarks || [];
+  const map = new Map<string, import("@/lib/classroom-types").TeacherRemark>();
+  try {
+    const { listStudentRemarksFile } = await import("@/lib/remarks-store");
+    for (const r of await listStudentRemarksFile(userId)) {
+      if (r?.id) map.set(r.id, r);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const meta = await getTeacherMeta(userId, { fresh: true });
+    for (const r of meta.teacherRemarks || []) {
+      if (r?.id) map.set(r.id, r);
+    }
+  } catch {
+    // ignore
+  }
+  return Array.from(map.values()).sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 
 export async function postMessage(
