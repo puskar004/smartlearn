@@ -110,12 +110,16 @@ function lightTest(t: LiveTest): LiveTest {
       total: s.total,
       at: s.at,
       videoKeys: s.videoKeys,
-      moments: (s.moments || []).slice(0, 8).map((m) => ({
+      moments: (s.moments || []).slice(0, 12).map((m) => ({
         at: m.at,
         note: m.note,
         videoKey: m.videoKey,
         imageKey: m.imageKey,
         audioKey: m.audioKey,
+        // small preview so teacher still sees snaps after cold start
+        imageDataUrl: m.imageDataUrl
+          ? String(m.imageDataUrl).slice(0, 80_000)
+          : undefined,
       })),
     };
   }
@@ -131,18 +135,53 @@ export function genTestCode() {
 }
 
 export async function saveTest(test: LiveTest) {
+  // Merge with any existing file copy so concurrent moment/submit don't wipe fields
   const list = await readFile();
-  const next = [test, ...list.filter((t) => t.id !== test.id)].slice(0, 100);
+  const prev = list.find((t) => t.id === test.id || t.code === test.code);
+  const merged: LiveTest = prev
+    ? {
+        ...prev,
+        ...test,
+        // Explicit close wins; otherwise stay live if either copy is active
+        active:
+          test.active === false
+            ? false
+            : Boolean(test.active || prev.active),
+        questions:
+          (test.questions?.length || 0) >= (prev.questions?.length || 0)
+            ? test.questions
+            : prev.questions,
+        submissions: mergeSubmissions(prev.submissions, test.submissions),
+        joinUntil: Math.max(test.joinUntil || 0, prev.joinUntil || 0),
+      }
+    : test;
+
+  const next = [merged, ...list.filter((t) => t.id !== merged.id)].slice(
+    0,
+    100
+  );
   await writeFile(next);
 
   try {
     const client = await clerkClient();
-    const user = await client.users.getUser(test.teacherId);
+    const user = await client.users.getUser(merged.teacherId);
     const sm = metaOf(user);
-    const liveTests = [lightTest(test), ...(sm.liveTests || [])]
+    const liveTests = [lightTest(merged), ...(sm.liveTests || [])]
       .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
-      .slice(0, 30);
-    await client.users.updateUserMetadata(test.teacherId, {
+      .map((t) =>
+        t.id === merged.id
+          ? {
+              ...t,
+              active: merged.active,
+              submissions: mergeSubmissions(
+                t.submissions,
+                lightTest(merged).submissions
+              ),
+            }
+          : t
+      )
+      .slice(0, 40);
+    await client.users.updateUserMetadata(merged.teacherId, {
       publicMetadata: {
         ...user.publicMetadata,
         smartlearn: { ...sm, liveTests },
@@ -151,7 +190,7 @@ export async function saveTest(test: LiveTest) {
   } catch (e) {
     console.error("saveTest meta", e);
   }
-  return test;
+  return merged;
 }
 
 export async function findTestByCode(code: string): Promise<LiveTest | null> {
@@ -177,14 +216,24 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
               map.set(t.id, {
                 ...t,
                 ...existing,
+                // Prefer whichever copy is richer / still active
+                questions:
+                  (existing.questions?.length || 0) >=
+                  (t.questions?.length || 0)
+                    ? existing.questions
+                    : t.questions,
                 submissions: mergeSubmissions(
                   t.submissions,
                   existing.submissions
                 ),
-                active:
-                  existing.active || t.active
-                    ? Boolean(existing.active ?? t.active)
-                    : false,
+                // Stay active if EITHER source says active (don't drop live tests)
+                active: Boolean(existing.active || t.active),
+                teacherId: existing.teacherId || t.teacherId,
+                joinUntil: Math.max(
+                  existing.joinUntil || 0,
+                  t.joinUntil || 0,
+                  existing.startsAt || t.startsAt || 0
+                ),
               });
             }
           }
@@ -221,8 +270,13 @@ export async function listTeacherTests(teacherId: string) {
             ? {
                 ...t,
                 ...ex,
+                questions:
+                  (ex.questions?.length || 0) >= (t.questions?.length || 0)
+                    ? ex.questions
+                    : t.questions,
                 submissions: mergeSubmissions(t.submissions, ex.submissions),
                 teacherId: ex.teacherId || t.teacherId || teacherId,
+                active: Boolean(ex.active || t.active),
               }
             : { ...t, teacherId: t.teacherId || teacherId }
         );
@@ -231,7 +285,10 @@ export async function listTeacherTests(teacherId: string) {
   } catch {
     // ignore
   }
-  return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+  // Active first, then newest
+  return Array.from(map.values()).sort(
+    (a, b) => Number(b.active) - Number(a.active) || b.createdAt - a.createdAt
+  );
 }
 
 export async function deleteTest(teacherId: string, code: string) {
@@ -461,13 +518,13 @@ export async function addTestMoment(
 
   const entry: ProctorMoment = {
     at: moment.at || Date.now(),
-    // Prefer file keys; keep small inline only if file save failed
     imageKey,
     audioKey,
-    imageDataUrl:
-      !imageKey && moment.imageDataUrl
-        ? String(moment.imageDataUrl).slice(0, 100_000)
-        : undefined,
+    // Keep a small inline preview so teacher UI always has something to show
+    // even if /tmp keys are lost on cold start (remote imageKey preferred)
+    imageDataUrl: moment.imageDataUrl
+      ? String(moment.imageDataUrl).slice(0, 120_000)
+      : undefined,
     audioDataUrl:
       !audioKey && moment.audioDataUrl
         ? String(moment.audioDataUrl).slice(0, 80_000)

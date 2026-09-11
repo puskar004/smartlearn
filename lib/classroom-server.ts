@@ -1643,18 +1643,35 @@ export async function endLive(teacherId: string, code: string) {
     console.error("endLive clear shared", e);
   }
 
+  // Pull concurrent journal before freeze (all students who marked)
+  let journalAtt: AttendanceAttendee[] = [];
+  try {
+    const peek = peekMeta(teacherId);
+    const sessId =
+      peek?.classrooms?.find((x) => x.code === normalized)?.liveSession?.id ||
+      "";
+    if (sessId) {
+      const { journalListAttendance } = await import(
+        "@/lib/live-attendance-journal"
+      );
+      journalAtt = await journalListAttendance(normalized, sessId);
+    }
+  } catch {
+    // ignore
+  }
+
   const room = await updateClassroom(teacherId, normalized, (c) => {
     if (!c.liveSession) return c;
     const sess = c.liveSession;
     const now = Date.now();
     const stampLeft = (list: AttendanceAttendee[]) =>
       list.map((a) => (a.leftAt ? a : { ...a, leftAt: now }));
-    // NEVER drop people: merge live attendees + open log + any prior closed same session
+    // NEVER drop people: journal + live + open log
     const fromLogs = (c.attendanceLog || [])
       .filter((r) => r.sessionId === sess.id)
       .flatMap((r) => r.attendees || []);
     const attendees = stampLeft(
-      mergeAttendees(sess.attendees, fromLogs)
+      mergeAttendees(journalAtt, sess.attendees, fromLogs)
     );
     let attendanceLog = (c.attendanceLog || []).map((r) => {
       if (r.sessionId === sess.id) {
@@ -1747,16 +1764,41 @@ export async function markAttendance(
       // ignore
     }
 
+    const attendee: AttendanceAttendee = {
+      studentId,
+      name: name || "Student",
+      joinedAt: Date.now(),
+    };
+
+    // 1) Journal first — survives concurrent Clerk write races (30–40 students)
+    let journalAttendees: AttendanceAttendee[] = [attendee];
+    const sessionHint =
+      shared?.id || found.classroom.liveSession?.id || "";
+    try {
+      const { journalMarkAttendance } = await import(
+        "@/lib/live-attendance-journal"
+      );
+      if (sessionHint) {
+        journalAttendees = await journalMarkAttendance(
+          code,
+          sessionHint,
+          attendee
+        );
+      }
+    } catch (e) {
+      console.error("journalMarkAttendance", e);
+    }
+
     return updateClassroom(found.teacherId, found.classroom.code, (c) => {
       let sess = c.liveSession;
-      // If Clerk lost active flag but shared live is on, still mark attendance
       if ((!sess || !sess.active) && shared) {
         sess = {
           id: shared.id,
           title: shared.title || sess?.title || "Live class",
           subject: shared.subject || sess?.subject || "General",
           startedAt: shared.startedAt || sess?.startedAt || Date.now(),
-          endsAt: shared.endsAt || sess?.endsAt || Date.now() + 12 * 60 * 60_000,
+          endsAt:
+            shared.endsAt || sess?.endsAt || Date.now() + 12 * 60 * 60_000,
           active: true,
           joinCode: shared.joinCode || sess?.joinCode || "",
           meetUrl: shared.meetUrl || sess?.meetUrl,
@@ -1765,58 +1807,41 @@ export async function markAttendance(
         };
       }
       if (!sess?.active) return c;
-    if ((sess.kickedIds || []).includes(studentId)) {
-      return c;
-    }
-    const existing = sess.attendees || [];
-    const already = existing.find(
-      (a) => a.studentId === studentId && !a.leftAt
-    );
-    if (already) {
-      // Already present — still ensure attendanceLog has them
-      const hasInLog = (c.attendanceLog || []).some(
-        (r) =>
-          r.sessionId === sess!.id &&
-          (r.attendees || []).some((x) => x.studentId === studentId)
+      if ((sess.kickedIds || []).includes(studentId)) {
+        return c;
+      }
+      const attendees = mergeAttendees(
+        journalAttendees,
+        sess.attendees,
+        [attendee]
       );
-      if (hasInLog) return c;
-    }
-    const attendee: AttendanceAttendee = already || {
-      studentId,
-      name: name || "Student",
-      joinedAt: Date.now(),
-    };
-    const attendees = mergeAttendees(
-      already ? existing : [attendee, ...existing],
-      existing
-    );
-    let attendanceLog = (c.attendanceLog || []).map((r) => {
-      if (r.sessionId !== sess!.id) return r;
+      let attendanceLog = (c.attendanceLog || []).map((r) => {
+        if (r.sessionId !== sess!.id) return r;
+        return {
+          ...r,
+          attendees: mergeAttendees(r.attendees, attendees, [attendee]),
+        };
+      });
+      const hasLog = attendanceLog.some((r) => r.sessionId === sess!.id);
+      if (!hasLog) {
+        attendanceLog = [
+          {
+            id: `att-${sess.id}`,
+            sessionId: sess.id,
+            sessionTitle: sess.title,
+            subject: sess.subject,
+            startedAt: sess.startedAt,
+            attendees,
+          } as AttendanceRecord,
+          ...attendanceLog,
+        ].slice(0, 80);
+      }
       return {
-        ...r,
-        attendees: mergeAttendees(r.attendees, [attendee], attendees),
+        ...c,
+        liveSession: { ...sess, attendees },
+        attendanceLog,
       };
     });
-    const hasLog = attendanceLog.some((r) => r.sessionId === sess!.id);
-    if (!hasLog) {
-      attendanceLog = [
-        {
-          id: `att-${sess.id}`,
-          sessionId: sess.id,
-          sessionTitle: sess.title,
-          subject: sess.subject,
-          startedAt: sess.startedAt,
-          attendees,
-        } as AttendanceRecord,
-        ...attendanceLog,
-      ].slice(0, 80);
-    }
-    return {
-      ...c,
-      liveSession: { ...sess, attendees },
-      attendanceLog,
-    };
-  });
 }
 
 export async function kickFromLive(
@@ -1918,6 +1943,18 @@ export async function leaveAttendance(
   const found = await findClassroomByCode(code);
   if (!found) return null;
   const now = Date.now();
+  const sessId = found.classroom.liveSession?.id || "";
+  let journalAtt: AttendanceAttendee[] = [];
+  if (sessId) {
+    try {
+      const { journalStampLeft } = await import(
+        "@/lib/live-attendance-journal"
+      );
+      journalAtt = await journalStampLeft(code, sessId, studentId);
+    } catch {
+      // ignore
+    }
+  }
   return updateClassroom(found.teacherId, found.classroom.code, (c) => {
     const sess = c.liveSession;
     if (!sess) return c;
@@ -1925,10 +1962,13 @@ export async function leaveAttendance(
       list.map((a) =>
         a.studentId === studentId && !a.leftAt ? { ...a, leftAt: now } : a
       );
-    const attendees = stamp(sess.attendees || []);
+    const attendees = mergeAttendees(journalAtt, stamp(sess.attendees || []));
     const attendanceLog = (c.attendanceLog || []).map((r) => {
       if (r.sessionId !== sess.id) return r;
-      return { ...r, attendees: stamp(r.attendees || []) };
+      return {
+        ...r,
+        attendees: mergeAttendees(journalAtt, stamp(r.attendees || [])),
+      };
     });
     return {
       ...c,

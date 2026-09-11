@@ -76,7 +76,7 @@ export default function TeacherTestPage() {
   const [title, setTitle] = useState("Unit Test");
   const [subject, setSubject] = useState("Physics");
   const [durationMin, setDurationMin] = useState(30);
-  const [joinWindowMin, setJoinWindowMin] = useState(15);
+  const [joinWindowMin, setJoinWindowMin] = useState(12 * 60);
   const [rawText, setRawText] = useState("");
   const [questions, setQuestions] = useState<Mcq[]>([]);
   const [tests, setTests] = useState<TestRow[]>([]);
@@ -102,7 +102,11 @@ export default function TeacherTestPage() {
   }, []);
 
   useEffect(() => {
-    if (userId) void load();
+    if (!userId) return;
+    void load();
+    // Keep live tests + submissions/snaps fresh while page open
+    const id = setInterval(() => void load(), 12_000);
+    return () => clearInterval(id);
   }, [userId, load]);
 
   const onPdfFile = async (file: File | null) => {
@@ -285,18 +289,20 @@ export default function TeacherTestPage() {
             />
           </label>
           <label className="text-xs font-semibold text-slate-700">
-            Code join window (minutes)
+            Code available (minutes)
             <input
               type="number"
-              min={5}
-              max={120}
+              min={30}
+              max={720}
               value={joinWindowMin}
-              onChange={(e) => setJoinWindowMin(Number(e.target.value) || 15)}
+              onChange={(e) =>
+                setJoinWindowMin(Number(e.target.value) || 12 * 60)
+              }
               className={inputCls}
             />
             <span className="mt-1 block text-[10px] font-normal text-slate-400">
-              Students can enter the code only within this time after publish
-              (default 15).
+              Soft window only — test stays live until you click Close. Default
+              12 hours.
             </span>
           </label>
         </div>
