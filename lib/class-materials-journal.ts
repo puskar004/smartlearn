@@ -98,8 +98,30 @@ async function loadJournal(code: string): Promise<Journal> {
   const memJ = mem.get(c) || null;
   const local = (await readLocal(c)) || null;
 
-  // Fast path: mem/local already have materials — skip remote on hot path
-  const baseMats = mergeMats(memJ?.materials, local?.materials);
+  // Always merge Supabase durable index (shared localhost ↔ Vercel)
+  let sbIdx: {
+    materials?: TeacherMaterial[];
+    teacherId?: string;
+    teacherName?: string;
+    className?: string;
+    updatedAt?: number;
+  } | null = null;
+  try {
+    const { loadMaterialsIndex } = await import(
+      "@/lib/supabase-materials-index"
+    );
+    sbIdx = await loadMaterialsIndex(c);
+  } catch (e) {
+    console.error("loadJournal supabase", e);
+  }
+
+  const baseMats = mergeMats(
+    memJ?.materials,
+    local?.materials,
+    sbIdx?.materials
+  );
+
+  // Free-host journal only if still empty
   let remote: Journal | null = null;
   if (baseMats.length === 0) {
     try {
@@ -116,14 +138,23 @@ async function loadJournal(code: string): Promise<Journal> {
   const materials = mergeMats(baseMats, remote?.materials);
   const j: Journal = {
     code: c,
-    teacherId: memJ?.teacherId || local?.teacherId || remote?.teacherId,
+    teacherId:
+      memJ?.teacherId || local?.teacherId || sbIdx?.teacherId || remote?.teacherId,
     teacherName:
-      memJ?.teacherName || local?.teacherName || remote?.teacherName,
-    className: memJ?.className || local?.className || remote?.className,
+      memJ?.teacherName ||
+      local?.teacherName ||
+      sbIdx?.teacherName ||
+      remote?.teacherName,
+    className:
+      memJ?.className ||
+      local?.className ||
+      sbIdx?.className ||
+      remote?.className,
     materials,
     updatedAt: Math.max(
       memJ?.updatedAt || 0,
       local?.updatedAt || 0,
+      sbIdx?.updatedAt || 0,
       remote?.updatedAt || 0,
       Date.now()
     ),
@@ -187,7 +218,25 @@ async function persistJournal(j: Journal, opts?: { awaitRemote?: boolean }) {
     console.error("journal local write", e);
   }
 
-  // Remote mirror off hot path (cross-instance) — default fire-and-forget
+  // Durable catalog on Supabase (await — this is what Vercel students read)
+  try {
+    const { writeMaterialsIndex, readMaterialsIndex } = await import(
+      "@/lib/supabase-materials-index"
+    );
+    const prev = await readMaterialsIndex(c);
+    await writeMaterialsIndex({
+      code: c,
+      teacherId: j.teacherId || prev?.teacherId,
+      teacherName: j.teacherName || prev?.teacherName,
+      className: j.className || prev?.className,
+      materials: mergeMats(j.materials, prev?.materials),
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    console.error("persistJournal supabase index", e);
+  }
+
+  // Free-host mirror optional background
   if (opts?.awaitRemote) {
     await mirrorJournalRemote(j);
   } else {

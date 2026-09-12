@@ -49,6 +49,8 @@ export async function uploadToSupabaseStorage(
           fileSizeLimit: 5 * 1024 * 1024,
           allowedMimeTypes: [
             "application/pdf",
+            "application/json",
+            "text/plain",
             "image/png",
             "image/jpeg",
             "image/webp",

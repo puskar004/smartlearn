@@ -50,7 +50,20 @@ export async function GET(req: NextRequest) {
   let name = `Class ${code}`;
   let teacherName = "Teacher";
 
-  // 1) Journal (append-only uploads)
+  // 0) Supabase durable index + storage listing (works on Vercel)
+  try {
+    const { loadMaterialsIndex } = await import(
+      "@/lib/supabase-materials-index"
+    );
+    const idx = await loadMaterialsIndex(code);
+    push(idx.materials as typeof materials);
+    if (idx.className) name = idx.className;
+    if (idx.teacherName) teacherName = idx.teacherName;
+  } catch (e) {
+    console.error("notes supabase index", e);
+  }
+
+  // 1) Journal (local/mem + supabase merge)
   try {
     const { journalListMaterials } = await import(
       "@/lib/class-materials-journal"
