@@ -122,44 +122,47 @@ export default function JoinClassPage() {
         "Cache-Control": "no-cache",
         Pragma: "no-cache",
       } as const;
-      // Dedicated notes route first (journal), then legacy actions
-      const [mr0, mr, mr2] = await Promise.all([
-        fetch(
-          `/api/classroom/notes?code=${encodeURIComponent(c)}&_=${bust}`,
-          { cache: "no-store", credentials: "same-origin", headers }
-        ),
-        fetch(
-          `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${bust + 1}`,
-          { cache: "no-store", credentials: "same-origin", headers }
-        ),
-        fetch(
-          `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${bust + 2}`,
-          { cache: "no-store", credentials: "same-origin", headers }
-        ),
-      ]);
+      // Fast path: dedicated notes API only; legacy only if empty
+      const mr0 = await fetch(
+        `/api/classroom/notes?code=${encodeURIComponent(c)}&_=${bust}`,
+        { cache: "no-store", credentials: "same-origin", headers }
+      );
       const md0 = await mr0.json().catch(() => ({}));
-      const md = await mr.json().catch(() => ({}));
-      const md2 = await mr2.json().catch(() => ({}));
-      const list = [
-        ...((md0.materials || []) as TeacherMaterial[]),
-        ...((md.materials || []) as TeacherMaterial[]),
-        ...((md2.materials || []) as TeacherMaterial[]),
-      ];
+      let list = [...((md0.materials || []) as TeacherMaterial[])];
+      let name = (md0.name as string) || undefined;
+      let teacherName = (md0.teacherName as string) || undefined;
 
-      const materials = mergeMaterials(c, list);
-      // Do NOT re-cache filtered list — mergeMaterials already cached full set
-      return {
-        materials,
-        name:
-          (md0.name as string) ||
-          (md.name as string) ||
-          (md2.name as string) ||
-          undefined,
-        teacherName:
-          (md0.teacherName as string) ||
+      if (list.length === 0) {
+        const [mr, mr2] = await Promise.all([
+          fetch(
+            `/api/classroom?action=notes&code=${encodeURIComponent(c)}&_=${bust + 1}`,
+            { cache: "no-store", credentials: "same-origin", headers }
+          ),
+          fetch(
+            `/api/classroom?action=materials&code=${encodeURIComponent(c)}&_=${bust + 2}`,
+            { cache: "no-store", credentials: "same-origin", headers }
+          ),
+        ]);
+        const md = await mr.json().catch(() => ({}));
+        const md2 = await mr2.json().catch(() => ({}));
+        list = [
+          ...list,
+          ...((md.materials || []) as TeacherMaterial[]),
+          ...((md2.materials || []) as TeacherMaterial[]),
+        ];
+        name = name || (md.name as string) || (md2.name as string) || undefined;
+        teacherName =
+          teacherName ||
           (md.teacherName as string) ||
           (md2.teacherName as string) ||
-          undefined,
+          undefined;
+      }
+
+      const materials = mergeMaterials(c, list);
+      return {
+        materials,
+        name,
+        teacherName,
         count: materials.length,
       };
     } catch {

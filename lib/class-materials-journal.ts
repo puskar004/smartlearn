@@ -52,6 +52,7 @@ async function readRemote(url: string): Promise<Journal | null> {
       {
         cache: "no-store",
         headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+        signal: AbortSignal.timeout(4000),
       }
     );
     if (!res.ok) return null;
@@ -94,32 +95,25 @@ function mergeMats(...lists: (TeacherMaterial[] | undefined)[]) {
 
 async function loadJournal(code: string): Promise<Journal> {
   const c = code.toUpperCase();
-  const empty: Journal = {
-    code: c,
-    materials: [],
-    updatedAt: Date.now(),
-  };
+  const memJ = mem.get(c) || null;
+  const local = (await readLocal(c)) || null;
 
+  // Fast path: mem/local already have materials — skip remote on hot path
+  const baseMats = mergeMats(memJ?.materials, local?.materials);
   let remote: Journal | null = null;
-  try {
-    const ptr = (await fs.readFile(pointerPath(c), "utf8")).trim();
-    if (ptr.startsWith("http")) remote = await readRemote(ptr);
-  } catch {
-    // ignore
+  if (baseMats.length === 0) {
+    try {
+      const ptr = (await fs.readFile(pointerPath(c), "utf8")).trim();
+      if (ptr.startsWith("http")) remote = await readRemote(ptr);
+    } catch {
+      // ignore
+    }
+    if (!remote && memJ?.remoteUrl) {
+      remote = await readRemote(memJ.remoteUrl);
+    }
   }
-  if (!remote && mem.get(c)?.remoteUrl) {
-    remote = await readRemote(mem.get(c)!.remoteUrl!);
-  }
 
-  const local = (await readLocal(c)) || mem.get(c) || null;
-  const memJ = mem.get(c);
-
-  const materials = mergeMats(
-    memJ?.materials,
-    local?.materials,
-    remote?.materials
-  );
-
+  const materials = mergeMats(baseMats, remote?.materials);
   const j: Journal = {
     code: c,
     teacherId: memJ?.teacherId || local?.teacherId || remote?.teacherId,
@@ -139,7 +133,47 @@ async function loadJournal(code: string): Promise<Journal> {
   return j;
 }
 
-async function persistJournal(j: Journal) {
+async function mirrorJournalRemote(j: Journal) {
+  const c = j.code.toUpperCase();
+  try {
+    const slim: Journal = {
+      ...j,
+      materials: j.materials
+        .map((m) => {
+          const u = m.url || "";
+          if (u.startsWith("data:") && u.length > 400_000) {
+            return { ...m, url: "" };
+          }
+          return m;
+        })
+        .filter((m) => m.url),
+    };
+    const fullJson = JSON.stringify(j);
+    const payload = fullJson.length < 4_500_000 ? j : slim;
+    const remote = await Promise.race([
+      uploadBufferRemote(
+        Buffer.from(JSON.stringify(payload), "utf8"),
+        `journal-${c}-${Date.now()}.json`,
+        "application/json"
+      ),
+      new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+    ]);
+    if (remote) {
+      j.remoteUrl = remote;
+      mem.set(c, j);
+      try {
+        await fs.writeFile(pointerPath(c), remote, "utf8");
+        await fs.writeFile(localPath(c), JSON.stringify(j), "utf8");
+      } catch {
+        // ignore
+      }
+    }
+  } catch (e) {
+    console.error("journal remote", e);
+  }
+}
+
+async function persistJournal(j: Journal, opts?: { awaitRemote?: boolean }) {
   const c = j.code.toUpperCase();
   j.code = c;
   j.updatedAt = Date.now();
@@ -153,41 +187,11 @@ async function persistJournal(j: Journal) {
     console.error("journal local write", e);
   }
 
-  // Remote mirror for cross-instance students
-  try {
-    // Strip huge data URLs from remote mirror size if needed — keep https + small data
-    const slim: Journal = {
-      ...j,
-      materials: j.materials.map((m) => {
-        const u = m.url || "";
-        if (u.startsWith("data:") && u.length > 400_000) {
-          return { ...m, url: u.slice(0, 0) }; // drop oversized from remote only
-        }
-        return m;
-      }).filter((m) => m.url),
-    };
-    // Always include full materials in remote if total JSON reasonable
-    const fullJson = JSON.stringify(j);
-    const payload =
-      fullJson.length < 4_500_000 ? j : slim;
-
-    const remote = await uploadBufferRemote(
-      Buffer.from(JSON.stringify(payload), "utf8"),
-      `journal-${c}-${Date.now()}.json`,
-      "application/json"
-    );
-    if (remote) {
-      j.remoteUrl = remote;
-      mem.set(c, j);
-      try {
-        await fs.writeFile(pointerPath(c), remote, "utf8");
-        await fs.writeFile(localPath(c), JSON.stringify(j), "utf8");
-      } catch {
-        // ignore
-      }
-    }
-  } catch (e) {
-    console.error("journal remote", e);
+  // Remote mirror off hot path (cross-instance) — default fire-and-forget
+  if (opts?.awaitRemote) {
+    await mirrorJournalRemote(j);
+  } else {
+    void mirrorJournalRemote(j);
   }
 
   return j;

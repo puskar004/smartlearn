@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
     // Dedupe: same title+url within last 60s = double-click
     // (handled after publish merge below)
 
-    // 0) JOURNAL FIRST — student list source of truth (append-only)
+    // 0) JOURNAL FIRST (local+mem fast; remote mirror async inside journal)
     let journalMats: typeof mat[] = [mat];
     try {
       const { journalAppendMaterial } = await import(
@@ -157,90 +157,54 @@ export async function POST(req: NextRequest) {
         teacherName,
         className: code,
       })) as typeof mat[];
-      console.log(
-        "journal ok",
-        code,
-        "count",
-        journalMats.length,
-        "ids",
-        journalMats.map((m) => m.id).join(",")
-      );
     } catch (e) {
       console.error("journalAppendMaterial", e);
     }
 
-    // 1) Clerk + bank
-    let room: Awaited<ReturnType<typeof addMaterialToClass>> | null = null;
-    try {
-      room = await addMaterialToClass(userId, code, {
-        title: mat.title,
-        url: publishUrl,
-        type: mat.type,
-        subject,
-        teacherName,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (!/too many|429|rate/i.test(msg)) {
-        console.error("addMaterialToClass", msg);
+    // 1+2) Clerk + class-code index — background (do not block teacher response)
+    void (async () => {
+      try {
+        await addMaterialToClass(userId, code, {
+          title: mat.title,
+          url: publishUrl,
+          type: mat.type,
+          subject,
+          teacherName,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/too many|429|rate/i.test(msg)) {
+          console.error("addMaterialToClass", msg);
+        }
       }
-    }
-
-    // 2) Shared class-code index (best-effort)
-    let published: typeof mat[] = journalMats;
-    try {
-      const { publishClassMaterials, registerClassCode } = await import(
-        "@/lib/class-code-index"
-      );
-      await registerClassCode(code, userId);
-      const toPublish = journalMats.length
-        ? journalMats
-        : [
-            mat,
-            ...((room?.materials || []).filter(
-              (m) => m.id !== mat.id && m.url !== mat.url
-            ) || []),
-          ];
-      published = (await publishClassMaterials(
-        code,
-        userId,
-        toPublish,
-        teacherName
-      )) as typeof mat[];
-    } catch (e) {
-      console.error("direct publishClassMaterials", e);
-    }
-
-    // Room list = journal (complete) ∪ room ∪ published
-    const byKey = new Map<string, typeof mat>();
-    for (const m of [
-      mat,
-      ...journalMats,
-      ...(room?.materials || []),
-      ...published,
-    ]) {
-      if (!m?.url) continue;
-      const k = m.id || m.url;
-      const prev = byKey.get(k);
-      if (!prev || (m.createdAt || 0) >= (prev.createdAt || 0)) {
-        byKey.set(k, m as typeof mat);
+      try {
+        const { publishClassMaterials, registerClassCode } = await import(
+          "@/lib/class-code-index"
+        );
+        await registerClassCode(code, userId);
+        await publishClassMaterials(
+          code,
+          userId,
+          journalMats.length ? journalMats : [mat],
+          teacherName
+        );
+      } catch (e) {
+        console.error("publishClassMaterials bg", e);
       }
-    }
-    const allMats = Array.from(byKey.values()).sort(
-      (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
-    );
+    })();
 
-    room = {
+    const allMats = journalMats.length ? journalMats : [mat];
+    const room = {
       code,
-      name: room?.name || code,
+      name: code,
       teacherId: userId,
-      teacherName: room?.teacherName || teacherName,
-      createdAt: room?.createdAt || now,
+      teacherName,
+      createdAt: now,
       materials: allMats,
-      students: room?.students || [],
-      liveSession: room?.liveSession || null,
-      alerts: room?.alerts || [],
-      attendanceLog: room?.attendanceLog || [],
+      students: [] as never[],
+      liveSession: null,
+      alerts: [] as never[],
+      attendanceLog: [] as never[],
     };
 
     return NextResponse.json({

@@ -72,9 +72,12 @@ export async function saveMaterialFile(
     console.error("supabase material upload", e);
   }
 
-  // 2) Free public hosts fallback
+  // 2) Free public hosts fallback (capped — never hang teacher publish)
   try {
-    const remote = await uploadBufferRemote(buf, key, mime);
+    const remote = await Promise.race([
+      uploadBufferRemote(buf, key, mime),
+      new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+    ]);
     if (remote && /^https?:\/\//i.test(remote)) {
       return { key, url: remote, durable: true, storage: "free-host" };
     }

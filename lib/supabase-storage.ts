@@ -3,43 +3,6 @@ import {
   supabaseStorageBucket,
 } from "@/lib/supabase-admin";
 
-const ensured = new Set<string>();
-
-async function ensurePublicBucket(bucket: string) {
-  if (ensured.has(bucket)) return;
-  const sb = getSupabaseAdmin();
-  if (!sb) return;
-  try {
-    const { data: list } = await sb.storage.listBuckets();
-    const exists = (list || []).some((b) => b.name === bucket);
-    if (!exists) {
-      const { error } = await sb.storage.createBucket(bucket, {
-        public: true,
-        fileSizeLimit: 5 * 1024 * 1024,
-        allowedMimeTypes: [
-          "application/pdf",
-          "image/png",
-          "image/jpeg",
-          "image/webp",
-        ],
-      });
-      if (error && !/already exists|duplicate/i.test(error.message)) {
-        console.error("createBucket", error.message);
-        return;
-      }
-    } else {
-      // Best-effort public
-      await sb.storage.updateBucket(bucket, {
-        public: true,
-        fileSizeLimit: 5 * 1024 * 1024,
-      });
-    }
-    ensured.add(bucket);
-  } catch (e) {
-    console.error("ensurePublicBucket", e);
-  }
-}
-
 function safePathPart(s: string) {
   return String(s || "x")
     .replace(/[^a-zA-Z0-9._-]+/g, "_")
@@ -48,7 +11,7 @@ function safePathPart(s: string) {
 
 /**
  * Upload class PDF/image to Supabase Storage (free plan).
- * Returns public https URL or null.
+ * Fast path: no listBuckets/updateBucket on every request (bucket must exist).
  */
 export async function uploadToSupabaseStorage(
   buf: Buffer,
@@ -65,7 +28,6 @@ export async function uploadToSupabaseStorage(
     return null;
   }
   const bucket = supabaseStorageBucket();
-  await ensurePublicBucket(bucket);
 
   const code = safePathPart(opts.code.toUpperCase());
   const tid = safePathPart(opts.teacherId).slice(0, 24);
@@ -79,8 +41,36 @@ export async function uploadToSupabaseStorage(
   });
 
   if (error) {
-    console.error("supabase upload", error.message);
-    return null;
+    // One-shot create bucket if missing, then retry once
+    if (/not found|does not exist/i.test(error.message)) {
+      try {
+        await sb.storage.createBucket(bucket, {
+          public: true,
+          fileSizeLimit: 5 * 1024 * 1024,
+          allowedMimeTypes: [
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+          ],
+        });
+        const retry = await sb.storage.from(bucket).upload(path, buf, {
+          contentType: opts.contentType || "application/pdf",
+          upsert: false,
+          cacheControl: "3600",
+        });
+        if (retry.error) {
+          console.error("supabase upload retry", retry.error.message);
+          return null;
+        }
+      } catch (e) {
+        console.error("supabase create/retry", e);
+        return null;
+      }
+    } else {
+      console.error("supabase upload", error.message);
+      return null;
+    }
   }
 
   const { data } = sb.storage.from(bucket).getPublicUrl(path);
