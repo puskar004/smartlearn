@@ -99,18 +99,18 @@ function metaOf(user: {
   return (m.smartlearn as Meta) || {};
 }
 
-/** Strip heavy moments before Clerk metadata (size limits) */
+/** Tiny Clerk copy — full questions/snaps live in file + durable store */
 function lightTest(t: LiveTest): LiveTest {
   const submissions: LiveTest["submissions"] = {};
   for (const [sid, s] of Object.entries(t.submissions || {})) {
     submissions[sid] = {
-      name: s.name,
-      answers: s.answers,
-      score: s.score,
-      total: s.total,
-      at: s.at,
-      videoKeys: s.videoKeys,
-      moments: (s.moments || []).slice(0, 8).map((m) => ({
+      name: s.name || "Student",
+      answers: Array.isArray(s.answers) ? s.answers.slice(0, 200) : [],
+      score: Number(s.score) || 0,
+      total: Number(s.total) || t.questions?.length || 0,
+      at: Number(s.at) || Date.now(),
+      videoKeys: (s.videoKeys || []).slice(0, 10),
+      moments: (s.moments || []).slice(0, 5).map((m) => ({
         at: m.at,
         note: m.note,
         videoKey: m.videoKey,
@@ -119,7 +119,29 @@ function lightTest(t: LiveTest): LiveTest {
       })),
     };
   }
-  return { ...t, submissions };
+  return {
+    id: t.id,
+    code: t.code,
+    title: t.title,
+    teacherId: t.teacherId,
+    teacherName: t.teacherName,
+    subject: t.subject,
+    classCode: t.classCode,
+    durationMin: t.durationMin,
+    joinUntil: t.joinUntil,
+    // stub questions so Clerk metadata stays small (create must not 413)
+    questions: (t.questions || []).slice(0, 3).map((q, i) => ({
+      id: q.id || `q-${i}`,
+      prompt: String(q.prompt || "").slice(0, 80),
+      options: (q.options || []).slice(0, 4).map((o) => String(o).slice(0, 40)),
+      correctIndex: q.correctIndex ?? 0,
+    })),
+    createdAt: t.createdAt,
+    startsAt: t.startsAt,
+    endsAt: t.endsAt,
+    active: t.active,
+    submissions,
+  };
 }
 
 export function genTestCode() {
@@ -131,18 +153,66 @@ export function genTestCode() {
 }
 
 export async function saveTest(test: LiveTest) {
+  // Merge with any existing file copy so concurrent moment/submit don't wipe fields
   const list = await readFile();
-  const next = [test, ...list.filter((t) => t.id !== test.id)].slice(0, 100);
+  const prev = list.find((t) => t.id === test.id || t.code === test.code);
+  const merged: LiveTest = prev
+    ? {
+        ...prev,
+        ...test,
+        active:
+          test.active === false
+            ? false
+            : Boolean(test.active || prev.active),
+        questions:
+          (test.questions?.length || 0) >= (prev.questions?.length || 0)
+            ? test.questions
+            : prev.questions,
+        submissions: mergeSubmissions(prev.submissions, test.submissions),
+        joinUntil: Math.max(test.joinUntil || 0, prev.joinUntil || 0),
+      }
+    : test;
+
+  const next = [merged, ...list.filter((t) => t.id !== merged.id)].slice(
+    0,
+    100
+  );
+
+  // 1) Local file FIRST
   await writeFile(next);
 
+  // 2) Durable mirror MUST complete for teacher/student cross-instance
+  //    (fire-and-forget caused tests to vanish from teacher after submit)
+  try {
+    const { durableSaveTest } = await import("@/lib/test-durable");
+    await Promise.race([
+      durableSaveTest(merged),
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("durable timeout")), 20_000)
+      ),
+    ]);
+  } catch (e) {
+    console.error("durableSaveTest", e);
+  }
+
+  // 3) Clerk index (scores/names) — await so teacher list has at least stubs
   try {
     const client = await clerkClient();
-    const user = await client.users.getUser(test.teacherId);
+    const user = await client.users.getUser(merged.teacherId);
     const sm = metaOf(user);
-    const liveTests = [lightTest(test), ...(sm.liveTests || [])]
+    const light = lightTest(merged);
+    const liveTests = [light, ...(sm.liveTests || [])]
       .filter((t, i, arr) => arr.findIndex((x) => x.id === t.id) === i)
-      .slice(0, 30);
-    await client.users.updateUserMetadata(test.teacherId, {
+      .map((t) =>
+        t.id === merged.id
+          ? {
+              ...light,
+              submissions: mergeSubmissions(t.submissions, light.submissions),
+            }
+          : t
+      )
+      .slice(0, 40);
+    await client.users.updateUserMetadata(merged.teacherId, {
       publicMetadata: {
         ...user.publicMetadata,
         smartlearn: { ...sm, liveTests },
@@ -151,15 +221,52 @@ export async function saveTest(test: LiveTest) {
   } catch (e) {
     console.error("saveTest meta", e);
   }
-  return test;
+
+  return merged;
+}
+
+function mergeTests(a: LiveTest, b: LiveTest): LiveTest {
+  // If either explicitly closed and the other is not newer active-only... prefer OR of active
+  // Closed only if BOTH say inactive (or one was closed via saveTest active:false on same id)
+  const active = Boolean(a.active || b.active);
+  return {
+    ...a,
+    ...b,
+    questions:
+      (b.questions?.length || 0) >= (a.questions?.length || 0)
+        ? b.questions
+        : a.questions,
+    submissions: mergeSubmissions(a.submissions, b.submissions),
+    active,
+    teacherId: a.teacherId || b.teacherId,
+    joinUntil: Math.max(a.joinUntil || 0, b.joinUntil || 0),
+    code: (a.code || b.code || "").toUpperCase(),
+  };
 }
 
 export async function findTestByCode(code: string): Promise<LiveTest | null> {
   const c = code.trim().toUpperCase();
   const map = new Map<string, LiveTest>();
 
+  const put = (t: LiveTest) => {
+    if (!t?.id && !t?.code) return;
+    const id = t.id || `code-${t.code}`;
+    const ex = map.get(id) || map.get(t.code);
+    const merged = ex ? mergeTests(ex, t) : t;
+    map.set(merged.id || id, merged);
+  };
+
   for (const t of await readFile()) {
-    if (t.code === c) map.set(t.id, t);
+    if (t.code === c) put(t);
+  }
+
+  // Durable remote (cross-instance)
+  try {
+    const { durableLoadByCode } = await import("@/lib/test-durable");
+    const d = await durableLoadByCode(c);
+    if (d) put(d);
+  } catch (e) {
+    console.error("durableLoadByCode", e);
   }
 
   try {
@@ -169,25 +276,7 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
       const res = await client.users.getUserList({ limit: 100, offset });
       for (const u of res.data) {
         for (const t of metaOf(u).liveTests || []) {
-          if (t.code === c) {
-            const existing = map.get(t.id);
-            // prefer file copy if it has richer submissions/moments
-            if (!existing) map.set(t.id, t);
-            else {
-              map.set(t.id, {
-                ...t,
-                ...existing,
-                submissions: mergeSubmissions(
-                  t.submissions,
-                  existing.submissions
-                ),
-                active:
-                  existing.active || t.active
-                    ? Boolean(existing.active ?? t.active)
-                    : false,
-              });
-            }
-          }
+          if (t.code === c) put(t);
         }
       }
       offset += 100;
@@ -197,41 +286,58 @@ export async function findTestByCode(code: string): Promise<LiveTest | null> {
     console.error("findTestByCode", e);
   }
 
-  const list = Array.from(map.values());
+  const list = Array.from(map.values()).filter(
+    (t) => t.code?.toUpperCase() === c
+  );
   if (!list.length) return null;
-  // Prefer active tests
-  list.sort((a, b) => Number(b.active) - Number(a.active) || b.createdAt - a.createdAt);
+  list.sort(
+    (a, b) =>
+      Number(b.active) - Number(a.active) ||
+      Object.keys(b.submissions || {}).length -
+        Object.keys(a.submissions || {}).length ||
+      b.createdAt - a.createdAt
+  );
   return list[0];
 }
 
 export async function listTeacherTests(teacherId: string) {
   const map = new Map<string, LiveTest>();
+  const put = (t: LiveTest) => {
+    const id = t.id || t.code;
+    if (!id) return;
+    const ex = map.get(id);
+    const withTeacher = { ...t, teacherId: t.teacherId || teacherId };
+    map.set(id, ex ? mergeTests(ex, withTeacher) : withTeacher);
+  };
+
   for (const t of await readFile()) {
-    if (t.teacherId === teacherId) map.set(t.id, t);
+    if (t.teacherId === teacherId) put(t);
   }
+
+  try {
+    const { durableListForTeacher } = await import("@/lib/test-durable");
+    for (const t of await durableListForTeacher(teacherId)) put(t);
+  } catch (e) {
+    console.error("durableListForTeacher", e);
+  }
+
   try {
     const client = await clerkClient();
     const user = await client.users.getUser(teacherId);
     for (const t of metaOf(user).liveTests || []) {
-      if (t.teacherId === teacherId || !t.teacherId) {
-        const ex = map.get(t.id);
-        map.set(
-          t.id,
-          ex
-            ? {
-                ...t,
-                ...ex,
-                submissions: mergeSubmissions(t.submissions, ex.submissions),
-                teacherId: ex.teacherId || t.teacherId || teacherId,
-              }
-            : { ...t, teacherId: t.teacherId || teacherId }
-        );
-      }
+      if (t.teacherId === teacherId || !t.teacherId) put(t);
     }
   } catch {
     // ignore
   }
-  return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+
+  return Array.from(map.values()).sort(
+    (a, b) =>
+      Number(b.active) - Number(a.active) ||
+      Object.keys(b.submissions || {}).length -
+        Object.keys(a.submissions || {}).length ||
+      b.createdAt - a.createdAt
+  );
 }
 
 export async function deleteTest(teacherId: string, code: string) {
@@ -272,7 +378,6 @@ export async function submitTest(
   if (!test.active) throw new Error("Test is closed by teacher");
 
   const prev = test.submissions[studentId];
-  // Block re-attempt if already fully submitted
   if (
     prev &&
     Array.isArray(prev.answers) &&
@@ -286,7 +391,8 @@ export async function submitTest(
   }
 
   let score = 0;
-  test.questions.forEach((q, i) => {
+  const qCount = test.questions?.length || 0;
+  (test.questions || []).forEach((q, i) => {
     if (answers[i] === q.correctIndex) score += 1;
   });
 
@@ -296,15 +402,16 @@ export async function submitTest(
     name: cleanName.slice(0, 80),
     answers,
     score,
-    total: test.questions.length,
+    total: qCount || answers.length || 0,
     at: Date.now(),
     moments: prev?.moments || [],
     videoKeys: prev?.videoKeys || [],
   };
-  await saveTest(test);
-  // Re-read merge in case concurrent moments wrote
-  const fresh = await findTestByCode(code);
-  const saved = fresh?.submissions?.[studentId] || test.submissions[studentId];
+  // Keep test active + full questions when saving submission
+  test.active = true;
+  const savedTest = await saveTest(test);
+  const saved =
+    savedTest.submissions?.[studentId] || test.submissions[studentId];
   return saved;
 }
 
@@ -461,13 +568,13 @@ export async function addTestMoment(
 
   const entry: ProctorMoment = {
     at: moment.at || Date.now(),
-    // Prefer file keys; keep small inline only if file save failed
     imageKey,
     audioKey,
-    imageDataUrl:
-      !imageKey && moment.imageDataUrl
-        ? String(moment.imageDataUrl).slice(0, 100_000)
-        : undefined,
+    // Keep a small inline preview so teacher UI always has something to show
+    // even if /tmp keys are lost on cold start (remote imageKey preferred)
+    imageDataUrl: moment.imageDataUrl
+      ? String(moment.imageDataUrl).slice(0, 120_000)
+      : undefined,
     audioDataUrl:
       !audioKey && moment.audioDataUrl
         ? String(moment.audioDataUrl).slice(0, 80_000)

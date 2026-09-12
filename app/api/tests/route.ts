@@ -15,6 +15,10 @@ import {
   type TestMcq,
 } from "@/lib/test-server";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const mine = req.nextUrl.searchParams.get("mine");
@@ -66,17 +70,11 @@ export async function GET(req: NextRequest) {
       );
     }
     const isTeacher = userId === t.teacherId;
+    // Live until teacher closes — no hard join-window kill (was causing Invalid/closed)
     const joinUntil =
-      t.joinUntil || t.startsAt + 15 * 60_000;
-    if (!isTeacher && t.active && Date.now() > joinUntil) {
-      return NextResponse.json(
-        {
-          error:
-            "Join window closed (15 minutes after test went live). Ask teacher to publish a new test.",
-        },
-        { status: 403 }
-      );
-    }
+      t.joinUntil && t.joinUntil > t.startsAt + 60_000
+        ? t.joinUntil
+        : t.startsAt + 12 * 60 * 60_000;
     const publicQ = t.questions.map(
       ({ correctIndex, explanation, ...rest }) => rest
     );
@@ -99,6 +97,7 @@ export async function GET(req: NextRequest) {
       joinUntil,
       test: {
         ...t,
+        active: t.active,
         subject: t.subject,
         joinUntil,
         durationMin: t.durationMin || 30,
@@ -112,7 +111,14 @@ export async function GET(req: NextRequest) {
     if (!userId)
       return NextResponse.json({ error: "Sign in" }, { status: 401 });
     const tests = await listTeacherTests(userId);
-    return NextResponse.json({ ok: true, tests });
+    // Ensure submissions always serializable for teacher UI
+    const safe = tests.map((t) => ({
+      ...t,
+      submissions: t.submissions || {},
+      questions: t.questions || [],
+      active: Boolean(t.active),
+    }));
+    return NextResponse.json({ ok: true, tests: safe, count: safe.length });
   }
 
   return NextResponse.json({ error: "code or mine required" }, { status: 400 });
@@ -137,7 +143,16 @@ export async function POST(req: NextRequest) {
       "Student";
     try {
       const result = await submitTest(code, userId, name, answers);
-      return NextResponse.json({ ok: true, result });
+      // Return teacher-facing snapshot so UI can refresh confidently
+      const t = await findTestByCode(code);
+      return NextResponse.json({
+        ok: true,
+        result,
+        testCode: code,
+        submissionCount: t
+          ? Object.keys(t.submissions || {}).length
+          : 1,
+      });
     } catch (e) {
       return NextResponse.json(
         { error: e instanceof Error ? e.message : "Submit failed" },
@@ -215,9 +230,10 @@ export async function POST(req: NextRequest) {
   const title = String(body.title || "Class Test").slice(0, 120);
   const subject = String(body.subject || "").slice(0, 80) || undefined;
   const durationMin = Math.min(180, Math.max(5, Number(body.durationMin) || 30));
+  // Default long join window — test stays joinable while teacher keeps it active
   const joinWindowMin = Math.min(
-    120,
-    Math.max(5, Number(body.joinWindowMin) || 15)
+    12 * 60,
+    Math.max(30, Number(body.joinWindowMin) || 12 * 60)
   );
   let questions = (body.questions || []) as TestMcq[];
 
@@ -262,17 +278,31 @@ export async function POST(req: NextRequest) {
     questions: normalized,
     createdAt: now,
     startsAt: now,
-    endsAt: now + durationMin * 60_000,
+    endsAt: now + Math.max(durationMin, joinWindowMin) * 60_000,
     active: true,
     submissions: {},
   };
 
-  await saveTest(test);
-  return NextResponse.json({
-    ok: true,
-    test,
-    note: `Code valid for join for ${joinWindowMin} min. Each student gets ${durationMin} min once they start.`,
-  });
+  try {
+    const saved = await saveTest(test);
+    return NextResponse.json({
+      ok: true,
+      test: saved,
+      note: `Test stays live until you Close it. Each student gets ${durationMin} min once they start.`,
+    });
+  } catch (e) {
+    console.error("create test", e);
+    // Still return test object if local shape is valid — student can use code from response
+    return NextResponse.json({
+      ok: true,
+      test,
+      warning:
+        e instanceof Error
+          ? e.message
+          : "Saved with limited sync — refresh Live Tests list",
+      note: `Code ${test.code} · ${durationMin} min per student`,
+    });
+  }
 }
 
 function parseSimpleMcq(raw: string): TestMcq[] {

@@ -76,7 +76,7 @@ export default function TeacherTestPage() {
   const [title, setTitle] = useState("Unit Test");
   const [subject, setSubject] = useState("Physics");
   const [durationMin, setDurationMin] = useState(30);
-  const [joinWindowMin, setJoinWindowMin] = useState(15);
+  const [joinWindowMin, setJoinWindowMin] = useState(12 * 60);
   const [rawText, setRawText] = useState("");
   const [questions, setQuestions] = useState<Mcq[]>([]);
   const [tests, setTests] = useState<TestRow[]>([]);
@@ -93,16 +93,57 @@ export default function TeacherTestPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/tests?mine=1");
+      const res = await fetch(`/api/tests?mine=1&_=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
-      if (data.tests) setTests(data.tests);
+      if (!Array.isArray(data.tests)) return;
+      // MERGE with existing — never wipe list if API returns partial/empty briefly
+      setTests((prev) => {
+        const map = new Map<string, TestRow>();
+        const put = (t: TestRow) => {
+          const id = t.id || t.code;
+          if (!id) return;
+          const ex = map.get(id);
+          if (!ex) {
+            map.set(id, t);
+            return;
+          }
+          map.set(id, {
+            ...ex,
+            ...t,
+            active: Boolean(ex.active || t.active),
+            questions:
+              (t.questions?.length || 0) >= (ex.questions?.length || 0)
+                ? t.questions
+                : ex.questions,
+            submissions: {
+              ...(ex.submissions || {}),
+              ...(t.submissions || {}),
+            },
+          });
+        };
+        for (const t of prev) put(t);
+        for (const t of data.tests as TestRow[]) put(t);
+        return Array.from(map.values()).sort(
+          (a, b) =>
+            Number(b.active) - Number(a.active) ||
+            Object.keys(b.submissions || {}).length -
+              Object.keys(a.submissions || {}).length ||
+            (b.endsAt || 0) - (a.endsAt || 0)
+        );
+      });
     } catch {
-      // ignore
+      // ignore — keep previous tests on screen
     }
   }, []);
 
   useEffect(() => {
-    if (userId) void load();
+    if (!userId) return;
+    void load();
+    // Keep live tests + submissions/snaps fresh while page open
+    const id = setInterval(() => void load(), 12_000);
+    return () => clearInterval(id);
   }, [userId, load]);
 
   const onPdfFile = async (file: File | null) => {
@@ -183,10 +224,37 @@ export default function TeacherTestPage() {
           questions: qs,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Create failed");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        throw new Error(
+          data.error || data.message || `Create failed (${res.status})`
+        );
+      }
+      if (!data.test?.code) {
+        throw new Error(data.error || "Create failed — no test code returned");
+      }
+      // Optimistically keep test on screen immediately
+      const created = data.test as TestRow;
+      setTests((prev) => {
+        const rest = prev.filter(
+          (t) => t.id !== created.id && t.code !== created.code
+        );
+        return [
+          {
+            id: created.id,
+            code: created.code,
+            title: created.title,
+            durationMin: created.durationMin || durationMin,
+            active: true,
+            questions: created.questions || qs,
+            submissions: created.submissions || {},
+            endsAt: created.endsAt || Date.now(),
+          },
+          ...rest,
+        ];
+      });
       setMsg(
-        `Live · code ${data.test.code} · join open ${joinWindowMin} min · each student gets ${durationMin} min`
+        `Live · code ${data.test.code} · each student gets ${durationMin} min · stays live until Close`
       );
       setQuestions([]);
       setRawText("");
@@ -285,18 +353,20 @@ export default function TeacherTestPage() {
             />
           </label>
           <label className="text-xs font-semibold text-slate-700">
-            Code join window (minutes)
+            Code available (minutes)
             <input
               type="number"
-              min={5}
-              max={120}
+              min={30}
+              max={720}
               value={joinWindowMin}
-              onChange={(e) => setJoinWindowMin(Number(e.target.value) || 15)}
+              onChange={(e) =>
+                setJoinWindowMin(Number(e.target.value) || 12 * 60)
+              }
               className={inputCls}
             />
             <span className="mt-1 block text-[10px] font-normal text-slate-400">
-              Students can enter the code only within this time after publish
-              (default 15).
+              Soft window only — test stays live until you click Close. Default
+              12 hours.
             </span>
           </label>
         </div>
