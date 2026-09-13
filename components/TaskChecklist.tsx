@@ -238,7 +238,7 @@ export default function TaskChecklist({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-violet-600/30 transition hover:bg-violet-500"
+        className="sl-floating-tasks fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-violet-600 px-3 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-600/30 transition hover:bg-violet-500 sm:px-4 sm:py-3 sm:text-sm"
       >
         <ListTodo className="h-4 w-4" />
         Tasks {doneCount}/{tasks.length}
@@ -247,7 +247,7 @@ export default function TaskChecklist({
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-40 w-[min(100vw-1.5rem,320px)]">
+    <div className="sl-floating-tasks fixed bottom-5 right-5 z-40 w-[min(100vw-1.5rem,320px)]">
       {body}
     </div>
   );

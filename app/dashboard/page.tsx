@@ -217,7 +217,7 @@ export default function DashboardPage() {
     displayName(user);
 
   return (
-    <div className="px-4 py-6 lg:px-8 lg:py-8">
+    <div className="w-full max-w-[100%] px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8">
       {liveBanner && (
         <Link
           href="/live-class"
@@ -247,10 +247,10 @@ export default function DashboardPage() {
       )}
 
       {/* Welcome banner */}
-      <div className="relative overflow-hidden rounded-[28px] border border-violet-100 bg-gradient-to-r from-[#f3e8ff] via-[#eef2ff] to-[#e0f2fe] p-6 shadow-sm sm:p-8">
-        <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div className="max-w-xl">
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
+      <div className="relative overflow-hidden rounded-2xl border border-violet-100 bg-gradient-to-r from-[#f3e8ff] via-[#eef2ff] to-[#e0f2fe] p-4 shadow-sm sm:rounded-[28px] sm:p-6 lg:p-8">
+        <div className="relative z-10 flex flex-col gap-4 sm:gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="max-w-xl min-w-0">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl lg:text-4xl">
               Welcome back,{" "}
               <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
                 {first}!

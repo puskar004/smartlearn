@@ -12,6 +12,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  scroll-behavior: smooth;
+  cursor: auto;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   background:
     radial-gradient(1200px 600px at 10% -10%, rgba(167, 139, 250, 0.25), transparent 55%),
@@ -20,13 +27,10 @@ body {
     var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
-  min-height: 100vh;
+  min-height: 100dvh;
   cursor: auto;
-}
-
-html {
-  scroll-behavior: smooth;
-  cursor: auto;
+  overflow-x: clip;
+  max-width: 100vw;
 }
 
 /* Normal system cursors everywhere */
@@ -89,21 +93,94 @@ textarea {
   }
 }
 
-/* Responsive orientation: phone / tablet / desktop */
+/* Responsive shell: phone / tablet / laptop / desktop */
 .sl-responsive-shell {
   min-height: 100dvh;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
 }
 
-@media (orientation: portrait) and (max-width: 900px) {
-  .sl-responsive-shell main {
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+/* Page content: fluid padding, no horizontal spill */
+.sl-page-main {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  box-sizing: border-box;
+}
+
+/* Common page wrappers tighten on small screens */
+.sl-page-main > div {
+  max-width: 100%;
+}
+
+@media (max-width: 767px) {
+  .sl-page-main h1 {
+    font-size: clamp(1.35rem, 5.5vw, 1.85rem);
+    line-height: 1.2;
+  }
+  .sl-page-main h2 {
+    font-size: clamp(1.1rem, 4.2vw, 1.35rem);
+  }
+  /* Soften large desktop paddings inside pages */
+  .sl-page-main .px-4 {
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+  .sl-page-main .py-10 {
+    padding-top: 1.25rem;
+    padding-bottom: 1.25rem;
+  }
+  .sl-page-main .py-8 {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+  /* Tables / wide blocks scroll instead of breaking layout */
+  .sl-page-main table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .sl-card:hover {
+    transform: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .sl-page-main h1 {
+    font-size: clamp(1.5rem, 3vw, 2rem);
   }
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
   .sl-responsive-shell header {
-    padding-top: 0.25rem;
-    padding-bottom: 0.25rem;
+    padding-top: 0.15rem;
+    padding-bottom: 0.15rem;
+  }
+  .sl-mobile-bottom-nav {
+    padding-top: 0.15rem;
+  }
+}
+
+/* Touch-friendly targets on coarse pointers */
+@media (pointer: coarse) {
+  .sl-app-sidebar a,
+  .sl-mobile-bottom-nav a {
+    min-height: 2.5rem;
+  }
+}
+
+/* Hide bottom nav during exam lock */
+html.sl-session-lock .sl-mobile-bottom-nav {
+  display: none !important;
+}
+
+/* Floating widgets stay above bottom nav on phones */
+@media (max-width: 767px) {
+  .sl-floating-tasks {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom)) !important;
+    right: 0.75rem !important;
   }
 }
 

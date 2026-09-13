@@ -129,9 +129,9 @@ export default function AppSidebar() {
       onMouseLeave={onLeave}
       onFocusCapture={onEnter}
       className={cn(
-        "sl-app-sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-indigo-100/80 bg-white/95 shadow-sm backdrop-blur-xl transition-[width,box-shadow] duration-200 ease-out",
+        "sl-app-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-indigo-100/80 bg-white/95 shadow-sm backdrop-blur-xl transition-[width,box-shadow] duration-200 ease-out md:flex",
         expanded
-          ? "w-[260px] shadow-xl shadow-indigo-500/10"
+          ? "w-[min(260px,70vw)] shadow-xl shadow-indigo-500/10"
           : "w-[72px]"
       )}
     >

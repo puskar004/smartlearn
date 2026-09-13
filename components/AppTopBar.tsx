@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { Bell, Flame, Search, Sparkles, Star } from "lucide-react";
+import { Bell, Flame, Search, Sparkles, Star, X } from "lucide-react";
 import NavAuth from "@/components/NavAuth";
 import { loadProgress } from "@/lib/user-store";
 import { getRole } from "@/lib/teacher-store";
@@ -30,6 +30,7 @@ export default function AppTopBar() {
   const [unread, setUnread] = useState(0);
   const [switches, setSwitches] = useState(0);
   const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const name = displayName(user);
@@ -74,12 +75,16 @@ export default function AppTopBar() {
     e.preventDefault();
     const term = q.trim();
     if (!term) return;
+    setSearchOpen(false);
     router.push(`/ncert?q=${encodeURIComponent(term)}`);
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/60 bg-white/75 backdrop-blur-xl">
-      <div className="flex items-center gap-3 px-4 py-3 lg:px-6">
+    <header
+      className="sticky top-0 z-30 border-b border-white/60 bg-white/80 backdrop-blur-xl"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
+      <div className="flex items-center gap-1.5 px-2 py-2 sm:gap-2 sm:px-3 sm:py-2.5 lg:gap-3 lg:px-5">
         {!isTeacher && (
           <form
             onSubmit={onSearch}
@@ -89,22 +94,35 @@ export default function AppTopBar() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search for chapters, topics, questions..."
-              className="w-full max-w-xl rounded-full border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
+              placeholder="Search chapters, topics…"
+              className="w-full max-w-xl rounded-full border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
             />
           </form>
         )}
-        {isTeacher && <div className="flex-1" />}
+        {isTeacher && <div className="min-w-0 flex-1" />}
 
-        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+        <div className="ml-auto flex min-w-0 flex-shrink-0 items-center gap-1 sm:gap-1.5 md:gap-2">
           {!isTeacher && (
-            <Link
-              href="/blueprint"
-              className="hidden items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 px-3 py-2 text-xs font-bold text-white shadow-md shadow-violet-500/25 transition hover:brightness-110 sm:inline-flex"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              What should I study now?
-            </Link>
+            <>
+              <button
+                type="button"
+                onClick={() => setSearchOpen((v) => !v)}
+                className="rounded-full border border-slate-200 bg-white p-2 text-slate-500 md:hidden"
+                aria-label="Search"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+              <Link
+                href="/blueprint"
+                className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-violet-500 to-indigo-500 p-2 text-white shadow-md shadow-violet-500/25 sm:gap-1.5 sm:px-2.5 sm:py-1.5"
+                title="What should I study now?"
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                <span className="hidden text-[11px] font-bold sm:inline lg:text-xs">
+                  Study now
+                </span>
+              </Link>
+            </>
           )}
 
           <div className="relative" ref={panelRef}>
@@ -128,7 +146,7 @@ export default function AppTopBar() {
               )}
             </button>
             {open && (
-              <div className="absolute right-0 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+              <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
                 <div className="border-b border-slate-100 px-3 py-2">
                   <div className="text-xs font-bold text-slate-800">
                     Notifications
@@ -186,30 +204,30 @@ export default function AppTopBar() {
 
           {!isTeacher && (
             <>
-              <div className="hidden items-center gap-2 rounded-full border border-orange-100 bg-orange-50 px-2.5 py-1.5 text-xs font-bold text-orange-600 sm:flex">
+              <div className="hidden items-center gap-1 rounded-full border border-orange-100 bg-orange-50 px-2 py-1 text-[11px] font-bold text-orange-600 xs:flex sm:gap-1.5 sm:px-2.5 sm:text-xs">
                 <Flame className="h-3.5 w-3.5" />
-                {streak} Day Streak
+                <span className="tabular-nums">{streak}d</span>
               </div>
-              <div className="hidden items-center gap-1.5 rounded-full border border-amber-100 bg-amber-50 px-2.5 py-1.5 text-xs font-bold text-amber-700 md:flex">
+              <div className="hidden items-center gap-1 rounded-full border border-amber-100 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700 sm:flex sm:px-2.5 sm:text-xs">
                 <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-                {xp.toLocaleString()} XP
+                <span className="tabular-nums">{xp.toLocaleString()}</span>
               </div>
             </>
           )}
 
           {isTeacher && (
-            <div className="hidden rounded-full bg-indigo-100 px-3 py-1.5 text-[11px] font-bold text-indigo-800 sm:block">
+            <div className="hidden rounded-full bg-indigo-100 px-2.5 py-1 text-[10px] font-bold text-indigo-800 sm:block">
               TEACHER
             </div>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             {user && (
-              <div className="hidden text-right leading-tight sm:block">
-                <div className="max-w-[140px] truncate text-xs font-bold text-slate-800">
+              <div className="hidden text-right leading-tight min-[400px]:block">
+                <div className="max-w-[72px] truncate text-[11px] font-bold text-slate-800 sm:max-w-[120px] sm:text-xs">
                   {name}
                 </div>
-                <div className="text-[10px] text-slate-400">
+                <div className="text-[9px] text-slate-400 sm:text-[10px]">
                   {isTeacher ? "Teacher" : "Student"}
                 </div>
               </div>
@@ -218,6 +236,32 @@ export default function AppTopBar() {
           </div>
         </div>
       </div>
+
+      {/* Mobile search drawer */}
+      {searchOpen && !isTeacher && (
+        <div className="border-t border-slate-100 px-3 py-2 md:hidden">
+          <form onSubmit={onSearch} className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search chapters, topics…"
+                className="w-full rounded-full border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-violet-300 focus:bg-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setSearchOpen(false)}
+              className="rounded-full p-2 text-slate-400"
+              aria-label="Close search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      )}
     </header>
   );
 }

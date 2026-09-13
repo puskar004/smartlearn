@@ -7,6 +7,7 @@ import FocusLock from "@/components/FocusLock";
 import UserBootstrap from "@/components/UserBootstrap";
 import AppSidebar from "@/components/AppSidebar";
 import AppTopBar from "@/components/AppTopBar";
+import MobileBottomNav from "@/components/MobileBottomNav";
 import SiteHeader from "@/components/SiteHeader";
 import TaskChecklist from "@/components/TaskChecklist";
 import StudentSync from "@/components/StudentSync";
@@ -95,7 +96,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {!isTeacher && <ExtremeLock />}
       {/* Collapsed badge by default — does not block nav */}
       {!isTeacher && eyeOn && !onTest && (
-        <div className="pointer-events-auto fixed bottom-3 left-3 z-[60]">
+        <div className="pointer-events-auto fixed bottom-[4.75rem] left-2 z-[60] md:bottom-3 md:left-[4.75rem]">
           <EyeFocusGuard enabled />
         </div>
       )}
@@ -104,18 +105,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {marketing ? (
         <>
           <SiteHeader />
-          <main>{children}</main>
+          <main className="sl-page-main">{children}</main>
         </>
       ) : (
         <RoleGate>
-          <div className="min-h-screen">
+          <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip">
             {!isTeacher && !onTest && <StudentSync />}
             {!hideChrome && <AppSidebar />}
-            <div className={cn(hideChrome ? "pl-0" : "pl-[72px]")}>
+            <div
+              className={cn(
+                "min-w-0 transition-[padding] duration-200",
+                hideChrome ? "pl-0" : "pl-0 md:pl-[72px]"
+              )}
+            >
               {!hideChrome && <AppTopBar />}
               <main
                 className={cn(
-                  hideChrome ? "min-h-screen" : "min-h-[calc(100vh-4rem)]"
+                  "sl-page-main min-w-0",
+                  hideChrome
+                    ? "min-h-dvh"
+                    : "min-h-[calc(100dvh-3.5rem)] pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:min-h-[calc(100dvh-4rem)] md:pb-4"
                 )}
               >
                 {children}
@@ -124,6 +133,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <TaskChecklist floating />
               )}
             </div>
+            {!hideChrome && <MobileBottomNav isTeacher={isTeacher} />}
           </div>
         </RoleGate>
       )}
