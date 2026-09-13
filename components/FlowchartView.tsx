@@ -55,7 +55,6 @@ const KIND_LABEL: Record<FlowNodeKind, string> = {
   tip: "Tip",
 };
 
-/** Level-order layout from edges */
 function layoutLevels(flow: ChapterFlowchart) {
   const ids = flow.nodes.map((n) => n.id);
   const byId = new Map(flow.nodes.map((n) => [n.id, n]));
@@ -76,7 +75,6 @@ function layoutLevels(flow: ChapterFlowchart) {
   const levels: string[][] = [];
   const seen = new Set<string>();
   let queue = start ? [start] : [];
-  // include other roots
   for (const r of roots) if (r !== start) queue.push(r);
 
   while (queue.length) {
@@ -92,30 +90,28 @@ function layoutLevels(flow: ChapterFlowchart) {
     }
     queue = next;
   }
-  // orphans
   for (const id of ids) {
     if (!seen.has(id)) {
       levels.push([id]);
       seen.add(id);
     }
   }
-  return { levels, byId, outs };
+  return { levels, byId };
 }
 
-export default function FlowchartView({
-  flow,
-}: {
-  flow: ChapterFlowchart;
-}) {
-  const [openId, setOpenId] = useState<string | null>(null);
+export default function FlowchartView({ flow }: { flow: ChapterFlowchart }) {
   const { levels, byId } = useMemo(() => layoutLevels(flow), [flow]);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const toggle = (id: string) =>
+    setCollapsed((c) => ({ ...c, [id]: !c[id] }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-violet-600">
-            Chapter map
+            Full chapter revision map
           </p>
           <h2 className="text-xl font-extrabold text-slate-900 sm:text-2xl">
             {flow.chapter}
@@ -127,15 +123,16 @@ export default function FlowchartView({
                 .join(" · ")}
             </p>
           )}
+          <p className="mt-1 text-xs text-slate-400">
+            Read top to bottom · each card is a revision block ·{" "}
+            {flow.nodes.length} sections
+          </p>
         </div>
         <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
           {(Object.keys(KIND_LABEL) as FlowNodeKind[]).map((k) => (
             <span
               key={k}
-              className={cn(
-                "rounded-full px-2 py-0.5",
-                KIND_STYLE[k].badge
-              )}
+              className={cn("rounded-full px-2 py-0.5", KIND_STYLE[k].badge)}
             >
               {KIND_LABEL[k]}
             </span>
@@ -143,24 +140,21 @@ export default function FlowchartView({
         </div>
       </div>
 
-      {/* Vertical flowchart */}
-      <div className="relative mx-auto max-w-2xl">
+      <div className="relative mx-auto max-w-3xl">
         {levels.map((level, li) => (
           <div key={li} className="relative">
             {li > 0 && (
               <div className="flex justify-center py-1">
-                <div className="flex h-8 w-8 items-center justify-center">
-                  <svg width="24" height="32" viewBox="0 0 24 32" aria-hidden>
-                    <path
-                      d="M12 0 v22 M6 18 l6 8 6-8"
-                      fill="none"
-                      stroke="#818cf8"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
+                <svg width="24" height="28" viewBox="0 0 24 28" aria-hidden>
+                  <path
+                    d="M12 0 v18 M6 14 l6 8 6-8"
+                    fill="none"
+                    stroke="#818cf8"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </div>
             )}
             <div
@@ -169,24 +163,27 @@ export default function FlowchartView({
                 level.length > 1 && "px-1"
               )}
             >
-              {level.map((id) => {
+              {level.map((id, idx) => {
                 const n = byId.get(id)!;
                 const st = KIND_STYLE[n.kind] || KIND_STYLE.concept;
-                const open = openId === id;
+                const isCollapsed = Boolean(collapsed[id]);
+                const stepNo =
+                  levels.slice(0, li).reduce((a, L) => a + L.length, 0) +
+                  idx +
+                  1;
                 return (
-                  <button
+                  <div
                     key={id}
-                    type="button"
-                    onClick={() => setOpenId(open ? null : id)}
                     className={cn(
-                      "w-full max-w-[280px] rounded-2xl border-2 px-4 py-3 text-left shadow-sm transition hover:shadow-md",
+                      "w-full max-w-xl rounded-2xl border-2 px-4 py-4 text-left shadow-sm sm:px-5",
                       st.bg,
-                      st.border,
-                      open && "ring-4",
-                      open && st.ring
+                      st.border
                     )}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/80 text-[11px] font-extrabold text-slate-700 ring-1 ring-black/5">
+                        {stepNo}
+                      </span>
                       <span
                         className={cn(
                           "rounded-md px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide",
@@ -195,21 +192,40 @@ export default function FlowchartView({
                       >
                         {KIND_LABEL[n.kind]}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => toggle(id)}
+                        className="ml-auto text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                      >
+                        {isCollapsed ? "Expand" : "Collapse"}
+                      </button>
                     </div>
-                    <p className="mt-1.5 text-sm font-extrabold leading-snug text-slate-900">
+                    <p className="mt-2 text-base font-extrabold leading-snug text-slate-900 sm:text-lg">
                       {n.label}
                     </p>
-                    {open && n.summary && (
-                      <p className="mt-2 border-t border-black/5 pt-2 text-xs leading-relaxed text-slate-600">
-                        {n.summary}
-                      </p>
+                    {!isCollapsed && (
+                      <>
+                        {n.summary && (
+                          <p className="mt-2 text-sm leading-relaxed text-slate-700">
+                            {n.summary}
+                          </p>
+                        )}
+                        {n.points && n.points.length > 0 && (
+                          <ul className="mt-3 space-y-1.5 border-t border-black/5 pt-3">
+                            {n.points.map((p, i) => (
+                              <li
+                                key={i}
+                                className="flex gap-2 text-[13px] leading-snug text-slate-800"
+                              >
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
+                                <span>{p}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </>
                     )}
-                    {!open && n.summary && (
-                      <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
-                        {n.summary}
-                      </p>
-                    )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -218,17 +234,20 @@ export default function FlowchartView({
       </div>
 
       {flow.examBullets?.length > 0 && (
-        <div className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-amber-50 p-5">
+        <div className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-amber-50 p-5 sm:p-6">
           <p className="text-xs font-extrabold uppercase tracking-wide text-rose-700">
             Key points before the exam
           </p>
-          <ul className="mt-3 space-y-2">
+          <p className="mt-1 text-xs text-rose-800/70">
+            Memorise these — highest yield facts for this chapter
+          </p>
+          <ul className="mt-4 space-y-3">
             {flow.examBullets.map((b, i) => (
               <li
                 key={i}
-                className="flex gap-2 text-sm font-medium text-slate-800"
+                className="flex gap-3 text-sm font-medium leading-relaxed text-slate-800"
               >
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[10px] font-bold text-white">
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white">
                   {i + 1}
                 </span>
                 <span>{b}</span>

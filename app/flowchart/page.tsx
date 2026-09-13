@@ -15,7 +15,7 @@ import type { ChapterFlowchart } from "@/lib/flowchart-types";
 import FlowchartView from "@/components/FlowchartView";
 import { cn } from "@/lib/utils";
 
-const CACHE_KEY = "sl_flowchart_cache_v1";
+const CACHE_KEY = "sl_flowchart_cache_v2";
 
 function cacheGet(key: string): ChapterFlowchart | null {
   try {
@@ -133,8 +133,9 @@ export default function FlowchartPage() {
         Chapter Flowchart
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-slate-500">
-        Enter a chapter name to get a clear study flowchart and exam bullets —
-        a full overview before you revise.
+        Enter a chapter name to get a detailed revision flowchart — concepts,
+        formulas, bullets, and exam points so you can revise the whole chapter
+        from one map.
       </p>
 
       <form
@@ -258,7 +259,7 @@ export default function FlowchartPage() {
             Pick a chapter or type a name, then tap Generate
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            Tap a node for a short summary · exam bullets below
+            Each card has full notes + bullets · exam checklist at the bottom
           </p>
         </div>
       )}
