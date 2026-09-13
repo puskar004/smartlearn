@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, ChevronDown, ChevronUp, Volume2 } from "lucide-react";
+import { judgePresence, samplePresence } from "@/lib/face-presence";
+import { playProctorBeep } from "@/lib/proctor-beep";
+
+/** Continuous violation before first beep */
+const VIOLATION_MS = 4000;
+/** Re-beep while still violating */
+const BEEP_EVERY_MS = 15_000;
 
 /**
- * Eye / face focus monitor.
- * Video always stays in the DOM so the stream can attach and the timer runs.
+ * Eye / face / phone / empty-seat monitor.
+ * Video stays in DOM so stream attaches and timer runs.
  */
 export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -17,13 +24,18 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
   );
   const [expanded, setExpanded] = useState(true);
   const [retry, setRetry] = useState(0);
-  const closedMs = useRef(0);
+  const badMs = useRef(0);
   const raf = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
   const lastAlarm = useRef(0);
-  const baseline = useRef<{ mean: number; eye: number } | null>(null);
+  const baseline = useRef<{
+    mean: number;
+    eye: number;
+    variance: number;
+  } | null>(null);
   const calibFrames = useRef(0);
   const wallRef = useRef(0);
+  const lastReason = useRef<string | null>(null);
 
   const attachStreamToVideo = useCallback(async () => {
     const video = videoRef.current;
@@ -55,7 +67,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       baseline.current = null;
       calibFrames.current = 0;
       wallRef.current = 0;
-      closedMs.current = 0;
+      badMs.current = 0;
       setStatus("Off");
       setMode("off");
       setPermission("pending");
@@ -78,80 +90,21 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
       baseline.current = null;
       calibFrames.current = 0;
       wallRef.current = 0;
-      closedMs.current = 0;
+      badMs.current = 0;
     }
 
     function alarm(reason: string) {
       const now = Date.now();
-      if (now - lastAlarm.current < 8000) return;
+      // While violating: beep at least every 15s (first after VIOLATION_MS)
+      if (now - lastAlarm.current < BEEP_EVERY_MS && lastAlarm.current > 0) {
+        setStatus(`⚠️ ${reason}`);
+        return;
+      }
       lastAlarm.current = now;
+      lastReason.current = reason;
       setStatus(`⚠️ ${reason}`);
       setExpanded(true);
-      try {
-        const ctx = new AudioContext();
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = "square";
-        o.frequency.value = 720;
-        g.gain.value = 0.12;
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.start();
-        let n = 0;
-        const id = setInterval(() => {
-          o.frequency.value = n % 2 ? 960 : 720;
-          n++;
-          if (n > 16) {
-            clearInterval(id);
-            o.stop();
-            void ctx.close();
-          }
-        }, 200);
-      } catch {
-        // ignore
-      }
-    }
-
-    function sample(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return null;
-      if (video.videoWidth < 2 || video.videoHeight < 2) return null;
-      const w = 120;
-      const h = 90;
-      canvas.width = w;
-      canvas.height = h;
-      ctx.drawImage(video, 0, 0, w, h);
-
-      const avg = (x: number, y: number, rw: number, rh: number) => {
-        const img = ctx.getImageData(
-          Math.floor(x),
-          Math.floor(y),
-          Math.floor(rw),
-          Math.floor(rh)
-        );
-        let s = 0;
-        let c = 0;
-        for (let i = 0; i < img.data.length; i += 4) {
-          s +=
-            0.299 * img.data[i] +
-            0.587 * img.data[i + 1] +
-            0.114 * img.data[i + 2];
-          c++;
-        }
-        return s / Math.max(1, c);
-      };
-
-      const faceMean = avg(w * 0.22, h * 0.12, w * 0.56, h * 0.6);
-      const eyeMean = avg(w * 0.28, h * 0.2, w * 0.44, h * 0.16);
-      const corners = [
-        avg(0, 0, 12, 12),
-        avg(w - 12, 0, 12, 12),
-        avg(0, h - 12, 12, 12),
-        avg(w - 12, h - 12, 12, 12),
-      ];
-      const cornerAvg = corners.reduce((a, b) => a + b, 0) / 4;
-      const contrast = Math.abs(faceMean - cornerAvg);
-      return { faceMean, eyeMean, contrast };
+      playProctorBeep({ durationMs: 2400, volume: 0.28 });
     }
 
     function loop() {
@@ -171,61 +124,62 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
         return;
       }
 
-      const s = sample(video, canvas);
+      const s = samplePresence(video, canvas);
       if (!s) {
         raf.current = requestAnimationFrame(loop);
         return;
       }
 
-      if (calibFrames.current < 45) {
+      if (calibFrames.current < 50) {
         calibFrames.current += 1;
-        const b = baseline.current || { mean: s.faceMean, eye: s.eyeMean };
-        baseline.current = {
-          mean: b.mean * 0.85 + s.faceMean * 0.15,
-          eye: b.eye * 0.85 + s.eyeMean * 0.15,
+        const b = baseline.current || {
+          mean: s.faceMean,
+          eye: s.eyeMean,
+          variance: s.variance,
         };
-        setStatus(`Calibrating… ${calibFrames.current}/45`);
+        baseline.current = {
+          mean: b.mean * 0.88 + s.faceMean * 0.12,
+          eye: b.eye * 0.88 + s.eyeMean * 0.12,
+          variance: b.variance * 0.88 + s.variance * 0.12,
+        };
+        setStatus(`Calibrating… ${calibFrames.current}/50 — seedha dekho`);
         raf.current = requestAnimationFrame(loop);
         return;
       }
 
-      const base = baseline.current!;
-      const faceAway =
-        s.contrast < 18 || s.faceMean < 22 || s.faceMean > 230;
-      const eyesClosed =
-        faceAway ||
-        s.eyeMean < base.eye * 0.9 ||
-        s.eyeMean < base.mean * 0.75 ||
-        (s.eyeMean < 75 && s.faceMean > 55);
-
+      const v = judgePresence(s, baseline.current);
       const now = Date.now();
       if (!wallRef.current) wallRef.current = now;
       const dt = Math.min(250, Math.max(0, now - wallRef.current));
       wallRef.current = now;
 
-      if (eyesClosed) {
-        closedMs.current += dt;
-      } else if (closedMs.current < 25000) {
-        closedMs.current = Math.max(0, closedMs.current - dt * 0.8);
+      const bad = Boolean(v.reason);
+      if (bad) {
+        badMs.current += dt;
       } else {
-        closedMs.current = Math.max(0, closedMs.current - dt * 0.05);
+        badMs.current = Math.max(0, badMs.current - dt * 1.2);
+        if (badMs.current < 500) lastReason.current = null;
       }
 
-      const secs = Math.floor(closedMs.current / 1000);
-      if (secs >= 30) {
-        alarm(
-          faceAway
-            ? "Face not in frame ~30s — sit in front of camera!"
-            : "Eyes closed / looking away ~30s — ALARM"
-        );
-        closedMs.current = 0;
-        wallRef.current = Date.now();
-      } else if (secs > 0) {
-        setStatus(
-          `${faceAway ? "Face away" : "Eyes drooping"} · ${secs}s / 30s`
-        );
-      } else {
-        setStatus("Focused · eyes open");
+      const secs = Math.floor(badMs.current / 1000);
+      if (bad && badMs.current >= VIOLATION_MS && v.reason) {
+        alarm(v.reason);
+        // keep badMs so 15s re-beep continues while still violating
+        if (badMs.current > VIOLATION_MS + BEEP_EVERY_MS) {
+          // clamp so counter doesn't grow forever
+          badMs.current = VIOLATION_MS;
+        }
+      } else if (bad && secs > 0) {
+        setStatus(`${v.reason} · ${secs}s`);
+      } else if (!bad) {
+        setStatus("Focused · face + eyes OK");
+        // slow baseline adapt when good
+        const b = baseline.current!;
+        baseline.current = {
+          mean: b.mean * 0.98 + s.faceMean * 0.02,
+          eye: b.eye * 0.98 + s.eyeMean * 0.02,
+          variance: b.variance * 0.98 + s.variance * 0.02,
+        };
       }
 
       raf.current = requestAnimationFrame(loop);
@@ -264,10 +218,11 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
         }
         setStatus(
           ok
-            ? "Calibrating… keep eyes open 2 sec"
+            ? "Calibrating… face center, eyes open"
             : "Camera on — open preview if blank"
         );
         wallRef.current = Date.now();
+        lastAlarm.current = 0;
         loop();
       } catch (e) {
         setPermission("denied");
@@ -359,6 +314,9 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
             {mode}
           </p>
           <p className="mt-1 text-sm font-semibold text-indigo-300">{status}</p>
+          <p className="mt-1 text-[10px] text-slate-500">
+            Face / eyes / empty / phone → beep ~15s
+          </p>
           {(permission === "denied" || permission === "pending") && (
             <button
               type="button"

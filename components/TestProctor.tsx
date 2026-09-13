@@ -55,6 +55,17 @@ export default function TestProctor({
   const [micOk, setMicOk] = useState(false);
   const [screenOk, setScreenOk] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [focusWarn, setFocusWarn] = useState("");
+  const presenceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const presenceBaseRef = useRef<{
+    mean: number;
+    eye: number;
+    variance: number;
+  } | null>(null);
+  const presenceBadMs = useRef(0);
+  const presenceLastBeep = useRef(0);
+  const presenceWall = useRef(0);
+  const presenceCalib = useRef(0);
 
   useEffect(() => {
     if (!active || !testCode) return;
@@ -63,6 +74,7 @@ export default function TestProctor({
     let timer: ReturnType<typeof setInterval> | undefined;
     let firstTick: ReturnType<typeof setTimeout> | undefined;
     let chunkTimer: ReturnType<typeof setInterval> | undefined;
+    let presenceTimer: ReturnType<typeof setInterval> | undefined;
 
     const stopAll = () => {
       try {
@@ -276,8 +288,76 @@ export default function TestProctor({
 
       if (cancelledRef.current) return;
       readyRef.current = true;
-      setStatus("Proctoring ON · 2–3 snaps / 5 min · screen video on");
+      setStatus("Proctoring ON · face/eye alerts · snaps on");
       readyCbRef.current?.();
+
+      // Face / eyes / phone / empty — beep every 15s (does not change exam flow)
+      presenceBaseRef.current = null;
+      presenceBadMs.current = 0;
+      presenceLastBeep.current = 0;
+      presenceWall.current = Date.now();
+      presenceCalib.current = 0;
+      if (!presenceCanvasRef.current) {
+        presenceCanvasRef.current = document.createElement("canvas");
+      }
+      presenceTimer = setInterval(() => {
+        if (cancelledRef.current || !readyRef.current) return;
+        const camV = camVideoRef.current;
+        const canvas = presenceCanvasRef.current;
+        if (!camV || !canvas || camV.videoWidth < 2) return;
+        void import("@/lib/face-presence").then(
+          ({ samplePresence, judgePresence }) => {
+            void import("@/lib/proctor-beep").then(({ playProctorBeep }) => {
+              if (cancelledRef.current || !readyRef.current) return;
+              const s = samplePresence(camV, canvas);
+              if (!s) return;
+              if (presenceCalib.current < 20) {
+                presenceCalib.current += 1;
+                const b = presenceBaseRef.current || {
+                  mean: s.faceMean,
+                  eye: s.eyeMean,
+                  variance: s.variance,
+                };
+                presenceBaseRef.current = {
+                  mean: b.mean * 0.85 + s.faceMean * 0.15,
+                  eye: b.eye * 0.85 + s.eyeMean * 0.15,
+                  variance: b.variance * 0.85 + s.variance * 0.15,
+                };
+                return;
+              }
+              const v = judgePresence(s, presenceBaseRef.current);
+              const now = Date.now();
+              const dt = Math.min(
+                600,
+                Math.max(0, now - (presenceWall.current || now))
+              );
+              presenceWall.current = now;
+              if (v.reason) {
+                presenceBadMs.current += dt;
+                setFocusWarn(v.reason);
+                if (
+                  presenceBadMs.current >= 4000 &&
+                  now - presenceLastBeep.current >= 15_000
+                ) {
+                  presenceLastBeep.current = now;
+                  presenceBadMs.current = 4000;
+                  playProctorBeep({ durationMs: 2400, volume: 0.3 });
+                  setStatus(`⚠️ ${v.reason}`);
+                }
+              } else {
+                presenceBadMs.current = Math.max(
+                  0,
+                  presenceBadMs.current - dt * 1.5
+                );
+                if (presenceBadMs.current < 500) {
+                  setFocusWarn("");
+                  setStatus("Proctoring ON · face/eye OK · snaps on");
+                }
+              }
+            });
+          }
+        );
+      }, 500);
 
       let tickN = 0;
       let posting = false;
@@ -401,6 +481,7 @@ export default function TestProctor({
       if (timer) clearInterval(timer);
       if (firstTick) clearTimeout(firstTick);
       if (chunkTimer) clearInterval(chunkTimer);
+      if (presenceTimer) clearInterval(presenceTimer);
       stopAll();
     };
   }, [active, testCode, retryKey]);
@@ -460,10 +541,15 @@ export default function TestProctor({
           className="h-14 w-14 rounded-full border-2 border-emerald-400 object-cover bg-slate-900"
         />
         <p className="text-[10px] text-slate-500">
-          ~2–3 photos every 5 min + screen video chunks → teacher (kept until
-          teacher deletes test).
+          ~2–3 photos every 5 min + screen video → teacher. Face/eyes/phone
+          empty-seat → loud beep every ~15s.
         </p>
       </div>
+      {focusWarn ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-800">
+          ⚠️ {focusWarn}
+        </p>
+      ) : null}
     </div>
   );
 }

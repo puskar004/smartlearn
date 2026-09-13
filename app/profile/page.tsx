@@ -294,7 +294,7 @@ export default function ProfilePage() {
         </label>
         <p className="mt-1 text-[11px] text-slate-400">
           Works best in Chrome. Camera stays active while browsing after Save.
-          Closed eyes / looking away ~30s triggers alarm.
+          Face away / eyes off / empty seat / phone in front → beep every ~15s.
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
