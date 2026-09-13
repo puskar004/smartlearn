@@ -220,7 +220,7 @@ export default function FlowchartView({
       {flow.examBullets?.length > 0 && (
         <div className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-amber-50 p-5">
           <p className="text-xs font-extrabold uppercase tracking-wide text-rose-700">
-            Exam pehle yaad rakho
+            Key points before the exam
           </p>
           <ul className="mt-3 space-y-2">
             {flow.examBullets.map((b, i) => (

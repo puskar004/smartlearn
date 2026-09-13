@@ -142,7 +142,7 @@ export default function EyeFocusGuard({ enabled }: { enabled: boolean }) {
           eye: b.eye * 0.88 + s.eyeMean * 0.12,
           variance: b.variance * 0.88 + s.variance * 0.12,
         };
-        setStatus(`Calibrating… ${calibFrames.current}/50 — seedha dekho`);
+        setStatus(`Calibrating… ${calibFrames.current}/50 — look straight ahead`);
         raf.current = requestAnimationFrame(loop);
         return;
       }

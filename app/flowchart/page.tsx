@@ -77,7 +77,7 @@ export default function FlowchartPage() {
     e?.preventDefault();
     const ch = chapter.trim();
     if (ch.length < 2) {
-      setError("Chapter name likho (kam se kam 2 letters).");
+      setError("Enter a chapter name (at least 2 characters).");
       return;
     }
     setError(null);
@@ -133,8 +133,8 @@ export default function FlowchartPage() {
         Chapter Flowchart
       </h1>
       <p className="mt-2 max-w-2xl text-sm text-slate-500">
-        Chapter name likho → clear study flowchart + exam bullets. Exam se
-        pehle poora overview ek nazar mein.
+        Enter a chapter name to get a clear study flowchart and exam bullets —
+        a full overview before you revise.
       </p>
 
       <form
@@ -255,10 +255,10 @@ export default function FlowchartPage() {
         <div className="mt-10 rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 px-6 py-12 text-center">
           <GitBranch className="mx-auto h-10 w-10 text-indigo-300" />
           <p className="mt-3 text-sm font-semibold text-slate-600">
-            Chapter choose karo ya type karo, phir Generate dabao
+            Pick a chapter or type a name, then tap Generate
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            Nodes pe click → short summary · neeche exam bullets
+            Tap a node for a short summary · exam bullets below
           </p>
         </div>
       )}

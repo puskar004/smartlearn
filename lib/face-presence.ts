@@ -223,10 +223,10 @@ export function judgePresence(
     (s.skinScore < 0.4 || s.variance > base.variance * 1.4);
 
   let reason: string | null = null;
-  if (emptySeat) reason = "Koi samne nahi hai — camera ke saamne baitho!";
-  else if (phoneLikely) reason = "Mobile screen dikh rahi hai — phone hatao!";
-  else if (faceMissing) reason = "Face camera par nahi — seedha baitho!";
-  else if (eyesOff) reason = "Aankhen screen par nahi — dekhte raho!";
+  if (emptySeat) reason = "No one in frame — sit in front of the camera!";
+  else if (phoneLikely) reason = "Phone screen detected — put the phone away!";
+  else if (faceMissing) reason = "Face not in frame — face the camera!";
+  else if (eyesOff) reason = "Eyes not on screen — look at the screen!";
 
   return {
     faceMissing,
