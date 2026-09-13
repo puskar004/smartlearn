@@ -10,6 +10,7 @@ import type {
   FlowNode,
   FlowNodeKind,
 } from "@/lib/flowchart-types";
+import { toPlainMath } from "@/lib/plain-math";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ const KINDS = new Set<FlowNodeKind>([
 function cleanPoints(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const pts = raw
-    .map((p) => String(p || "").trim().slice(0, 220))
+    .map((p) => toPlainMath(String(p || "").trim()).slice(0, 280))
     .filter(Boolean)
     .slice(0, 8);
   return pts.length ? pts : undefined;
@@ -61,11 +62,11 @@ function sanitize(
     if (!id || ids.has(id)) continue;
     const kindRaw = String(n.kind || "concept") as FlowNodeKind;
     const kind = KINDS.has(kindRaw) ? kindRaw : "concept";
-    const label = String(n.label || "Concept").trim().slice(0, 90);
+    const label = toPlainMath(String(n.label || "Concept").trim()).slice(0, 90);
     if (!label) continue;
     ids.add(id);
     const summary = n.summary
-      ? String(n.summary).trim().slice(0, 600)
+      ? toPlainMath(String(n.summary).trim()).slice(0, 700)
       : undefined;
     const points = cleanPoints(n.points);
     nodes.push({ id, label, kind, summary, points });
@@ -96,13 +97,15 @@ function sanitize(
   }
   const bullets = Array.isArray(o.examBullets)
     ? o.examBullets
-        .map((b) => String(b).trim().slice(0, 280))
+        .map((b) => toPlainMath(String(b).trim()).slice(0, 320))
         .filter(Boolean)
         .slice(0, 14)
     : fallback.examBullets;
   return {
-    chapter: String(o.chapter || chapter).trim().slice(0, 100) || chapter,
-    subject: String(o.subject || subject || "").slice(0, 50) || subject,
+    chapter:
+      toPlainMath(String(o.chapter || chapter).trim()).slice(0, 100) || chapter,
+    subject:
+      toPlainMath(String(o.subject || subject || "").slice(0, 50)) || subject,
     grade: o.grade ? String(o.grade).slice(0, 8) : undefined,
     examBullets: bullets.length ? bullets : fallback.examBullets,
     nodes,
@@ -177,6 +180,12 @@ Hard rules:
 - kinds: exactly one start, one end; several concept; at least two formula or tip; at least two exam.
 - edges connect into a clear flow (one main path; at most one small branch).
 - English only. Accurate CBSE/NCERT. No fluff, no politics, no "you should study hard" filler.
+- MATH FORMAT (critical): NEVER use LaTeX, NEVER use $...$, \\frac, \\varepsilon, \\vec, \\text, etc.
+  Write formulas in PLAIN TEXT only, e.g.:
+  Id = ε0 × dΦE/dt
+  c = 1/√(μ0 ε0) = 3 × 10^8 m/s
+  S = (1/μ0)(E × B)
+  Use unicode letters (ε μ Φ π θ) and words like "sqrt" or √ when needed.
 - Chapter: "${chapter}"${subject ? ` Subject: ${subject}` : ""}${grade ? ` Class: ${grade}` : ""}
 `;
 

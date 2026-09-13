@@ -15,7 +15,7 @@ import type { ChapterFlowchart } from "@/lib/flowchart-types";
 import FlowchartView from "@/components/FlowchartView";
 import { cn } from "@/lib/utils";
 
-const CACHE_KEY = "sl_flowchart_cache_v2";
+const CACHE_KEY = "sl_flowchart_cache_v3";
 
 function cacheGet(key: string): ChapterFlowchart | null {
   try {

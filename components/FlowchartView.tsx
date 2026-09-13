@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ChapterFlowchart, FlowNodeKind } from "@/lib/flowchart-types";
+import { toPlainMath } from "@/lib/plain-math";
 import { cn } from "@/lib/utils";
 
 const KIND_STYLE: Record<
@@ -100,7 +101,27 @@ function layoutLevels(flow: ChapterFlowchart) {
 }
 
 export default function FlowchartView({ flow }: { flow: ChapterFlowchart }) {
-  const { levels, byId } = useMemo(() => layoutLevels(flow), [flow]);
+  // Clean any cached LaTeX so symbols show as plain math
+  const cleanFlow = useMemo(() => {
+    return {
+      ...flow,
+      chapter: toPlainMath(flow.chapter),
+      subject: flow.subject ? toPlainMath(flow.subject) : flow.subject,
+      examBullets: (flow.examBullets || []).map((b) => toPlainMath(b)),
+      nodes: flow.nodes.map((n) => ({
+        ...n,
+        label: toPlainMath(n.label),
+        summary: n.summary ? toPlainMath(n.summary) : n.summary,
+        points: n.points?.map((p) => toPlainMath(p)),
+      })),
+      edges: flow.edges,
+    };
+  }, [flow]);
+
+  const { levels, byId } = useMemo(
+    () => layoutLevels(cleanFlow),
+    [cleanFlow]
+  );
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const toggle = (id: string) =>
@@ -114,18 +135,18 @@ export default function FlowchartView({ flow }: { flow: ChapterFlowchart }) {
             Full chapter revision map
           </p>
           <h2 className="text-xl font-extrabold text-slate-900 sm:text-2xl">
-            {flow.chapter}
+            {cleanFlow.chapter}
           </h2>
-          {(flow.subject || flow.grade) && (
+          {(cleanFlow.subject || cleanFlow.grade) && (
             <p className="mt-0.5 text-sm text-slate-500">
-              {[flow.subject, flow.grade && `Class ${flow.grade}`]
+              {[cleanFlow.subject, cleanFlow.grade && `Class ${cleanFlow.grade}`]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
           )}
           <p className="mt-1 text-xs text-slate-400">
             Read top to bottom · each card is a revision block ·{" "}
-            {flow.nodes.length} sections
+            {cleanFlow.nodes.length} sections
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
@@ -233,7 +254,7 @@ export default function FlowchartView({ flow }: { flow: ChapterFlowchart }) {
         ))}
       </div>
 
-      {flow.examBullets?.length > 0 && (
+      {cleanFlow.examBullets?.length > 0 && (
         <div className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-amber-50 p-5 sm:p-6">
           <p className="text-xs font-extrabold uppercase tracking-wide text-rose-700">
             Key points before the exam
@@ -242,7 +263,7 @@ export default function FlowchartView({ flow }: { flow: ChapterFlowchart }) {
             Memorise these — highest yield facts for this chapter
           </p>
           <ul className="mt-4 space-y-3">
-            {flow.examBullets.map((b, i) => (
+            {cleanFlow.examBullets.map((b, i) => (
               <li
                 key={i}
                 className="flex gap-3 text-sm font-medium leading-relaxed text-slate-800"
@@ -250,7 +271,9 @@ export default function FlowchartView({ flow }: { flow: ChapterFlowchart }) {
                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white">
                   {i + 1}
                 </span>
-                <span>{b}</span>
+                <span className="font-mono text-[13px] sm:font-sans sm:text-sm">
+                  {b}
+                </span>
               </li>
             ))}
           </ul>
