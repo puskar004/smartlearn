@@ -20,6 +20,7 @@ const ncertMenu = [
 const aiMenu = [
   { href: "/ai-tutor", label: "Gemini AI Tutor" },
   { href: "/feynman", label: "Feynman Mode" },
+  { href: "/flowchart", label: "Chapter Flowchart" },
   { href: "/safe-search", label: "Safe YouTube" },
 ];
 

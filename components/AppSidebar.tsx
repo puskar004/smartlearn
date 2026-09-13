@@ -23,6 +23,7 @@ import {
   Link2,
   MessageSquare,
   Newspaper,
+  GitBranch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getJoinedClass, getRole, setRole } from "@/lib/teacher-store";
@@ -37,6 +38,7 @@ const studentNav = [
   { href: "/live-class", label: "Live Class", icon: Radio },
   { href: "/ai-tutor", label: "AI Tutor", icon: Brain },
   { href: "/feynman", label: "Feynman Mode", icon: Sparkles },
+  { href: "/flowchart", label: "Chapter Flowchart", icon: GitBranch },
   { href: "/blueprint", label: "Study Plan", icon: CalendarDays },
   { href: "/mistakes", label: "Progress", icon: LineChart },
   { href: "/news", label: "Exam News", icon: Newspaper },
