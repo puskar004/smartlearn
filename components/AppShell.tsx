@@ -111,7 +111,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="min-h-screen">
             {!isTeacher && !onTest && <StudentSync />}
             {!hideChrome && <AppSidebar />}
-            <div className={cn(hideChrome ? "pl-0" : "pl-[72px] lg:pl-[260px]")}>
+            <div className={cn(hideChrome ? "pl-0" : "pl-[72px]")}>
               {!hideChrome && <AppTopBar />}
               <main
                 className={cn(

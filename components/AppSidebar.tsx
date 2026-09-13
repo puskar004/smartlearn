@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import {
   BookOpen,
@@ -71,6 +71,9 @@ export default function AppSidebar() {
   const { userId } = useAuth();
   const [role, setRoleState] = useState<"student" | "teacher">("student");
   const [joined, setJoined] = useState<string | null>(null);
+  /** Collapsed rail by default; hover expands full labels (overlay). */
+  const [expanded, setExpanded] = useState(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refresh = () => {
     if (!userId) {
@@ -93,45 +96,89 @@ export default function AppSidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Entering any section → collapse rail again
+  useEffect(() => {
+    setExpanded(false);
+    if (leaveTimer.current) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = null;
+    }
+  }, [path]);
+
+  const onEnter = () => {
+    if (leaveTimer.current) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = null;
+    }
+    setExpanded(true);
+  };
+
+  const onLeave = () => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => setExpanded(false), 180);
+  };
+
   const isTeacher = role === "teacher";
   const nav = isTeacher ? teacherNav : studentNav;
   const bottom = isTeacher ? bottomTeacher : bottomStudent;
+  const showLabels = expanded;
 
   return (
-    <aside className="sl-app-sidebar fixed inset-y-0 left-0 z-40 flex w-[72px] flex-col border-r border-indigo-100/80 bg-white/80 backdrop-blur-xl lg:w-[260px]">
+    <aside
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocusCapture={onEnter}
+      className={cn(
+        "sl-app-sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-indigo-100/80 bg-white/95 shadow-sm backdrop-blur-xl transition-[width,box-shadow] duration-200 ease-out",
+        expanded
+          ? "w-[260px] shadow-xl shadow-indigo-500/10"
+          : "w-[72px]"
+      )}
+    >
       <Link
         href={isTeacher ? "/teacher" : "/dashboard"}
-        className="flex items-center gap-3 px-4 py-5 lg:px-5"
+        className={cn(
+          "flex items-center gap-3 py-5",
+          showLabels ? "px-5" : "justify-center px-2"
+        )}
+        title="CurioSphere"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/curiosphere-logo.svg"
           alt="CurioSphere"
-          className="h-10 w-10 rounded-xl shadow-md shadow-indigo-500/20"
+          className="h-10 w-10 shrink-0 rounded-xl shadow-md shadow-indigo-500/20"
         />
-        <div className="hidden leading-tight lg:block">
-          <div className="text-base font-extrabold tracking-tight text-slate-900">
-            Curio<span className="text-violet-600">Sphere</span>
+        {showLabels && (
+          <div className="min-w-0 leading-tight">
+            <div className="text-base font-extrabold tracking-tight text-slate-900">
+              Curio<span className="text-violet-600">Sphere</span>
+            </div>
+            <div className="text-[10px] font-medium text-slate-400">
+              {isTeacher ? "Teacher console" : "Learn. Grow. Achieve."}
+            </div>
           </div>
-          <div className="text-[10px] font-medium text-slate-400">
-            {isTeacher ? "Teacher console" : "Learn. Grow. Achieve."}
-          </div>
-        </div>
+        )}
       </Link>
 
-      {isTeacher && (
-        <div className="mx-3 mb-2 hidden rounded-xl bg-indigo-600 px-3 py-2 text-center text-[11px] font-bold text-white lg:block">
+      {isTeacher && showLabels && (
+        <div className="mx-3 mb-2 rounded-xl bg-indigo-600 px-3 py-2 text-center text-[11px] font-bold text-white">
           TEACHER MODE
         </div>
       )}
 
-      {!isTeacher && joined && (
-        <div className="mx-3 mb-2 hidden rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800 lg:block">
+      {!isTeacher && joined && showLabels && (
+        <div className="mx-3 mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
           Linked to class <span className="font-mono">{joined}</span>
         </div>
       )}
 
-      <nav className="mt-2 flex-1 space-y-1 overflow-y-auto px-2 lg:px-3">
+      <nav
+        className={cn(
+          "mt-2 flex-1 space-y-1 overflow-y-auto overflow-x-hidden",
+          showLabels ? "px-3" : "px-2"
+        )}
+      >
         {nav.map((item) => {
           const base = item.href.split("?")[0];
           const active =
@@ -145,8 +192,10 @@ export default function AppSidebar() {
             <Link
               key={item.href + item.label}
               href={item.href}
+              title={item.label}
               className={cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                "group flex items-center rounded-xl text-sm font-medium transition-all duration-200",
+                showLabels ? "gap-3 px-3 py-2.5" : "justify-center px-2 py-2.5",
                 active
                   ? isTeacher
                     ? "bg-indigo-100 text-indigo-900 shadow-sm"
@@ -164,14 +213,16 @@ export default function AppSidebar() {
                     : "text-slate-400 group-hover:text-violet-500"
                 )}
               />
-              <span className="hidden lg:inline">{item.label}</span>
+              {showLabels && (
+                <span className="truncate whitespace-nowrap">{item.label}</span>
+              )}
             </Link>
           );
         })}
       </nav>
 
-      {!isTeacher && (
-        <div className="mx-3 mb-3 hidden rounded-2xl bg-gradient-to-br from-violet-100 via-fuchsia-50 to-indigo-50 p-4 lg:block">
+      {!isTeacher && showLabels && (
+        <div className="mx-3 mb-3 rounded-2xl bg-gradient-to-br from-violet-100 via-fuchsia-50 to-indigo-50 p-4">
           <div className="flex items-center gap-2 text-violet-700">
             <Sparkles className="h-4 w-4" />
             <span className="text-xs font-bold">Small steps</span>
@@ -189,7 +240,12 @@ export default function AppSidebar() {
         </div>
       )}
 
-      <div className="space-y-1 border-t border-slate-100 px-2 py-3 lg:px-3">
+      <div
+        className={cn(
+          "space-y-1 border-t border-slate-100 py-3",
+          showLabels ? "px-3" : "px-2"
+        )}
+      >
         {bottom.map((item) => {
           const Icon = item.icon;
           const active = path.startsWith(item.href);
@@ -197,45 +253,60 @@ export default function AppSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              title={item.label}
               className={cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-all",
+                "group flex items-center rounded-xl text-sm font-medium transition-all",
+                showLabels ? "gap-3 px-3 py-2" : "justify-center px-2 py-2",
                 active
                   ? "bg-slate-100 text-slate-900"
                   : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
               )}
             >
-              <Icon className="h-5 w-5 text-slate-400 group-hover:text-slate-600" />
-              <span className="hidden lg:inline">{item.label}</span>
+              <Icon className="h-5 w-5 shrink-0 text-slate-400 group-hover:text-slate-600" />
+              {showLabels && (
+                <span className="truncate whitespace-nowrap">{item.label}</span>
+              )}
             </Link>
           );
         })}
-        {/* Separate panels: student can open teacher hub; teacher can return to student */}
         {!isTeacher && userId && (
           <button
             type="button"
+            title="Join as Teacher"
             onClick={() => {
               setRole(userId, "teacher");
               emitRoleChanged();
               window.location.href = "/teacher";
             }}
-            className="group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-bold text-indigo-700 transition hover:bg-indigo-50"
+            className={cn(
+              "group flex w-full items-center rounded-xl text-left text-sm font-bold text-indigo-700 transition hover:bg-indigo-50",
+              showLabels ? "gap-3 px-3 py-2" : "justify-center px-2 py-2"
+            )}
           >
-            <GraduationCap className="h-5 w-5 text-indigo-600" />
-            <span className="hidden lg:inline">Join as Teacher</span>
+            <GraduationCap className="h-5 w-5 shrink-0 text-indigo-600" />
+            {showLabels && (
+              <span className="truncate whitespace-nowrap">Join as Teacher</span>
+            )}
           </button>
         )}
         {isTeacher && userId && (
           <button
             type="button"
+            title="Student panel"
             onClick={() => {
               setRole(userId, "student");
               emitRoleChanged();
               window.location.href = "/dashboard";
             }}
-            className="group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-bold text-violet-700 transition hover:bg-violet-50"
+            className={cn(
+              "group flex w-full items-center rounded-xl text-left text-sm font-bold text-violet-700 transition hover:bg-violet-50",
+              showLabels ? "gap-3 px-3 py-2" : "justify-center px-2 py-2"
+            )}
           >
-            <BookOpen className="h-5 w-5 text-violet-600" />
-            <span className="hidden lg:inline">Student panel</span>
+            <BookOpen className="h-5 w-5 shrink-0 text-violet-600" />
+            {showLabels && (
+              <span className="truncate whitespace-nowrap">Student panel</span>
+            )}
           </button>
         )}
       </div>
