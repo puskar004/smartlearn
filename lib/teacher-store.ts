@@ -51,8 +51,54 @@ export function setRole(userId: string, role: "student" | "teacher") {
   }).catch(() => null);
 }
 
+const LEFT_KEY = "sl_left_classes_v1_";
+
+/** Codes the student intentionally left — never auto re-add */
+export function getLeftClasses(userId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LEFT_KEY + userId);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return [
+      ...new Set(
+        arr
+          .map((c) => String(c || "").trim().toUpperCase())
+          .filter(Boolean)
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+export function markLeftClass(userId: string, code: string) {
+  if (typeof window === "undefined") return;
+  const c = code.toUpperCase();
+  const next = [...new Set([...getLeftClasses(userId), c])].slice(0, 40);
+  try {
+    localStorage.setItem(LEFT_KEY + userId, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearLeftClass(userId: string, code: string) {
+  if (typeof window === "undefined") return;
+  const c = code.toUpperCase();
+  const next = getLeftClasses(userId).filter((x) => x !== c);
+  try {
+    if (next.length) localStorage.setItem(LEFT_KEY + userId, JSON.stringify(next));
+    else localStorage.removeItem(LEFT_KEY + userId);
+  } catch {
+    // ignore
+  }
+}
+
 export function getJoinedClasses(userId: string): string[] {
   if (typeof window === "undefined") return [];
+  const left = new Set(getLeftClasses(userId));
   const set = new Set<string>();
   try {
     const raw = localStorage.getItem(JOINS_KEY + userId);
@@ -63,7 +109,7 @@ export function getJoinedClasses(userId: string): string[] {
           const v = String(c || "")
             .trim()
             .toUpperCase();
-          if (v) set.add(v);
+          if (v && !left.has(v)) set.add(v);
         }
       }
     }
@@ -73,7 +119,10 @@ export function getJoinedClasses(userId: string): string[] {
   // Always merge single-key too (fixes empty JOINS_KEY array wiping JOIN_KEY)
   try {
     const one = localStorage.getItem(JOIN_KEY + userId);
-    if (one) set.add(one.trim().toUpperCase());
+    if (one) {
+      const v = one.trim().toUpperCase();
+      if (v && !left.has(v)) set.add(v);
+    }
   } catch {
     // ignore
   }
@@ -98,6 +147,7 @@ export function setJoinedClass(userId: string, code: string | null) {
   let next: string[];
   if (code) {
     const c = code.toUpperCase();
+    clearLeftClass(userId, c); // explicit join overrides left block
     next = [c, ...cur.filter((x) => x !== c)].slice(0, 12);
   } else {
     next = [];
@@ -114,10 +164,14 @@ export function setJoinedClass(userId: string, code: string | null) {
 }
 
 export function setJoinedClasses(userId: string, codes: string[]) {
-  const next = [...new Set(codes.map((c) => c.toUpperCase()).filter(Boolean))].slice(
-    0,
-    12
-  );
+  const left = new Set(getLeftClasses(userId));
+  const next = [
+    ...new Set(
+      codes
+        .map((c) => c.toUpperCase())
+        .filter((c) => c && !left.has(c))
+    ),
+  ].slice(0, 12);
   if (next.length) {
     localStorage.setItem(JOIN_KEY + userId, next[0]);
     localStorage.setItem(JOINS_KEY + userId, JSON.stringify(next));
@@ -140,6 +194,7 @@ export type JoinedRoomMeta = {
 export function dropJoinedClasses(userId: string, codes: string[]) {
   if (!codes.length) return getJoinedClasses(userId);
   const drop = new Set(codes.map((c) => c.toUpperCase()));
+  for (const c of drop) markLeftClass(userId, c);
   const next = getJoinedClasses(userId).filter((c) => !drop.has(c));
   setJoinedClasses(userId, next);
   try {
@@ -212,10 +267,12 @@ export function removeJoinedRoomMeta(userId: string, code: string) {
 
 export function removeJoinedClass(userId: string, code: string) {
   const c = code.toUpperCase();
+  markLeftClass(userId, c);
   setJoinedClasses(
     userId,
     getJoinedClasses(userId).filter((x) => x !== c)
   );
+  removeJoinedRoomMeta(userId, c);
 }
 
 /** @deprecated use API create */

@@ -6,6 +6,7 @@ import {
   apiSyncStudent,
   dropJoinedClasses,
   getJoinedClasses,
+  getLeftClasses,
   setJoinedClasses,
 } from "@/lib/teacher-store";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
@@ -68,14 +69,12 @@ export default function StudentSync() {
           String(c).toUpperCase()
         );
         if (deleted.length) dropJoinedClasses(userId, deleted);
-        const delSet = new Set(deleted);
-        const codes = (
-          (data.codes || (data.joined ? [data.joined] : [])) as string[]
-        )
-          .map((c) => String(c || "").toUpperCase())
-          .filter((c) => c && !delSet.has(c));
-        if (codes.length) setJoinedClasses(userId, codes);
-        else if (deleted.length) setJoinedClasses(userId, []);
+        // Never expand joins from stale Clerk — only keep local (minus left/deleted)
+        const left = new Set(getLeftClasses(userId));
+        const block = new Set([...left, ...deleted]);
+        const safe = getJoinedClasses(userId).filter((c) => !block.has(c));
+        setJoinedClasses(userId, safe);
+
 
         const rooms = (data.classrooms ||
           (data.classroom ? [data.classroom] : [])) as {

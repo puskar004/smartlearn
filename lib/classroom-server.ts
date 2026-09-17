@@ -340,6 +340,14 @@ export async function findClassroomByCode(
   const normalized = code.trim().toUpperCase();
   if (!normalized) return null;
 
+  // Teacher-deleted codes are dead — never resolve for join/sync
+  try {
+    const { isClassDeleted } = await import("@/lib/class-code-index");
+    if (await isClassDeleted(normalized)) return null;
+  } catch {
+    // ignore
+  }
+
   // 1) Fast index lookup
   try {
     const { lookupTeacherByCode, registerClassCode } = await import(
@@ -1019,7 +1027,21 @@ export async function joinClassroomAsStudent(
   code: string,
   snapshot: StudentSnapshot
 ): Promise<{ ok: true; classroom: Classroom } | { ok: false; error: string }> {
-  const found = await findClassroomByCode(code);
+  const normalized = code.trim().toUpperCase();
+  try {
+    const { isClassDeleted } = await import("@/lib/class-code-index");
+    if (await isClassDeleted(normalized)) {
+      return {
+        ok: false,
+        error:
+          "This class was deleted by the teacher. Ask for a new class code.",
+      };
+    }
+  } catch {
+    // ignore
+  }
+
+  const found = await findClassroomByCode(normalized);
   if (!found) {
     return {
       ok: false,
@@ -1086,13 +1108,18 @@ export async function joinClassroomAsStudent(
     if (!codes.includes(updated.code)) codes.unshift(updated.code);
     const map = { ...(sm.joinedClassMap || {}) };
     map[updated.code] = found.teacherId;
-    await saveMeta(snapshot.studentId, {
-      ...sm,
-      role: sm.role === "teacher" ? "teacher" : "student",
-      joinedClassCode: updated.code,
-      joinedClassCodes: codes.slice(0, 12),
-      joinedClassMap: map,
-    });
+    clearClerkWriteCooldown(snapshot.studentId);
+    await saveMeta(
+      snapshot.studentId,
+      {
+        ...sm,
+        role: sm.role === "teacher" ? "teacher" : "student",
+        joinedClassCode: updated.code,
+        joinedClassCodes: codes.slice(0, 12),
+        joinedClassMap: map,
+      },
+      { force: true }
+    );
   } catch (e) {
     console.error("join student meta", e);
   }
@@ -1297,11 +1324,97 @@ export async function listStudentClassrooms(userId: string): Promise<
   return out;
 }
 
+/**
+ * Progress sync only — NEVER re-join after student left.
+ * If student is not on roster / not in their joined meta, strip from teacher list.
+ */
 export async function pushStudentToClass(
   code: string,
   snapshot: StudentSnapshot
 ) {
-  return joinClassroomAsStudent(code, snapshot);
+  const normalized = code.trim().toUpperCase();
+  const studentId = snapshot.studentId;
+  if (!normalized || !studentId) {
+    return { ok: false as const, error: "Missing data" };
+  }
+
+  try {
+    const { isClassDeleted } = await import("@/lib/class-code-index");
+    if (await isClassDeleted(normalized)) {
+      return { ok: false as const, error: "Class deleted" };
+    }
+  } catch {
+    // ignore
+  }
+
+  const found = await findClassroomByCode(normalized);
+  if (!found) {
+    return { ok: false as const, error: "Class not found" };
+  }
+
+  // Fresh student meta: only sync if they still list this class
+  let stillJoined = false;
+  try {
+    clearClerkWriteCooldown(studentId);
+    const client = await clerkClient();
+    const student = await client.users.getUser(studentId);
+    const sm = metaOf(student);
+    stillJoined = codesOf(sm).includes(normalized);
+  } catch {
+    stillJoined = false;
+  }
+
+  const onRoster = (found.classroom.students || []).some(
+    (s) => s.studentId === studentId
+  );
+
+  // Student left (or never joined server-side) — ensure off teacher roster
+  if (!stillJoined) {
+    if (onRoster) {
+      try {
+        clearClerkWriteCooldown(found.teacherId);
+        await updateClassroom(found.teacherId, found.classroom.code, (c) => ({
+          ...c,
+          students: (c.students || []).filter((s) => s.studentId !== studentId),
+        }));
+      } catch (e) {
+        console.error("pushStudentToClass purge left", e);
+      }
+    }
+    return { ok: false as const, error: "Not in class" };
+  }
+
+  // Member: update XP/stats only (do not recreate join)
+  try {
+    const now = Date.now();
+    const room = await updateClassroom(
+      found.teacherId,
+      found.classroom.code,
+      (c) => {
+        const prev = (c.students || []).find((s) => s.studentId === studentId);
+        const others = (c.students || []).filter(
+          (s) => s.studentId !== studentId
+        );
+        const row: StudentSnapshot = {
+          ...snapshot,
+          studentId,
+          name: String(snapshot.name || prev?.name || "Student").slice(0, 80),
+          joinedAt: prev?.joinedAt || snapshot.joinedAt || now,
+          lastActive: now,
+        };
+        return {
+          ...c,
+          students: [row, ...others].slice(0, 80),
+        };
+      }
+    );
+    return room
+      ? { ok: true as const, classroom: room }
+      : { ok: false as const, error: "Update failed" };
+  } catch (e) {
+    console.error("pushStudentToClass", e);
+    return { ok: false as const, error: "Sync failed" };
+  }
 }
 
 export async function addMaterialToClass(

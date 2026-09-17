@@ -231,6 +231,8 @@ export async function registerClassCode(code: string, teacherId: string) {
   const c = code.toUpperCase();
   const idx = await loadIndex(true);
   idx.codes[c] = teacherId;
+  // Fresh class with this code — allow join again
+  if (idx.deleted?.[c]) delete idx.deleted[c];
   await persist(idx, true);
 }
 
@@ -449,7 +451,7 @@ export async function getClassLive(code: string): Promise<SharedLive | null> {
   return r.status === "active" ? r.live : null;
 }
 
-/** Mark class deleted so students drop it on next poll */
+/** Mark class deleted so students drop it and cannot rejoin */
 export async function markClassDeleted(code: string) {
   const c = code.toUpperCase();
   const idx = await loadIndex(true);
@@ -459,12 +461,29 @@ export async function markClassDeleted(code: string) {
   if (idx.live) delete idx.live[c];
   if (idx.liveUrls) delete idx.liveUrls[c];
   if (idx.materials) delete idx.materials[c];
+  if (idx.matsUrls) delete idx.matsUrls[c];
   await persist(idx, true);
   try {
     await fs.unlink(liveLocalPath(c));
   } catch {
     // ignore
   }
+}
+
+export async function isClassDeleted(code: string): Promise<boolean> {
+  const c = code.trim().toUpperCase();
+  if (!c) return false;
+  const idx = await loadIndex(true);
+  return Boolean(idx.deleted?.[c]);
+}
+
+/** Clear deleted flag when teacher creates a fresh class with same code */
+export async function clearClassDeleted(code: string) {
+  const c = code.toUpperCase();
+  const idx = await loadIndex(true);
+  if (!idx.deleted?.[c]) return;
+  delete idx.deleted[c];
+  await persist(idx, true);
 }
 
 export async function getDeletedCodes(codes: string[]): Promise<string[]> {
@@ -475,7 +494,6 @@ export async function getDeletedCodes(codes: string[]): Promise<string[]> {
   for (const raw of codes) {
     const c = raw.toUpperCase();
     if (del[c]) out.push(c);
-    // also deleted if code no longer registered and was once known empty
   }
   return out;
 }

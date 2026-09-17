@@ -24,7 +24,9 @@ import {
   getRole,
   readCachedClassMaterials,
   readJoinedRoomMeta,
+  clearLeftClass,
   dropJoinedClasses,
+  getLeftClasses,
   removeJoinedClass,
   removeJoinedRoomMeta,
   saveJoinedRoomMeta,
@@ -224,31 +226,15 @@ export default function JoinClassPage() {
         credentials: "same-origin",
       });
       const data = await res.json().catch(() => ({}));
-      const deleted = (data.deleted || []) as string[];
+      const deleted = ((data.deleted || []) as string[]).map((c) =>
+        String(c).toUpperCase()
+      );
       if (deleted.length) dropJoinedClasses(userId, deleted);
-      const serverCodes = (
-        (data.codes as string[]) ||
-        (data.joined ? [String(data.joined)] : [])
-      )
-        .map((c) => String(c || "").toUpperCase())
-        .filter(Boolean);
-      const delSet = new Set(deleted.map((c) => c.toUpperCase()));
-      const merged = [
-        ...new Set(
-          [...serverCodes, ...getJoinedClasses(userId)].filter(
-            (c) => !delSet.has(c)
-          )
-        ),
-      ];
-      // Prefer server list when present; always strip deleted
-      if (serverCodes.length || deleted.length) {
-        setJoinedClasses(
-          userId,
-          serverCodes.length
-            ? serverCodes.filter((c) => !delSet.has(c))
-            : merged
-        );
-      }
+      const left = new Set(getLeftClasses(userId));
+      const block = new Set([...left, ...deleted]);
+      // Never restore left/deleted codes from stale server meta
+      const local = getJoinedClasses(userId).filter((c) => !block.has(c));
+      setJoinedClasses(userId, local);
       codes = getJoinedClasses(userId);
     } catch {
       // offline — keep local
@@ -364,6 +350,7 @@ export default function JoinClassPage() {
       const name = room?.name || `Class ${roomCode}`;
       const teacherName = room?.teacherName || "Teacher";
 
+      clearLeftClass(userId, roomCode); // explicit join only
       setJoinedClass(userId, roomCode);
       saveJoinedRoomMeta(userId, { code: roomCode, name, teacherName });
 
@@ -400,13 +387,15 @@ export default function JoinClassPage() {
     }
     setLeaving(up);
     setErr(null);
+    // Instant local leave so sync cannot re-add while API runs
+    removeJoinedClass(userId, up);
+    removeJoinedRoomMeta(userId, up);
+    setRooms((prev) => prev.filter((r) => r.code !== up));
     try {
       const res = await apiLeaveClassroom(up);
       if (res && res.ok === false) {
         throw new Error(res.error || "Leave failed");
       }
-      removeJoinedClass(userId, up);
-      removeJoinedRoomMeta(userId, up);
       try {
         localStorage.removeItem(`sl_class_mats_v1_${up}`);
         // Clear cached remarks so left-class notes don't linger client-side
@@ -429,12 +418,10 @@ export default function JoinClassPage() {
       } catch {
         // ignore
       }
-      setRooms((prev) => prev.filter((r) => r.code !== up));
       setMsg(`You left class ${up}.`);
     } catch {
-      // still remove locally so UI is correct
+      // keep local leave even if server fails
       removeJoinedClass(userId, up);
-      removeJoinedRoomMeta(userId, up);
       setRooms((prev) => prev.filter((r) => r.code !== up));
       setMsg(`You left class ${up}.`);
     } finally {
