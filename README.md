@@ -48,3 +48,6 @@ Never commit `.env.local`.
 ```bash
 npm run build
 ```
+```bash
+npm build
+```
