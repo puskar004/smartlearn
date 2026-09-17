@@ -3,8 +3,19 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { Loader2, MessageCircle } from "lucide-react";
-import { apiGetRemarks } from "@/lib/teacher-store";
+import { apiGetRemarks, getJoinedClasses } from "@/lib/teacher-store";
 import type { TeacherRemark } from "@/lib/classroom-types";
+
+function filterForJoined(
+  userId: string,
+  list: TeacherRemark[]
+): TeacherRemark[] {
+  const joined = new Set(getJoinedClasses(userId));
+  return list.filter((r) => {
+    if (!r.classCode) return true;
+    return joined.has(String(r.classCode).toUpperCase());
+  });
+}
 
 export default function RemarksPage() {
   const { userId, isSignedIn } = useAuth();
@@ -16,32 +27,28 @@ export default function RemarksPage() {
     const load = async () => {
       try {
         const data = await apiGetRemarks();
-        const list = (data.remarks || []) as TeacherRemark[];
-        if (list.length) {
-          setRemarks(list);
-          try {
-            localStorage.setItem(
-              `sl_student_remarks_${userId}`,
-              JSON.stringify(list.slice(0, 40))
-            );
-          } catch {
-            // ignore
-          }
-        } else {
-          try {
-            const raw = localStorage.getItem(`sl_student_remarks_${userId}`);
-            const cached = raw ? (JSON.parse(raw) as TeacherRemark[]) : [];
-            setRemarks(Array.isArray(cached) ? cached : []);
-          } catch {
-            setRemarks([]);
-          }
+        // Server is source of truth (already filters left classes)
+        const list = filterForJoined(
+          userId,
+          (data.remarks || []) as TeacherRemark[]
+        );
+        setRemarks(list);
+        try {
+          localStorage.setItem(
+            `sl_student_remarks_${userId}`,
+            JSON.stringify(list.slice(0, 40))
+          );
+        } catch {
+          // ignore
         }
       } catch {
         try {
           const raw = localStorage.getItem(`sl_student_remarks_${userId}`);
           if (raw) {
             const cached = JSON.parse(raw) as TeacherRemark[];
-            if (Array.isArray(cached)) setRemarks(cached);
+            if (Array.isArray(cached)) {
+              setRemarks(filterForJoined(userId, cached));
+            }
           }
         } catch {
           // ignore

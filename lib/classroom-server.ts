@@ -888,7 +888,7 @@ export async function deleteClassroom(
     // ignore
   }
 
-  // Remove class from every joined student's Clerk meta + map
+  // Remove class from every joined student's Clerk meta + map + remarks
   for (const s of room.students || []) {
     try {
       clearClerkWriteCooldown(s.studentId);
@@ -897,6 +897,20 @@ export async function deleteClassroom(
       const next = codesOf(sm).filter((c) => c !== normalized);
       const map = { ...(sm.joinedClassMap || {}) };
       delete map[normalized];
+      let teacherRemarks = (sm.teacherRemarks || []).filter(
+        (r) => !(r.classCode && r.classCode.toUpperCase() === normalized)
+      );
+      try {
+        const { removeStudentRemarksForClass } = await import(
+          "@/lib/remarks-store"
+        );
+        teacherRemarks = await removeStudentRemarksForClass(
+          s.studentId,
+          normalized
+        );
+      } catch {
+        // ignore file errors
+      }
       await saveMeta(
         s.studentId,
         {
@@ -904,6 +918,7 @@ export async function deleteClassroom(
           joinedClassCode: next[0] || null,
           joinedClassCodes: next,
           joinedClassMap: map,
+          teacherRemarks,
         },
         { force: true }
       );
@@ -928,6 +943,7 @@ export async function leaveClassroomAsStudent(
   userId: string,
   code?: string
 ): Promise<{ ok: true; codes: string[] } | { ok: false; error: string }> {
+  clearClerkWriteCooldown(userId);
   const client = await clerkClient();
   const student = await client.users.getUser(userId);
   const sm = metaOf(student);
@@ -939,35 +955,63 @@ export async function leaveClassroomAsStudent(
   const map = { ...(sm.joinedClassMap || {}) };
 
   if (!target) {
-    await saveMeta(userId, {
-      ...sm,
-      joinedClassCode: null,
-      joinedClassCodes: [],
-      joinedClassMap: {},
-    });
+    await saveMeta(
+      userId,
+      {
+        ...sm,
+        joinedClassCode: null,
+        joinedClassCodes: [],
+        joinedClassMap: {},
+      },
+      { force: true }
+    );
     return { ok: true, codes: [] };
   }
 
+  // Remove student from teacher roster (always force Clerk write)
   const teacherIdHint = map[target];
   let found = teacherIdHint
     ? await getClassroomByTeacher(teacherIdHint, target)
     : null;
   if (!found) found = await findClassroomByCode(target);
   if (found) {
-    await updateClassroom(found.teacherId, found.classroom.code, (c) => ({
-      ...c,
-      students: (c.students || []).filter((s) => s.studentId !== userId),
-    }));
+    try {
+      clearClerkWriteCooldown(found.teacherId);
+      await updateClassroom(found.teacherId, found.classroom.code, (c) => ({
+        ...c,
+        students: (c.students || []).filter((s) => s.studentId !== userId),
+      }));
+    } catch (e) {
+      console.error("leaveClassroomAsStudent roster", e);
+    }
+  }
+
+  // Drop class-scoped remarks so they no longer show on Remarks page
+  let teacherRemarks = (sm.teacherRemarks || []).filter(
+    (r) => !(r.classCode && r.classCode.toUpperCase() === target)
+  );
+  try {
+    const { removeStudentRemarksForClass } = await import(
+      "@/lib/remarks-store"
+    );
+    teacherRemarks = await removeStudentRemarksForClass(userId, target);
+  } catch (e) {
+    console.error("leave remarks file", e);
   }
 
   const next = current.filter((c) => c !== target);
   delete map[target];
-  await saveMeta(userId, {
-    ...sm,
-    joinedClassCode: next[0] || null,
-    joinedClassCodes: next,
-    joinedClassMap: map,
-  });
+  await saveMeta(
+    userId,
+    {
+      ...sm,
+      joinedClassCode: next[0] || null,
+      joinedClassCodes: next,
+      joinedClassMap: map,
+      teacherRemarks,
+    },
+    { force: true }
+  );
   return { ok: true, codes: next };
 }
 
@@ -2071,6 +2115,16 @@ export async function pushTeacherRemark(
 export async function getStudentRemarks(userId: string) {
   clearClerkWriteCooldown(userId);
   const map = new Map<string, import("@/lib/classroom-types").TeacherRemark>();
+  let joined = new Set<string>();
+  try {
+    const meta = await getTeacherMeta(userId, { fresh: true });
+    joined = new Set(codesOf(meta));
+    for (const r of meta.teacherRemarks || []) {
+      if (r?.id) map.set(r.id, r);
+    }
+  } catch {
+    // ignore
+  }
   try {
     const { listStudentRemarksFile } = await import("@/lib/remarks-store");
     for (const r of await listStudentRemarksFile(userId)) {
@@ -2079,15 +2133,13 @@ export async function getStudentRemarks(userId: string) {
   } catch {
     // ignore
   }
-  try {
-    const meta = await getTeacherMeta(userId, { fresh: true });
-    for (const r of meta.teacherRemarks || []) {
-      if (r?.id) map.set(r.id, r);
-    }
-  } catch {
-    // ignore
-  }
-  return Array.from(map.values()).sort((a, b) => (b.at || 0) - (a.at || 0));
+  // Hide remarks for classes the student left / teacher deleted
+  return Array.from(map.values())
+    .filter((r) => {
+      if (!r.classCode) return true;
+      return joined.has(String(r.classCode).toUpperCase());
+    })
+    .sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 
 export async function postMessage(

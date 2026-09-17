@@ -59,3 +59,28 @@ export async function listStudentRemarksFile(
   const data = await load();
   return data[studentId] || [];
 }
+
+/** Remove remarks tied to a class code (after leave / class delete). */
+export async function removeStudentRemarksForClass(
+  studentId: string,
+  classCode: string
+): Promise<TeacherRemark[]> {
+  const c = classCode.toUpperCase();
+  const data = await load();
+  const prev = data[studentId] || [];
+  const next = prev.filter(
+    (r) => !(r.classCode && r.classCode.toUpperCase() === c)
+  );
+  data[studentId] = next;
+  await save(data);
+  return next;
+}
+
+export async function setStudentRemarksFile(
+  studentId: string,
+  remarks: TeacherRemark[]
+) {
+  const data = await load();
+  data[studentId] = remarks.slice(0, 50);
+  await save(data);
+}

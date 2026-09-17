@@ -24,16 +24,17 @@ import {
   getRole,
   readCachedClassMaterials,
   readJoinedRoomMeta,
+  dropJoinedClasses,
   removeJoinedClass,
   removeJoinedRoomMeta,
   saveJoinedRoomMeta,
   setJoinedClass,
+  setJoinedClasses,
   type TeacherMaterial,
 } from "@/lib/teacher-store";
 import {
   dismissMaterial,
   filterStudentMaterials,
-  hoursLeft,
 } from "@/lib/student-materials";
 import { accuracy, loadProgress, weaknessMap } from "@/lib/user-store";
 
@@ -209,10 +210,50 @@ export default function JoinClassPage() {
     }
   };
 
-  /** Load joined classes once — no loops, no role-event thrash */
+  /** Load joined classes once — drop teacher-deleted codes from server */
   const bootRooms = useCallback(async () => {
     if (!userId) return;
-    const codes = getJoinedClasses(userId);
+    let codes = getJoinedClasses(userId);
+
+    // Sync deleted / left classes from server
+    try {
+      const q = new URLSearchParams({ action: "joined" });
+      if (codes.length) q.set("codes", codes.join(","));
+      const res = await fetch(`/api/classroom?${q}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      const data = await res.json().catch(() => ({}));
+      const deleted = (data.deleted || []) as string[];
+      if (deleted.length) dropJoinedClasses(userId, deleted);
+      const serverCodes = (
+        (data.codes as string[]) ||
+        (data.joined ? [String(data.joined)] : [])
+      )
+        .map((c) => String(c || "").toUpperCase())
+        .filter(Boolean);
+      const delSet = new Set(deleted.map((c) => c.toUpperCase()));
+      const merged = [
+        ...new Set(
+          [...serverCodes, ...getJoinedClasses(userId)].filter(
+            (c) => !delSet.has(c)
+          )
+        ),
+      ];
+      // Prefer server list when present; always strip deleted
+      if (serverCodes.length || deleted.length) {
+        setJoinedClasses(
+          userId,
+          serverCodes.length
+            ? serverCodes.filter((c) => !delSet.has(c))
+            : merged
+        );
+      }
+      codes = getJoinedClasses(userId);
+    } catch {
+      // offline — keep local
+    }
+
     if (!codes.length) {
       setRooms([]);
       setBooting(false);
@@ -360,9 +401,34 @@ export default function JoinClassPage() {
     setLeaving(up);
     setErr(null);
     try {
-      await apiLeaveClassroom(up).catch(() => null);
+      const res = await apiLeaveClassroom(up);
+      if (res && res.ok === false) {
+        throw new Error(res.error || "Leave failed");
+      }
       removeJoinedClass(userId, up);
       removeJoinedRoomMeta(userId, up);
+      try {
+        localStorage.removeItem(`sl_class_mats_v1_${up}`);
+        // Clear cached remarks so left-class notes don't linger client-side
+        const rk = `sl_student_remarks_${userId}`;
+        const raw = localStorage.getItem(rk);
+        if (raw) {
+          const list = JSON.parse(raw) as { classCode?: string }[];
+          if (Array.isArray(list)) {
+            localStorage.setItem(
+              rk,
+              JSON.stringify(
+                list.filter(
+                  (r) =>
+                    !(r.classCode && r.classCode.toUpperCase() === up)
+                )
+              )
+            );
+          }
+        }
+      } catch {
+        // ignore
+      }
       setRooms((prev) => prev.filter((r) => r.code !== up));
       setMsg(`You left class ${up}.`);
     } catch {
@@ -536,10 +602,6 @@ export default function JoinClassPage() {
                     {/* Materials panel */}
                     {r.showMats && (
                       <div className="mt-2 rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                        <p className="mb-2 text-[11px] font-semibold text-slate-500">
-                          Notes auto-remove after <strong>24 hours</strong>. You
-                          can also delete any PDF from your list anytime.
-                        </p>
                         <div className="mb-2 flex justify-end">
                           <button
                             type="button"
@@ -612,8 +674,7 @@ export default function JoinClassPage() {
                                       {m.title}
                                     </div>
                                     <div className="text-[11px] text-slate-500">
-                                      {m.subject || "General"} ·{" "}
-                                      {hoursLeft(m)}h left
+                                      {m.subject || "General"}
                                     </div>
                                   </div>
                                   <span className="shrink-0 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white">

@@ -64,10 +64,16 @@ export default function StudentSync() {
         if (local.length) q.set("codes", local.join(","));
         const res = await fetch(`/api/classroom?${q}`, { cache: "no-store" });
         const data = await res.json();
-        const deleted = (data.deleted || []) as string[];
+        const deleted = ((data.deleted || []) as string[]).map((c) =>
+          String(c).toUpperCase()
+        );
         if (deleted.length) dropJoinedClasses(userId, deleted);
-        const codes = (data.codes ||
-          (data.joined ? [data.joined] : [])) as string[];
+        const delSet = new Set(deleted);
+        const codes = (
+          (data.codes || (data.joined ? [data.joined] : [])) as string[]
+        )
+          .map((c) => String(c || "").toUpperCase())
+          .filter((c) => c && !delSet.has(c));
         if (codes.length) setJoinedClasses(userId, codes);
         else if (deleted.length) setJoinedClasses(userId, []);
 
