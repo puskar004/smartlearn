@@ -10,6 +10,7 @@ import { loadProgress } from "@/lib/user-store";
 import { getRole } from "@/lib/teacher-store";
 import { ROLE_EVENT } from "@/lib/role-events";
 import {
+  clearAllNotifications,
   loadNotifications,
   markAllRead,
   unreadCount,
@@ -36,6 +37,18 @@ export default function AppTopBar() {
   const name = displayName(user);
 
   useEffect(() => {
+    if (!userId) return;
+    // One-time full clear of old notification clutter
+    try {
+      const wipeKey = `sl_notif_wiped_once_v1_${userId}`;
+      if (!localStorage.getItem(wipeKey)) {
+        clearAllNotifications(userId);
+        localStorage.setItem(wipeKey, "1");
+      }
+    } catch {
+      // ignore
+    }
+
     const sync = () => {
       if (!userId) return;
       const p = loadProgress(userId);
@@ -147,15 +160,29 @@ export default function AppTopBar() {
             </button>
             {open && (
               <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-                <div className="border-b border-slate-100 px-3 py-2">
-                  <div className="text-xs font-bold text-slate-800">
-                    Notifications
-                  </div>
-                  {!isTeacher && (
-                    <div className="mt-0.5 text-[10px] text-slate-500">
-                      Tab switches:{" "}
-                      <strong className="text-amber-700">{switches}</strong>
+                <div className="flex items-start justify-between gap-2 border-b border-slate-100 px-3 py-2">
+                  <div>
+                    <div className="text-xs font-bold text-slate-800">
+                      Notifications
                     </div>
+                    {!isTeacher && (
+                      <div className="mt-0.5 text-[10px] text-slate-500">
+                        Tab switches:{" "}
+                        <strong className="text-amber-700">{switches}</strong>
+                      </div>
+                    )}
+                  </div>
+                  {userId && notes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotes(clearAllNotifications(userId));
+                        setUnread(0);
+                      }}
+                      className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-50"
+                    >
+                      Clear all
+                    </button>
                   )}
                 </div>
                 <ul className="max-h-72 overflow-y-auto">
