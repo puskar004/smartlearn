@@ -190,7 +190,7 @@ ONE EXAM LINE:
         <Brain className="h-3.5 w-3.5" /> Unique · Feynman Mode
       </div>
       <h1 className="mt-3 text-3xl font-extrabold text-slate-900">
-        Teach it like you&apos;re 12
+        Teach it like you&apos;re 12 - FEYNMAN MODE
       </h1>
       <p className="mt-2 text-sm text-slate-500">
         Explain a concept in plain words. Gemini grades clarity, finds gaps, and
